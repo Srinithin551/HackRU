@@ -12,6 +12,8 @@ from backend.brain.state import SessionState
 from backend.contracts import QuestionStats
 
 _DIGIT = re.compile(r"(?<![Qq\d])\d")   # a real number, not a "Q2" label
+NO_VITALS_SCORE = 50     # composure can't be measured without vitals; don't let "no data" read as "calm"
+COMPOSURE_LEEWAY = 15    # Gemini may adjust the stress-based score for recovery, but only this far
 
 
 def _answered(items: list[HistoryItem]) -> list[HistoryItem]:
@@ -112,7 +114,7 @@ def fallback_report(s: SessionState, items: list[HistoryItem], generated_by: str
     if score is None:
         summary = (f"You answered {len(answered)} question(s). The camera didn't capture enough usable vitals "
                    f"to measure your stress, so this report focuses on your answers.")
-        score = 50
+        score = NO_VITALS_SCORE
     else:
         level = "calm" if score >= 60 else "visibly stressed at times" if score >= 30 else "under heavy stress"
         h = hardest(items)
@@ -151,7 +153,12 @@ def finalize_draft(s: SessionState, items: list[HistoryItem], draft: ReportDraft
         if extra not in tips:
             tips.append(extra)
 
-    score = max(0, min(100, int(draft.composure_score)))
+    base = composure_from_stats(items)
+    if base is None:
+        score = NO_VITALS_SCORE
+    else:
+        score = max(base - COMPOSURE_LEEWAY, min(base + COMPOSURE_LEEWAY, int(draft.composure_score)))
+        score = max(0, min(100, score))
     hardest_text = draft.hardest_moment.strip()
     if not _DIGIT.search(hardest_text):
         hardest_text = hardest_moment_text(items)

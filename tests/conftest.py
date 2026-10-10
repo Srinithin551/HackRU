@@ -16,10 +16,16 @@ from backend.brain import gemini, interviewer, watcher  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def fast_timings(monkeypatch):
+def fast_timings(monkeypatch, tmp_path):
+    # Isolated from the developer's real .env keys, generated audio, and Gemini logs.
     monkeypatch.setattr(config, "BRAIN_FAKE", True)
     monkeypatch.setattr(config, "GEMINI_API_KEY", "")
     monkeypatch.setattr(config, "ELEVENLABS_API_KEY", "")
+    monkeypatch.setattr(config, "ELEVENLABS_VOICE_ID", "")
+    monkeypatch.setattr(config, "PUBLIC_BASE_URL", "")
+    (tmp_path / "audio").mkdir()
+    monkeypatch.setattr(config, "AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path)
     monkeypatch.setattr(interviewer, "CALIBRATION_MIN_S", 0.0)
     monkeypatch.setattr(interviewer, "CLOSING_PAUSE_S", 0.0)
     monkeypatch.setattr(interviewer, "ANSWER_TIMEOUT_S", 10.0)

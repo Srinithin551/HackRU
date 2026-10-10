@@ -18,9 +18,11 @@ class FakeModels:
     def __init__(self, replies):
         self.replies = list(replies)
         self.calls = []
+        self.models = []
 
     async def generate_content(self, model, contents, config):
         self.calls.append(config)
+        self.models.append(model)
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
@@ -35,7 +37,10 @@ def fake_gemini(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "BRAIN_FAKE", False)
     monkeypatch.setattr(config, "GEMINI_API_KEY", "test")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path)
-    monkeypatch.setattr(gemini, "_thinking_supported", True)
+    monkeypatch.setattr(config, "GEMINI_MODEL", "main-model")
+    monkeypatch.setattr(config, "GEMINI_FAST_MODEL", "fast-model")
+    monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "minimal")
+    monkeypatch.setattr(gemini, "_no_thinking_level", set())
 
     def install(*replies):
         models = FakeModels(replies)
@@ -84,8 +89,30 @@ def test_thinking_level_rejected_retries_without_it(fake_gemini):
                          {"action": "next", "spoken_text": "", "answer_quality": 3, "rationale": "ok"})
     d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
     assert d.rationale == "ok"
+    assert models.models == ["fast-model", "fast-model"]   # same model, retried without thinking_level
     assert models.calls[0].thinking_config is not None and models.calls[1].thinking_config is None
-    assert gemini._thinking_supported is False
+    assert gemini._no_thinking_level == {"fast-model"}
+
+
+def test_overloaded_model_fails_over_to_the_other(fake_gemini):
+    models = fake_gemini(RuntimeError("503 UNAVAILABLE: model is experiencing high demand"),
+                         {"action": "ease_off", "spoken_text": "Let's slow down.", "answer_quality": 2,
+                          "rationale": "stressed"})
+    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
+    assert d.action == "ease_off"
+    assert models.models == ["fast-model", "main-model"]   # decide_next tries the fast model first
+
+
+def test_plan_and_report_prefer_the_main_model(fake_gemini):
+    models = fake_gemini(RuntimeError("429 RESOURCE_EXHAUSTED"), {"questions": []})
+    asyncio.run(gemini.plan_interview(get_spec("demo"), "Engineer"))
+    assert models.models == ["main-model", "fast-model"]
+
+
+def test_every_model_failing_falls_back(fake_gemini):
+    fake_gemini(RuntimeError("503"), RuntimeError("503"))
+    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
+    assert d.action == "next" and d.rationale.startswith("fallback")
 
 
 def test_final_report_from_gemini(fake_gemini):

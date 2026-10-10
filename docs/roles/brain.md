@@ -234,7 +234,7 @@ pip install -r backend/requirements.txt
 cp .env.example .env                                  # fill in keys; BRAIN_FAKE=1 needs none
 BRAIN_FAKE=1 uvicorn backend.main:app --reload        # from the repo root
 python scripts/fake_frontend.py                       # terminal stand-in for the browser
-pytest                                                # 46 tests, < 1 second
+pytest                                                # 51 tests, < 1 second
 ```
 
 `GET /health` reports fake mode, whether Gemini/ElevenLabs keys are set, and which routers are mounted.
@@ -260,7 +260,9 @@ pytest                                                # 46 tests, < 1 second
 
 ### For Frontend
 
-- **`audio_url` is absolute** (`PUBLIC_BASE_URL` + `/audio/<hash>.mp3`) so it works as an `<audio>` src from the Vite origin. It is **`null`** if TTS failed or ElevenLabs isn't configured. In that case show the text and send `answer_started` right away. `new URL(audio_url, API_BASE)` handles both.
+- **`audio_url` is a relative path** (`/audio/<hash>.mp3`), resolved with `apiUrl()`. The Vite proxy then serves it same-origin, which the waveform's Web Audio analysis needs. It is **`null`** if TTS failed. In that case show the text and send `answer_started` right away. `QuestionEvent.audio_url` / `FillerEvent.audio_url` in `frontend/src/types.ts` should be `string | null`. (Setting `PUBLIC_BASE_URL` makes them absolute again, if ever needed.)
+- **`interview_type`**: the frontend slugs `software_engineering`, `behavioral`, `class_presentation`, `demo` are all recognized (human labels work too).
+- **Coach flags for the replay chart** are already in the report (`report.coach_flags`, each with its `question_id`), so the proposed `ReplayResponse.coach_flags` isn't needed.
 - **`question.index` / `total`** = the planned question number and the planned count ("Q 2 of 5"). Calibration is `index: 0`. A follow-up keeps its parent's number, so check `kind`. The replay chart's Q1, Q2... come from Data's sequential `idx`, which counts follow-ups too.
 - **State sequence:**
   - `calibrating` covers the whole calibration (one or two small-talk prompts, no `asking`/`listening` during it);
@@ -300,11 +302,12 @@ pytest                                                # 46 tests, < 1 second
 | `DECIDE_TIMEOUT_S` / `PLAN_TIMEOUT_S` / `REPORT_TIMEOUT_S` | 6 / 20 / 45 | `gemini.py` |
 | `INTERVAL_S` / `WINDOW_S` / `COOLDOWN_S` / `MIN_SAMPLES` | 3 / 10 / 12 / 3 | `watcher.py` |
 | Questions, `max_turns`, `max_seconds` per type | SWE/Behavioral/Presentation: 5 (2,3,3,4,5), 7, 480s. Demo: 3 (2,4,5), 5, 240s | `specs.py` |
-| `GEMINI_MODEL`, `GEMINI_THINKING_LEVEL`, `ELEVENLABS_MODEL` | `gemini-3.8-flash`, `low`, `eleven_flash_v2_5` | `.env` |
+| `GEMINI_MODEL` (plan + report), `GEMINI_FAST_MODEL` (decide_next), `GEMINI_THINKING_LEVEL` | `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `minimal` | `.env` |
+| `ELEVENLABS_MODEL`, `ELEVENLABS_VOICE_ID` | `eleven_flash_v2_5`, Eric (`cjVigY5qzO86Huf0OWal`) | `.env` |
 
 ### Where the build differs from the plan above
 
-- **Absolute `audio_url`**, for the reason given under Frontend.
+- **Two Gemini models with failover.** Measured on 2026-10-10: `gemini-3.8-flash` took 2–6s per decision and returned 503 "high demand" errors, while `3.6-flash` (about 1.3s) and `3.5-flash-lite` (about 0.7s) made the same decisions. Free-tier limits are 5 requests per minute *per model*, so splitting the calls doubles the headroom. If one model returns 503/429 or errors, the other gets the remaining time budget.
 - **Filler line:** "Take your time, let's keep going." became "Alright, let's keep going.", since it plays after the answer ends.
 - **Fake-mode decisions are rule-based**, not a fixed `next`. They follow the same thresholds as the Gemini prompt, so pressing `s` in `mock_vitals.py` makes the fake interviewer ease off.
 - **Fake clips are placeholder macOS voices.** Once the ElevenLabs voice is picked, run `python scripts/make_fake_audio.py --force` and commit the result.
