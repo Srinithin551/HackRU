@@ -1,0 +1,14 @@
+# Secrets: never commit. Copy .env.example and fill in locally.
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# From brain.md
+backend/static/audio/*.mp3
+node_modules/
