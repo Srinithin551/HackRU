@@ -18,8 +18,11 @@ def _bool(name: str, default: bool = False) -> bool:
 
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-3.8-flash"
-GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "low").strip().lower()
+# Two models, because free-tier rate limits are per model: the main one plans and writes the report,
+# the fast one makes the live decide_next call. Each backs the other up on 503/429 errors.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-3.6-flash"
+GEMINI_FAST_MODEL = os.getenv("GEMINI_FAST_MODEL") or "gemini-3.5-flash-lite"
+GEMINI_THINKING_LEVEL = (os.getenv("GEMINI_THINKING_LEVEL") or "minimal").strip().lower()
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
@@ -29,7 +32,9 @@ PRESAGE_API_KEY = os.getenv("PRESAGE_API_KEY", "")
 TIGER_DATABASE_URL = os.getenv("TIGER_DATABASE_URL", "")
 
 BRAIN_FAKE = _bool("BRAIN_FAKE")
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+# Prefix for audio URLs. Blank (default) = relative "/audio/x.mp3", which the frontend resolves
+# against its own origin (the Vite dev server proxies /audio to this backend).
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
 CORS_ORIGINS = [
     o.strip()
     for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")

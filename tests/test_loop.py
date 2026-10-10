@@ -2,7 +2,6 @@
 
 import time
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -81,8 +80,8 @@ def test_full_fake_session(client):
         cal = recv_until(ws, "question", log)
         assert cal["data"]["kind"] == "calibration" and cal["data"]["index"] == 0 and cal["data"]["total"] == 3
         audio = cal["data"]["audio_url"]
-        assert audio.startswith(config.PUBLIC_BASE_URL + "/audio/")
-        assert client.get(urlparse(audio).path).headers["content-type"] == "audio/mpeg"
+        assert audio.startswith("/audio/")                    # relative: the frontend proxies /audio
+        assert client.get(audio).headers["content-type"] == "audio/mpeg"
 
         answer(ws, cal, "It's going great, thanks for asking, we built a lot this weekend.")
         questions = run_to_end(ws, log)
