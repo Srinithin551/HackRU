@@ -1,1 +1,1 @@
-"""Data role: Tiger Data storage, stress score, queries Brain uses, replay endpoint."""
+"""Data role package (Tiger Data, stress score, replay). Owned by Data."""

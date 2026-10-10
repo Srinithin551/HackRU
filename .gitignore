@@ -1,14 +1,22 @@
-# Secrets: never commit. Copy .env.example and fill in locally.
+# env / secrets
 .env
-.env.*
-!.env.example
+*.env.local
 
-# Python
+# python
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
 
-# From brain.md
-backend/static/audio/*.mp3
+# generated audio + logs
+backend/static/audio/*
+!backend/static/audio/.gitkeep
+backend/logs/*
+!backend/logs/.gitkeep
+
+# node
 node_modules/
+dist/
+
+# os
+.DS_Store
