@@ -1,0 +1,8 @@
+# Dev, analysis and chart dependencies (Data role). NOT needed to run the backend:
+# runtime deps (fastapi, asyncpg, pydantic, python-dotenv, uvicorn[standard]) live in backend/requirements.txt.
+#   python -m pip install -r requirements-dev.txt
+pytest>=8
+pandas>=2.2
+numpy>=1.26
+scipy>=1.11
+matplotlib>=3.8

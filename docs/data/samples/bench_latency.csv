@@ -1,0 +1,17 @@
+query,caller,runs,p50_ms,p95_ms,min_ms,max_ms,server_exec_ms
+get_window_stats(15 s),"Brain watcher, every 3 s",20,52.6,54.8,50.5,71.2,0.075
+insert_vitals (1 reading),"Sensing, every 1 s",20,53.8,79.1,50.9,81.5,0.139
+get_question_stats,"Brain, after every answer",20,52.4,54.2,51.1,54.4,0.169
+get_active_session (uncached),"Sensing client, every 2 s",20,52.6,54.7,50.6,61.8,0.034
+get_baseline (uncached),"Brain, Data internals",20,52.4,57.3,50.3,61.6,0.029
+insert_question,"Brain, per question",20,53.3,65.0,51.4,73.3,
+mark_answer_started,"Brain, per question",20,51.8,73.6,49.5,91.8,
+mark_answered,"Brain, per question",20,53.1,67.9,50.9,69.0,
+get_session_history (9 questions),"Brain, once at the end",20,60.5,109.5,54.7,163.4,0.713
+get_replay (3 queries in parallel),"Frontend replay page, once",20,54.2,79.8,52.7,81.5,0.081
+compute_baseline,"Brain, once after calibration",20,104.6,110.1,101.2,112.3,0.527
+save_report,"Brain, once",20,53.3,80.8,50.0,138.3,
+get_report,"Frontend, once",20,52.4,58.2,50.3,70.1,
+create_session,"Brain, once",20,52.2,59.9,49.9,81.5,
+end_session (+ vitals_5s refresh),"Brain, once",20,103.2,109.6,100.8,115.6,
+network floor: SELECT 1,-,20,53.3,66.1,50.2,80.9,
