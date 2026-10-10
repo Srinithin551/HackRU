@@ -326,3 +326,8 @@ def test_reports_say_whether_composure_was_measured():
                         per_question=[])
     assert finalize_draft(state(), no_vitals, draft).composure_measured is False
     assert finalize_draft(state(), normalize_history(history()), draft).composure_measured is True
+
+
+def test_pct_never_prints_negative_zero():
+    from backend.brain.history import pct
+    assert [pct(-0.3), pct(0.4), pct(22.4), pct(-7.6), pct(None)] == ["+0%", "+0%", "+22%", "-8%", "n/a"]

@@ -71,7 +71,7 @@ def num(x: Optional[float], digits: int = 0, suffix: str = "") -> str:
 def pct(x: Optional[float]) -> str:
     if x is None:
         return "n/a"
-    return f"{x:+.0f}%"
+    return f"{round(x) or 0:+d}%"   # round first so -0.3 reads "+0%", not "-0%"
 
 
 def stats_line(st: Optional[QuestionStats]) -> str:
