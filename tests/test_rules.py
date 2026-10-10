@@ -295,3 +295,12 @@ def test_prompts_carry_the_voice_style():
 ])
 def test_final_coaching_ends_at_the_model_answer(raw, want):
     assert final_coaching(raw) == want
+
+
+def test_small_talk_context_names_what_they_are_interviewing_for():
+    s = state()
+    s.exchanges = [{"kind": "calibration", "text": lines.CALIBRATION_LINE, "transcript": "I'm a CS major at Rutgers."}]
+    ctx = prompts.small_talk_context(s)
+    assert "INTERVIEWING FOR: Backend Engineer" in ctx and 'CANDIDATE: "I\'m a CS major at Rutgers."' in ctx
+    assert "PRESENTATION TOPIC:" in prompts.small_talk_context(state("Class Presentation"))
+    assert "major" in prompts.SMALL_TALK_SYSTEM and '"got it"' in prompts.SMALL_TALK_SYSTEM

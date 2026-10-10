@@ -193,15 +193,19 @@ def record_adaptation(s: SessionState, qid: str, decision: Decision, action: str
 # ---------------------------------------------------------------- phases
 
 async def calibrate(s: SessionState) -> None:
-    """Small talk while Presage warms up and Data collects the calm baseline."""
+    """Small talk while Presage warms up and Data collects the calm baseline. The opener is pre-recorded
+    so the session starts instantly; the second turn (only if the baseline needs more time) is written
+    by Gemini so it reacts to what they said and asks about their major or field."""
     await set_state(s, "calibrating")
-    for line in lines.calibration_lines(s.spec.key):
+    line, fallback = lines.calibration_lines(s.spec.key)
+    for turn in range(2):
         qid = str(await data.insert_question(s.session_id, 0, "calibration", line))
         await ask(s, qid, line, "calibration")
         transcript = await wait_answer(s, qid)
         s.exchanges.append({"kind": "calibration", "text": line, "transcript": transcript})
-        if s.elapsed() >= CALIBRATION_MIN_S:
+        if turn == 1 or s.elapsed() >= CALIBRATION_MIN_S:
             break
+        line = spoken(await gemini.small_talk_follow_up(s) or "") or fallback
 
 
 def _next_planned(s: SessionState):

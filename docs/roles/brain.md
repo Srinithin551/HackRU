@@ -234,7 +234,7 @@ pip install -r backend/requirements.txt
 cp .env.example .env                                  # fill in keys; BRAIN_FAKE=1 needs none
 BRAIN_FAKE=1 uvicorn backend.main:app --reload        # from the repo root
 python scripts/fake_frontend.py                       # terminal stand-in for the browser
-pytest                                                # 88 tests, < 2 seconds
+pytest                                                # 93 tests, < 2 seconds
 ```
 
 `GET /health` reports fake mode, whether Gemini/ElevenLabs keys are set, and which routers are mounted.
@@ -332,7 +332,9 @@ pytest                                                # 88 tests, < 2 seconds
 - **`redirect`** now only means "I didn't catch that" (empty or garbled speech-to-text), once per planned question.
 - **Voice style.** Prompts ban stock acknowledgments ("got it", "I see", "I understand", "makes sense", "great answer", "thanks for sharing"…) and ask for specific, substantive reactions with contractions. A code backstop (`gemini.strip_stock_openers`) removes stock openers that still slip through.
 - **Fake mode** approximates `coach` with a word-overlap check and a fixed coaching line, pre-recorded joined to each next question so it's still one clip.
-- **Warm-up lines** are generic interview openers ("Thanks for joining me today. To start, tell me a little about yourself."), with a per-type second line. Fake-mode clips were re-rendered in the ElevenLabs voice.
+- **Adaptive small talk.** The opener is pre-recorded so the session starts instantly ("Thanks for joining me today. To start, tell me a little about yourself.").
+  - The second small-talk turn, asked only when the baseline needs more time, is written live by Gemini (`small_talk_follow_up`, fast model, 4s budget). It reacts to what they said: it plays along with something random, calmly notes something rude, or says it didn't catch an empty answer. Then it asks an easy background question tied to what they're interviewing for: why they chose their major or field, or what drew them to a presentation topic.
+  - The fixed per-type line is the fallback. Measured: about 0.6–1.1s.
 - **ElevenLabs speech-to-text is not done** (it needs Frontend's agreement first).
 
 ---

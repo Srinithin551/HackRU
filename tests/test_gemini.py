@@ -146,3 +146,15 @@ def test_decide_turn_has_stock_openers_removed(fake_gemini):
                  "answer_quality": 4, "rationale": "solid"})
     d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
     assert d.spoken_text == "Let's switch gears. Why Go?"
+
+
+def test_small_talk_uses_the_fast_model_and_cleans_the_turn(fake_gemini):
+    models = fake_gemini({"spoken_text": "Got it. Turtles are underrated. What made you pick computer science?"})
+    line = asyncio.run(gemini.small_talk_follow_up(state()))
+    assert line == "Turtles are underrated. What made you pick computer science?"
+    assert models.models == ["fast-model"]
+
+
+def test_small_talk_failure_returns_none(fake_gemini):
+    fake_gemini(RuntimeError("503"), RuntimeError("503"))
+    assert asyncio.run(gemini.small_talk_follow_up(state())) is None

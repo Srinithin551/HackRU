@@ -379,3 +379,39 @@ def test_session_does_not_end_until_the_closing_clip_has_played(client, monkeypa
         started = time.monotonic()
         recv_until(ws, "session_ended", log)
         assert time.monotonic() - started >= 0.75
+
+
+@pytest.mark.parametrize("gemini_line,expected", [
+    ("Turtles, huh? Respect. So what got you into computer science in the first place?", None),
+    (None, "fallback"),   # Gemini unavailable: the fixed line
+])
+def test_second_small_talk_turn_reacts_to_the_first_answer(client, monkeypatch, gemini_line, expected):
+    from backend.brain import interviewer
+    monkeypatch.setattr(config, "BRAIN_FAKE", False)
+    monkeypatch.setattr(interviewer, "CALIBRATION_MIN_S", 999.0)     # first answer too short → second turn
+    seen = []
+
+    async def small_talk(s):
+        seen.append([e["transcript"] for e in s.exchanges])
+        return gemini_line
+
+    async def no_audio(text):
+        return None
+
+    monkeypatch.setattr(gemini, "small_talk_follow_up", small_talk)
+    monkeypatch.setattr(voice, "tts", no_audio)
+    sid = create(client)
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        first = recv_until(ws, "question", log)
+        assert first["data"]["text"] == lines.CALIBRATION_LINE
+        answer(ws, first, "I like turtles.", log)
+        second = recv_until(ws, "question", log)
+        ws.send_json({"type": "end_session", "data": {}})
+        recv_until(ws, "session_ended", log)
+
+    assert seen == [["I like turtles."]]                              # it saw what they actually said
+    assert second["data"]["kind"] == "calibration" and second["data"]["index"] == 0
+    want = gemini_line if expected is None else lines.CALIBRATION_EXTRA_LINES["demo"]
+    assert second["data"]["text"] == want

@@ -108,6 +108,21 @@ convincing. Empty or near-empty is 1.
 rationale: one short sentence for the logs, never spoken."""
 
 
+SMALL_TALK_SYSTEM = f"""You are a friendly interviewer in the relaxed small talk before a mock interview starts. You asked
+an easy opener and the candidate just answered. Write your next small-talk turn as one natural reply:
+- React briefly to what they actually said, specific to their answer.
+- If it was random, a joke, or off-topic, play along for a moment with good humor, then steer back with your question.
+- If it was rude or inappropriate, note calmly and kindly that it wouldn't land well in a real interview, then ask.
+- If it was empty or garbled (answers come from speech-to-text), say you didn't quite catch that, then ask.
+- Then ask ONE easy, personal background question tied to what they're interviewing for: why they chose their
+  major or field, what got them into it, or what they enjoy about the work they do in it. Use what they told you
+  (if they named their major, school, or job, refer to it). For a class presentation, ask what drew them to the topic.
+- Keep it light and low-pressure: no technical questions and no interview questions yet. Under 35 words.
+
+{VOICE_STYLE}
+{SPOKEN_RULES}"""
+
+
 OPEN_SYSTEM = f"""You are a live mock interviewer. You just finished a little small talk with the candidate and are
 now moving into the interview itself. Write what you say next as one natural turn:
 - React briefly to something specific they said in the small talk, so it's clear you listened.
@@ -175,6 +190,15 @@ def decide_context(s: SessionState, kind: str, question: str, transcript: str,
         f"FOLLOW-UPS USED ON THIS QUESTION: {s.followups_on_current}/1",
         f"REDIRECTS USED ON THIS QUESTION: {s.redirects_on_current}/1",
         f"PREVIOUS DECISIONS: {', '.join(s.actions[-3:]) or 'none'}",
+    ])
+
+
+def small_talk_context(s: SessionState) -> str:
+    subject = "PRESENTATION TOPIC" if s.spec.key == "presentation" else "INTERVIEWING FOR"
+    return "\n".join([
+        f"{subject}: {s.meta.role}   TYPE: {s.spec.label}",
+        "SMALL TALK SO FAR:",
+        conversation_block(s.exchanges),
     ])
 
 

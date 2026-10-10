@@ -9,12 +9,13 @@ reads as an interviewer considering the answer.
 # calm baseline. The answer also gives Gemini something to build the first real question on.
 CALIBRATION_LINE = "Thanks for joining me today. To start, tell me a little about yourself."
 
-# Asked only if the first answer was too short to give a usable baseline. Keyed by interview type
-# (specs.SPECS keys). Kept generic (no role name) so they can be pre-recorded.
+# The second small-talk turn (asked only if the first answer was too short for a usable baseline) is
+# written live by Gemini so it can react to what they said. These are the fallbacks if Gemini is
+# unavailable (and fake mode). Keyed by interview type (specs.SPECS keys).
 CALIBRATION_EXTRA_LINES = {
-    "swe": "What got you interested in this kind of work?",
-    "behavioral": "What got you interested in this kind of work?",
-    "demo": "What got you interested in this kind of work?",
+    "swe": "What got you into your field in the first place?",
+    "behavioral": "What got you into your field in the first place?",
+    "demo": "What got you into your field in the first place?",
     "presentation": "What made you choose this topic?",
 }
 

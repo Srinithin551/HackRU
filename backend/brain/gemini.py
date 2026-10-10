@@ -27,6 +27,7 @@ log = logging.getLogger("brain.gemini")
 PLAN_TIMEOUT_S = 20.0     # runs during the ~40s calibration, so it has room
 DECIDE_TIMEOUT_S = 6.0    # brain.md: fall back to "next" past 6s
 OPEN_TIMEOUT_S = 5.0      # the small-talk → first-question bridge; falls back to the planned text
+SMALL_TALK_TIMEOUT_S = 4.0  # the second small-talk turn; falls back to a fixed line
 REPORT_TIMEOUT_S = 45.0
 MIN_ATTEMPT_S = 1.0       # don't start another model attempt with less time than this left
 
@@ -222,6 +223,20 @@ async def decide_next(s: SessionState, kind: str, question: str, transcript: str
     except Exception as e:
         log.warning("decide_next fell back to 'next': %s", _short(e))
         return Decision(action="next", spoken_text="", answer_quality=3, rationale=f"fallback: {type(e).__name__}")
+
+
+async def small_talk_follow_up(s: SessionState) -> Optional[str]:
+    """The second small-talk turn: reacts to the first answer, then asks about their major or field.
+    None means "use the fixed fallback line" (fake mode, no key, or Gemini failed). Never raises."""
+    if config.BRAIN_FAKE or not configured():
+        return None
+    try:
+        line = await generate("small_talk", prompts.SMALL_TALK_SYSTEM, prompts.small_talk_context(s), OpeningLine,
+                              temperature=0.7, timeout=SMALL_TALK_TIMEOUT_S, models=fast_models())
+        return _clean_turn(line.spoken_text) or None
+    except Exception as e:
+        log.warning("small_talk_follow_up fell back to the fixed line: %s", _short(e))
+        return None
 
 
 async def open_interview(s: SessionState, first: PlannedQuestion) -> Optional[str]:
