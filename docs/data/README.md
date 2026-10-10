@@ -102,6 +102,16 @@ Session and question bookkeeping (`create_session`, `insert_question`, `mark_*`,
 
 ![Query latency](charts/chart4_query_latency.png)
 
+## Tiger Data extras (Phase 7)
+
+- **Columnstore:** `vitals` is set to store closed chunks column by column, one segment per session ([`backend/data/columnstore.sql`](../../backend/data/columnstore.sql), applied with `python scripts/init_db.py --columnstore`). A policy converts chunks once they're a day old, so the live chunk is never touched mid-event. Measured on a copy: **2.8x smaller** on our 5 sessions, **8.1x** at 35 ten-minute sessions, with identical query results ([compression.md](compression.md)).
+- **"Which question type spikes stress most":** `queries.get_stress_by_question_type()` runs the questions ↔ vitals time-range join over every answered question in 0.5 ms. On mock data, main questions peak at 73 and follow-ups at 26, but that's how `--auto` spikes, so re-run `python scripts/viz/chart_question_types.py` after real sessions.
+
+![Which questions spike stress most](charts/chart5_question_type_stress.png)
+
+**Dashboard:** [dashboard.html](dashboard.html) puts the session timeline, per-question stats, latency, compression and the question-type finding on one self-contained page (open it in a browser; rebuild with `python scripts/viz/build_dashboard.py`).
+**Devpost draft:** [devpost_tiger_data.md](devpost_tiger_data.md).
+
 ## Reports and charts
 
 | File | What it shows |
@@ -111,4 +121,6 @@ Session and question bookkeeping (`create_session`, `insert_question`, `mark_*`,
 | [qa_checkpoint_phase4.md](qa_checkpoint_phase4.md) | data QA: calm ≈ 0, spikes, face-lost nulls, baseline, no duplicates, `vitals_5s` = raw rollup |
 | [stats_checkpoint_phase4.md](stats_checkpoint_phase4.md) | how well stress separates calm from spikes; constants recommendation |
 | [profile_mock_stream.md](profile_mock_stream.md) · [profile_checkpoint_phase4.md](profile_checkpoint_phase4.md) | ranges, nulls, confidence, 1 Hz gaps |
+| [qa_replay_sample.md](qa_replay_sample.md) | QA of the replay sample session, including the replay JSON shape agreed with Frontend |
+| [compression.md](compression.md) | columnstore size before/after |
 | [charts/](charts/) | every chart; regenerate with the scripts in [`scripts/viz/`](../../scripts/viz/) |

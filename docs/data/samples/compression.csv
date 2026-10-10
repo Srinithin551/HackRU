@@ -1,0 +1,3 @@
+dataset,sessions,rows,rowstore_bytes,columnstore_bytes,ratio,stats_before_bytes,chunks_converted,on_disk_after_bytes,rollup_identical
+real mock sessions (from vitals),5,1110,303104,106496,2.8,278528,1/1,155648,True
++ 30 synthetic 10-min sessions,35,19110,4046848,499712,8.1,4022272,2/2,573440,True

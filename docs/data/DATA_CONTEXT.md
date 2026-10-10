@@ -90,6 +90,8 @@ stress     = 100 * (0.5*hr_part + 0.3*br_part + 0.2*focus_part)  # missing input
 
 Thresholds (fixed, everyone uses them): **< 40 calm · 40 to 70 rising · > 70 high**.
 
+**Columnstore:** `vitals` has the columnstore enabled (`segmentby = session_id`, `orderby = time DESC`, from `backend/data/columnstore.sql`). A policy converts a chunk once its whole range is over a day old, so the chunk receiving live inserts stays a normal rowstore. Converted chunks still accept inserts and updates, and queries see no difference.
+
 ## `vitals_5s` (continuous aggregate)
 
 5-second rollups for the replay chart. `materialized_only = false`, so queries also include rows newer than the last refresh (real-time aggregate). Refresh policy: every 30 s, window from 1 hour ago to 5 s ago. TimescaleDB indexes the materialized data on `(session_id, bucket DESC)` automatically, so a per-session replay read is an index scan.

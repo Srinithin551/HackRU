@@ -451,3 +451,39 @@ async def get_replay(session_id: str) -> dict | None:
                        "answered_at": _iso(q["answered_at"]), "stats": _question_stats(q, b).model_dump()}
                       for q in qrows],
     }
+
+
+# ---------------------------------------------------------------- insights (demo slide, not a Brain contract)
+
+# "Across all sessions, which question type spikes stress most": the questions <-> vitals time-range
+# join over every answered question, grouped by question kind and by interview type.
+STRESS_BY_QUESTION_TYPE_SQL = """
+SELECT s.interview_type, q.kind,
+       count(*)                                     AS questions,
+       count(*) FILTER (WHERE st.stress_peak > 70) AS high_peaks,
+       avg(st.stress_mean)                         AS stress_mean,
+       avg(st.stress_peak)                         AS stress_peak,
+       avg((st.hr_mean / s.baseline_hr - 1) * 100) AS hr_delta_pct
+FROM questions q
+JOIN sessions s ON s.id = q.session_id
+CROSS JOIN LATERAL (
+    SELECT avg(v.stress) AS stress_mean, max(v.stress) AS stress_peak, avg(v.heart_rate) AS hr_mean
+    FROM vitals v
+    WHERE v.session_id = q.session_id
+      AND v.time BETWEEN COALESCE(q.answer_started_at, q.created_at) AND q.answered_at
+      AND v.confidence >= 0.5
+) st
+WHERE q.answered_at IS NOT NULL AND st.stress_peak IS NOT NULL
+GROUP BY GROUPING SETS ((q.kind), (s.interview_type), (s.interview_type, q.kind))
+ORDER BY stress_peak DESC
+"""
+
+
+async def get_stress_by_question_type() -> list[dict]:
+    """Rows per question kind, per interview type, and per (type, kind): counts, mean/peak stress,
+    share of answers that went 'high' (> 70). A NULL in a grouping column means 'all'."""
+    if FAKE:
+        return []
+    pool = await db.get_pool()
+    return [{k: (_r(v) if isinstance(v, float) else v) for k, v in dict(r).items()}
+            for r in await pool.fetch(STRESS_BY_QUESTION_TYPE_SQL)]

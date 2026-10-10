@@ -66,3 +66,20 @@ def save(fig, name: str) -> Path:
     plt.close(fig)
     print(f"wrote {path.relative_to(ROOT).as_posix()}")
     return path
+
+
+def hbars(ax, ys, widths, color, max_px: float = 24, radius_px: float = 4, zorder: int = 3) -> None:
+    """Horizontal bars from x=0: at most `max_px` thick, 4 px rounded data end, square at the baseline.
+    Call after the axis limits are final (sizes are converted from pixels to data units)."""
+    from matplotlib.patches import FancyBboxPatch, Rectangle
+    bbox = ax.get_window_extent()
+    (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+    px_x, px_y = (x1 - x0) / bbox.width, abs(y1 - y0) / bbox.height
+    h = min(0.62, max_px * px_y)
+    r = radius_px * px_x
+    for y, w in zip(ys, widths):
+        if not w or w <= 0:
+            continue
+        ax.add_patch(FancyBboxPatch((0, y - h / 2), w, h, boxstyle=f"round,pad=0,rounding_size={min(r, w)}",
+                                    mutation_aspect=px_y / px_x, facecolor=color, edgecolor="none", zorder=zorder))
+        ax.add_patch(Rectangle((0, y - h / 2), min(r, w), h, facecolor=color, edgecolor="none", zorder=zorder))

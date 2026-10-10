@@ -4,6 +4,7 @@
     python scripts/init_db.py            # create anything missing (safe to re-run)
     python scripts/init_db.py --reset    # DROP sessions, questions, vitals, vitals_5s and recreate
     python scripts/init_db.py --check    # only verify: hypertable, continuous aggregate, policy
+    python scripts/init_db.py --columnstore   # also enable the columnstore on vitals (columnstore.sql)
 
 Reads TIGER_DATABASE_URL from the environment or backend/.env. Statements run one
 at a time outside any transaction block, because continuous-aggregate DDL
@@ -21,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 from backend.data.db import database_url  # noqa: E402
 
 SCHEMA = ROOT / "backend" / "data" / "schema.sql"
+COLUMNSTORE = ROOT / "backend" / "data" / "columnstore.sql"
 RESET_SQL = [
     "DROP MATERIALIZED VIEW IF EXISTS vitals_5s CASCADE",   # also removes its refresh policy
     "DROP TABLE IF EXISTS vitals CASCADE",
@@ -73,8 +75,8 @@ def redact(msg: str, url: str) -> str:
     return msg.replace(url, "<TIGER_DATABASE_URL>")
 
 
-async def apply_schema(conn: asyncpg.Connection) -> None:
-    for stmt in split_sql(SCHEMA.read_text(encoding="utf-8")):
+async def apply_schema(conn: asyncpg.Connection, path=SCHEMA) -> None:
+    for stmt in split_sql(path.read_text(encoding="utf-8")):
         try:
             await conn.execute(stmt)
             print(f"  ok       {short(stmt)}")
@@ -110,9 +112,19 @@ CHECKS = [
 ]
 
 
-async def verify(conn: asyncpg.Connection) -> bool:
+COLUMNSTORE_CHECKS = [
+    ("vitals columnstore enabled",
+     "SELECT format('segmentby %s, orderby %s', segmentby, orderby) "
+     "FROM timescaledb_information.hypertable_columnstore_settings WHERE hypertable = 'vitals'::regclass"),
+    ("vitals columnstore policy",
+     "SELECT format('job %s every %s, %s', job_id, schedule_interval, config) FROM timescaledb_information.jobs "
+     "WHERE hypertable_name = 'vitals' AND proc_name IN ('policy_compression', 'policy_columnstore')"),
+]
+
+
+async def verify(conn: asyncpg.Connection, columnstore: bool = False) -> bool:
     ok = True
-    for label, sql in CHECKS:
+    for label, sql in CHECKS + (COLUMNSTORE_CHECKS if columnstore else []):
         value = await conn.fetchval(sql)
         ok &= value is not None
         print(f"  {'PASS' if value is not None else 'FAIL'}  {label:32s} {value or ''}")
@@ -124,6 +136,8 @@ async def main() -> int:
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--reset", action="store_true", help="drop everything and recreate (asks for confirmation)")
     g.add_argument("--check", action="store_true", help="only run the verification checks")
+    ap.add_argument("--columnstore", action="store_true",
+                    help="also apply columnstore.sql (columnstore on vitals + conversion policy)")
     args = ap.parse_args()
 
     url = database_url()
@@ -145,8 +159,11 @@ async def main() -> int:
         if not args.check:
             print(f"applying {SCHEMA.relative_to(ROOT)}")
             await apply_schema(conn)
+            if args.columnstore:
+                print(f"applying {COLUMNSTORE.relative_to(ROOT)}")
+                await apply_schema(conn, COLUMNSTORE)
         print("verifying")
-        return 0 if await verify(conn) else 1
+        return 0 if await verify(conn, args.columnstore) else 1
     finally:
         await conn.close()
 

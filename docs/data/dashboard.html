@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>StressTest Vitals Dashboard</title>
+<style>
+/* Layout: one reading column of panels; tiles wrap; latency + compression sit side by side when wide. */
+:root {
+  --bg: #f9f9f7; --panel: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --wash: #f0efec; --line: rgba(11,11,11,0.10);
+  --mean: #256abf; --peak: #86b6ef; --bar-muted: #c3c2b7;
+  --calm: #006300; --rising: #8a5a00; --high: #b42318;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d0d0d; --panel: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --wash: #24241f; --line: rgba(255,255,255,0.10);
+  --mean: #6da7ec; --peak: #1c5cab; --bar-muted: #52514e;
+  --calm: #0ca30c; --rising: #fab219; --high: #e66767; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0d0d0d; --panel: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --wash: #24241f; --line: rgba(255,255,255,0.10);
+  --mean: #6da7ec; --peak: #1c5cab; --bar-muted: #52514e;
+  --calm: #0ca30c; --rising: #fab219; --high: #e66767; color-scheme: dark; }
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); margin: 0; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 48px; display: grid; gap: 20px; }
+header h1 { font-size: 1.6rem; margin: 0 0 4px; text-wrap: balance; letter-spacing: -0.01em; }
+header p { margin: 0; color: var(--ink-2); max-width: 70ch; line-height: 1.5; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; }
+.tile .label { font-size: 0.78rem; color: var(--ink-2); letter-spacing: 0.02em; }
+.tile .value { font-size: 1.7rem; font-weight: 600; }
+.tile .note { font-size: 0.78rem; color: var(--muted); line-height: 1.35; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; min-width: 0; }
+.panel h2 { font-size: 1.02rem; margin: 0; }
+.panel .sub { font-size: 0.85rem; color: var(--ink-2); margin: 0; line-height: 1.45; }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+.chart { position: relative; width: 100%; min-width: 0; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--ink-2); font-family: var(--sans); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.8rem; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.key { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.tip { position: absolute; pointer-events: none; background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.12); border-radius: 8px; padding: 8px 10px; font-size: 0.8rem; line-height: 1.45;
+  white-space: nowrap; z-index: 2; }
+.tip b { font-weight: 600; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--ink-2); font-weight: 600; font-size: 0.76rem; letter-spacing: 0.02em; white-space: nowrap; }
+td.n, th.n { text-align: right; white-space: nowrap; }
+td.q { min-width: 220px; max-width: 420px; }
+tr.sel td { background: var(--wash); }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 0.76rem; font-weight: 600; white-space: nowrap; }
+.chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.chip.calm { color: var(--calm); } .chip.rising { color: var(--rising); } .chip.high { color: var(--high); }
+.mono { font-family: var(--mono); font-size: 0.8rem; }
+footer { color: var(--muted); font-size: 0.8rem; line-height: 1.5; }
+@media (prefers-reduced-motion: no-preference) { tr { transition: background 0.15s; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>StressTest vitals on Tiger Data</h1>
+  <p>Webcam vitals stored once a second in a TimescaleDB hypertable, scored against each person's calm baseline,
+  joined to interview questions by time range, and rolled into 5-second buckets for the replay. All numbers below are
+  measured on our Tiger Data service. The sessions are mock sessions run through the real interview loop.</p>
+</header>
+<section class="tiles" aria-label="Summary"><div class="tile"><div class="label">Sessions on Tiger Data</div><div class="value">5</div><div class="note">1,110 vitals readings at 1 Hz</div></div><div class="tile"><div class="label">get_window_stats on Tiger</div><div class="value">0.07 ms</div><div class="note">server time; 53 ms round trip (network floor 53 ms)</div></div><div class="tile"><div class="label">Columnstore</div><div class="value">8.1x smaller</div><div class="note">19,110 readings, segmentby session_id</div></div><div class="tile"><div class="label">Replay below</div><div class="value">peak 87</div><div class="note">7 questions, 60 points from vitals_5s</div></div></section>
+
+<section class="panel" aria-labelledby="h-timeline">
+  <h2 id="h-timeline">One session, replayed from the continuous aggregate</h2>
+  <p class="sub">Demo Candidate, 7 questions. Stress is 0 to 100 against the calibration baseline
+  (under 40 calm, 40 to 70 rising, over 70 high). Shaded bands are answer windows; + marks a follow-up. Hover for values.</p>
+  <div class="legend"><span><i class="key" style="background:var(--mean)"></i>stress, mean per 5 s</span>
+  <span><i class="key" style="background:var(--peak)"></i>stress, peak per 5 s</span><span>heart rate on its own axis below</span></div>
+  <div class="chart" id="timeline"></div>
+</section>
+
+<section class="panel" aria-labelledby="h-q">
+  <h2 id="h-q">How they reacted to each question</h2>
+  <p class="sub">QuestionStats from the time-range join between each answer window and the vitals hypertable.</p>
+  <div class="tablewrap"><table id="qtable"><thead><tr><th>#</th><th>Kind</th><th>Question</th><th class="n">Answer</th>
+  <th class="n">HR mean</th><th class="n">HR vs base</th><th class="n">Stress mean</th><th class="n">Stress peak</th>
+  <th>Level</th><th class="n">Peak at</th></tr></thead><tbody></tbody></table></div>
+</section>
+
+<div class="pair">
+  <section class="panel" aria-labelledby="h-lat">
+    <h2 id="h-lat">Query latency</h2>
+    <p class="sub">20 runs each on a session with 10 minutes of data. Every query executes in under a millisecond on Tiger;
+    the round trip is the network.</p>
+    <div class="legend"><span><i class="dot" style="background:var(--mean)"></i>p50</span><span><i class="dot" style="background:var(--peak)"></i>p95</span></div>
+    <div class="chart" id="latency"></div>
+  </section>
+  <section class="panel" aria-labelledby="h-comp">
+    <h2 id="h-comp">Columnstore compression</h2>
+    <p class="sub">vitals with segmentby session_id, orderby time DESC, measured on a copy so the live chunk is untouched.
+    Query results are identical after conversion.</p>
+    <div class="chart" id="compression"></div>
+    <h2 id="h-qt" style="margin-top:10px">Which questions spike stress most</h2>
+    <p class="sub">Average answer peak across 43 answers in 4 interview types. Mock data: mock_vitals --auto
+    spikes every other question, so this pattern is by construction until real sessions come in.</p>
+    <div class="chart" id="qtypes"></div>
+  </section>
+</div>
+
+<footer>Stored in Tiger Data (PostgreSQL 18.6, TimescaleDB 2.30.2): hypertable <span class="mono">vitals</span>,
+continuous aggregate <span class="mono">vitals_5s</span>, columnstore. Built by <span class="mono">scripts/viz/build_dashboard.py</span>
+from <span class="mono">frontend/src/mocks/replay_sample.json</span> and <span class="mono">docs/data/samples/</span>.</footer>
+</div>
+<script id="data" type="application/json">{"replay":{"session":{"id":"21531403-398d-4098-a5e6-93271b8d40c5","user_name":"Demo Candidate","started_at":"2026-10-10T18:17:15.854276Z","ended_at":"2026-10-10T18:22:10.697796Z","baseline":{"heart_rate":72.2,"breathing_rate":14.1,"focus":0.805}},"series":[{"t":"2026-10-10T18:17:15Z","hr":72.0,"br":14.6,"focus":0.801,"stress":4.4,"stress_peak":6.2},{"t":"2026-10-10T18:17:20Z","hr":71.7,"br":13.7,"focus":0.802,"stress":0.7,"stress_peak":1.7},{"t":"2026-10-10T18:17:25Z","hr":71.9,"br":14.0,"focus":0.805,"stress":1.6,"stress_peak":5.1},{"t":"2026-10-10T18:17:30Z","hr":72.9,"br":14.1,"focus":0.811,"stress":3.0,"stress_peak":4.8},{"t":"2026-10-10T18:17:35Z","hr":72.2,"br":14.2,"focus":0.81,"stress":2.3,"stress_peak":5.0},{"t":"2026-10-10T18:17:40Z","hr":71.8,"br":14.4,"focus":0.832,"stress":2.2,"stress_peak":4.9},{"t":"2026-10-10T18:17:45Z","hr":72.4,"br":14.0,"focus":0.8,"stress":2.5,"stress_peak":4.6},{"t":"2026-10-10T18:17:50Z","hr":72.8,"br":14.1,"focus":0.797,"stress":4.0,"stress_peak":6.6},{"t":"2026-10-10T18:17:55Z","hr":72.0,"br":14.0,"focus":0.81,"stress":2.2,"stress_peak":4.6},{"t":"2026-10-10T18:18:00Z","hr":72.3,"br":14.0,"focus":0.796,"stress":2.4,"stress_peak":7.6},{"t":"2026-10-10T18:18:05Z","hr":71.7,"br":14.0,"focus":0.805,"stress":2.7,"stress_peak":5.0},{"t":"2026-10-10T18:18:10Z","hr":71.9,"br":13.6,"focus":0.79,"stress":2.4,"stress_peak":5.7},{"t":"2026-10-10T18:18:15Z","hr":71.9,"br":14.3,"focus":0.805,"stress":3.2,"stress_peak":5.4},{"t":"2026-10-10T18:18:20Z","hr":72.2,"br":13.8,"focus":0.782,"stress":2.3,"stress_peak":5.0},{"t":"2026-10-10T18:18:25Z","hr":71.8,"br":14.2,"focus":0.803,"stress":2.6,"stress_peak":6.1},{"t":"2026-10-10T18:18:30Z","hr":72.7,"br":13.9,"focus":0.796,"stress":4.1,"stress_peak":15.6},{"t":"2026-10-10T18:18:35Z","hr":84.1,"br":16.8,"focus":0.599,"stress":55.8,"stress_peak":82.2},{"t":"2026-10-10T18:18:40Z","hr":86.9,"br":17.6,"focus":0.527,"stress":70.4,"stress_peak":76.3},{"t":"2026-10-10T18:18:45Z","hr":83.4,"br":16.2,"focus":0.602,"stress":50.4,"stress_peak":60.7},{"t":"2026-10-10T18:18:50Z","hr":77.5,"br":15.7,"focus":0.702,"stress":27.7,"stress_peak":35.6},{"t":"2026-10-10T18:18:55Z","hr":73.1,"br":14.5,"focus":0.771,"stress":7.0,"stress_peak":14.1},{"t":"2026-10-10T18:19:00Z","hr":71.8,"br":14.0,"focus":0.801,"stress":1.8,"stress_peak":4.3},{"t":"2026-10-10T18:19:05Z","hr":72.5,"br":13.8,"focus":0.817,"stress":2.8,"stress_peak":8.0},{"t":"2026-10-10T18:19:10Z","hr":72.3,"br":13.8,"focus":0.779,"stress":2.1,"stress_peak":4.5},{"t":"2026-10-10T18:19:15Z","hr":72.2,"br":14.5,"focus":0.792,"stress":3.7,"stress_peak":5.7},{"t":"2026-10-10T18:19:20Z","hr":72.2,"br":14.2,"focus":0.803,"stress":2.2,"stress_peak":4.0},{"t":"2026-10-10T18:19:25Z","hr":72.2,"br":13.7,"focus":0.794,"stress":1.7,"stress_peak":4.6},{"t":"2026-10-10T18:19:30Z","hr":73.0,"br":13.9,"focus":0.809,"stress":3.0,"stress_peak":6.8},{"t":"2026-10-10T18:19:35Z","hr":73.1,"br":14.4,"focus":0.764,"stress":8.3,"stress_peak":27.6},{"t":"2026-10-10T18:19:40Z","hr":86.2,"br":17.5,"focus":0.555,"stress":66.6,"stress_peak":86.8},{"t":"2026-10-10T18:19:45Z","hr":86.1,"br":17.3,"focus":0.558,"stress":66.0,"stress_peak":73.8},{"t":"2026-10-10T18:19:50Z","hr":81.3,"br":16.5,"focus":0.626,"stress":45.7,"stress_peak":52.0},{"t":"2026-10-10T18:19:55Z","hr":77.2,"br":15.2,"focus":0.695,"stress":24.6,"stress_peak":30.4},{"t":"2026-10-10T18:20:00Z","hr":73.0,"br":14.0,"focus":0.776,"stress":4.9,"stress_peak":12.9},{"t":"2026-10-10T18:20:05Z","hr":72.0,"br":14.3,"focus":0.792,"stress":2.6,"stress_peak":6.2},{"t":"2026-10-10T18:20:10Z","hr":72.7,"br":14.0,"focus":0.809,"stress":2.9,"stress_peak":6.2},{"t":"2026-10-10T18:20:15Z","hr":71.7,"br":14.0,"focus":0.81,"stress":1.1,"stress_peak":2.6},{"t":"2026-10-10T18:20:20Z","hr":71.7,"br":14.5,"focus":0.792,"stress":4.1,"stress_peak":8.3},{"t":"2026-10-10T18:20:25Z","hr":71.5,"br":14.1,"focus":0.79,"stress":1.7,"stress_peak":4.8},{"t":"2026-10-10T18:20:30Z","hr":71.7,"br":14.1,"focus":0.799,"stress":2.4,"stress_peak":5.1},{"t":"2026-10-10T18:20:35Z","hr":72.4,"br":14.0,"focus":0.789,"stress":3.1,"stress_peak":10.7},{"t":"2026-10-10T18:20:40Z","hr":75.8,"br":14.8,"focus":0.738,"stress":18.0,"stress_peak":42.8},{"t":"2026-10-10T18:20:45Z","hr":86.6,"br":17.5,"focus":0.529,"stress":69.4,"stress_peak":81.0},{"t":"2026-10-10T18:20:50Z","hr":85.9,"br":17.2,"focus":0.581,"stress":63.4,"stress_peak":78.6},{"t":"2026-10-10T18:20:55Z","hr":80.9,"br":16.1,"focus":0.646,"stress":41.1,"stress_peak":46.3},{"t":"2026-10-10T18:21:00Z","hr":76.3,"br":15.1,"focus":0.745,"stress":19.7,"stress_peak":28.0},{"t":"2026-10-10T18:21:05Z","hr":72.7,"br":13.8,"focus":0.801,"stress":2.8,"stress_peak":5.3},{"t":"2026-10-10T18:21:10Z","hr":71.4,"br":14.3,"focus":0.805,"stress":2.3,"stress_peak":6.2},{"t":"2026-10-10T18:21:15Z","hr":71.4,"br":14.2,"focus":0.791,"stress":2.7,"stress_peak":5.0},{"t":"2026-10-10T18:21:20Z","hr":71.8,"br":14.1,"focus":0.785,"stress":2.2,"stress_peak":5.2},{"t":"2026-10-10T18:21:25Z","hr":72.1,"br":14.2,"focus":0.81,"stress":2.8,"stress_peak":6.8},{"t":"2026-10-10T18:21:30Z","hr":72.3,"br":14.6,"focus":0.797,"stress":4.1,"stress_peak":5.7},{"t":"2026-10-10T18:21:35Z","hr":72.1,"br":13.8,"focus":0.796,"stress":2.1,"stress_peak":5.9},{"t":"2026-10-10T18:21:40Z","hr":72.3,"br":13.9,"focus":0.781,"stress":3.0,"stress_peak":4.7},{"t":"2026-10-10T18:21:45Z","hr":75.9,"br":15.1,"focus":0.747,"stress":18.6,"stress_peak":45.3},{"t":"2026-10-10T18:21:50Z","hr":87.5,"br":17.8,"focus":0.545,"stress":72.4,"stress_peak":83.7},{"t":"2026-10-10T18:21:55Z","hr":85.7,"br":16.8,"focus":0.585,"stress":60.5,"stress_peak":67.6},{"t":"2026-10-10T18:22:00Z","hr":80.7,"br":16.1,"focus":0.657,"stress":40.1,"stress_peak":47.3},{"t":"2026-10-10T18:22:05Z","hr":76.5,"br":15.1,"focus":0.719,"stress":20.7,"stress_peak":31.2},{"t":"2026-10-10T18:22:10Z","hr":74.5,"br":13.8,"focus":0.785,"stress":7.3,"stress_peak":7.3}],"questions":[{"id":"264b7a5a-86e3-4dbb-b13b-7e0bc40c035e","idx":0,"kind":"calibration","text":"Hey, thanks for coming in. Before we get started, how's HackRU going so far?","transcript":"It's going really well. We've been building an interview coach that reads your heart rate from the webcam.","answer_started_at":"2026-10-10T18:17:18.869171Z","answered_at":"2026-10-10T18:17:48.879785Z","stats":{"question_id":"264b7a5a-86e3-4dbb-b13b-7e0bc40c035e","duration_s":30.0,"n_samples":30,"hr_mean":72.2,"hr_peak":74.0,"hr_delta_pct":0.0,"br_mean":14.1,"focus_mean":0.809,"stress_mean":2.2,"stress_peak":5.4,"peak_offset_s":0.9}},{"id":"4341c857-0da8-4ed4-ae55-5dddb738d586","idx":0,"kind":"calibration","text":"Nice. And what have you been working on this weekend?","transcript":"I built a FastAPI backend for a hackathon project. The part I'm proudest of is the real-time pipeline: readings come in every second, get scored against a personal baseline, and stream to a live chart over WebSockets. I learned a lot about keeping latency low.","answer_started_at":"2026-10-10T18:17:51.050195Z","answered_at":"2026-10-10T18:18:21.057624Z","stats":{"question_id":"4341c857-0da8-4ed4-ae55-5dddb738d586","duration_s":30.0,"n_samples":30,"hr_mean":72.0,"hr_peak":74.0,"hr_delta_pct":-0.2,"br_mean":14.0,"focus_mean":0.8,"stress_mean":2.7,"stress_peak":7.6,"peak_offset_s":12.7}},{"id":"f50a5cc6-c885-4861-ac75-084c02de9164","idx":1,"kind":"main","text":"Tell me about a project you built recently and the part you're proudest of.","transcript":"Um, I'm not sure.","answer_started_at":"2026-10-10T18:18:23.641122Z","answered_at":"2026-10-10T18:18:53.648273Z","stats":{"question_id":"f50a5cc6-c885-4861-ac75-084c02de9164","duration_s":30.0,"n_samples":30,"hr_mean":79.2,"hr_peak":89.4,"hr_delta_pct":9.8,"br_mean":15.6,"focus_mean":0.675,"stress_mean":34.0,"stress_peak":82.2,"peak_offset_s":16.1}},{"id":"fdc209de-2381-45c7-860c-0a442b24c1d7","idx":2,"kind":"follow_up","text":"That's okay, let me put it more simply. Just walk me through the very first step you'd take.","transcript":"First I'd check whether the slowdown is everywhere or one endpoint, then look at recent deploys, database query plans, and connection pool saturation. I'd add timing around each layer to find where the time goes.","answer_started_at":"2026-10-10T18:18:55.980785Z","answered_at":"2026-10-10T18:19:25.991219Z","stats":{"question_id":"fdc209de-2381-45c7-860c-0a442b24c1d7","duration_s":30.0,"n_samples":30,"hr_mean":72.2,"hr_peak":73.9,"hr_delta_pct":0.1,"br_mean":14.1,"focus_mean":0.797,"stress_mean":2.9,"stress_peak":14.1,"peak_offset_s":0.8}},{"id":"af0a26ef-2a65-4645-acde-cfdf7098b53c","idx":3,"kind":"main","text":"Walk me through how you'd debug an API that suddenly got ten times slower.","transcript":"I'd shard users across chat servers, keep connections on WebSockets, put messages in a durable queue, and store history in a partitioned database so reads stay fast.","answer_started_at":"2026-10-10T18:19:28.365529Z","answered_at":"2026-10-10T18:19:58.381260Z","stats":{"question_id":"af0a26ef-2a65-4645-acde-cfdf7098b53c","duration_s":30.0,"n_samples":30,"hr_mean":79.2,"hr_peak":91.1,"hr_delta_pct":9.8,"br_mean":15.7,"focus_mean":0.671,"stress_mean":34.5,"stress_peak":86.8,"peak_offset_s":16.4}},{"id":"ae760380-ed01-43c3-b8e1-78934ffc8f96","idx":4,"kind":"follow_up","text":"That's okay, let me put it more simply. Just walk me through the very first step you'd take.","transcript":"My biggest failure was missing a launch deadline because I didn't flag a risk early. Now I raise blockers the day I see them.","answer_started_at":"2026-10-10T18:20:00.611120Z","answered_at":"2026-10-10T18:20:30.632961Z","stats":{"question_id":"ae760380-ed01-43c3-b8e1-78934ffc8f96","duration_s":30.0,"n_samples":30,"hr_mean":72.1,"hr_peak":75.8,"hr_delta_pct":-0.1,"br_mean":14.1,"focus_mean":0.795,"stress_mean":2.9,"stress_peak":12.9,"peak_offset_s":1.2}},{"id":"ee6c206d-ba9c-49d8-8f9c-34d2218af860","idx":5,"kind":"main","text":"How would you design a chat app that has to support a million users?","transcript":"It's going really well. We've been building an interview coach that reads your heart rate from the webcam.","answer_started_at":"2026-10-10T18:20:32.970945Z","answered_at":"2026-10-10T18:21:02.983953Z","stats":{"question_id":"ee6c206d-ba9c-49d8-8f9c-34d2218af860","duration_s":30.0,"n_samples":30,"hr_mean":79.4,"hr_peak":89.1,"hr_delta_pct":10.1,"br_mean":15.8,"focus_mean":0.672,"stress_mean":35.1,"stress_peak":81.0,"peak_offset_s":15.8}},{"id":"583b429a-8248-4a6a-ba6e-f234cf557745","idx":6,"kind":"follow_up","text":"That's okay, let me put it more simply. Just walk me through the very first step you'd take.","transcript":"I built a FastAPI backend for a hackathon project. The part I'm proudest of is the real-time pipeline: readings come in every second, get scored against a personal baseline, and stream to a live chart over WebSockets. I learned a lot about keeping latency low.","answer_started_at":"2026-10-10T18:21:05.206784Z","answered_at":"2026-10-10T18:21:35.215664Z","stats":{"question_id":"583b429a-8248-4a6a-ba6e-f234cf557745","duration_s":30.0,"n_samples":30,"hr_mean":72.0,"hr_peak":74.0,"hr_delta_pct":-0.3,"br_mean":14.2,"focus_mean":0.798,"stress_mean":2.8,"stress_peak":6.8,"peak_offset_s":20.6}},{"id":"fb32c08a-9adb-4c27-b661-514f8fe02ebd","idx":7,"kind":"main","text":"Tell me about your biggest failure, and why I should still hire you.","transcript":"Um, I'm not sure.","answer_started_at":"2026-10-10T18:21:37.444968Z","answered_at":"2026-10-10T18:22:07.471191Z","stats":{"question_id":"fb32c08a-9adb-4c27-b661-514f8fe02ebd","duration_s":30.0,"n_samples":30,"hr_mean":79.5,"hr_peak":90.3,"hr_delta_pct":10.2,"br_mean":15.7,"focus_mean":0.677,"stress_mean":34.7,"stress_peak":83.7,"peak_offset_s":15.3}}]},"latency":[{"query":"get_window_stats(15 s)","caller":"Brain watcher, every 3 s","p50":52.6,"p95":54.8,"server":0.075},{"query":"insert_vitals (1 reading)","caller":"Sensing, every 1 s","p50":53.8,"p95":79.1,"server":0.139},{"query":"get_question_stats","caller":"Brain, after every answer","p50":52.4,"p95":54.2,"server":0.169},{"query":"get_active_session (uncached)","caller":"Sensing client, every 2 s","p50":52.6,"p95":54.7,"server":0.034},{"query":"get_baseline (uncached)","caller":"Brain, Data internals","p50":52.4,"p95":57.3,"server":0.029},{"query":"insert_question","caller":"Brain, per question","p50":53.3,"p95":65.0,"server":null},{"query":"mark_answer_started","caller":"Brain, per question","p50":51.8,"p95":73.6,"server":null},{"query":"mark_answered","caller":"Brain, per question","p50":53.1,"p95":67.9,"server":null},{"query":"get_session_history (9 questions)","caller":"Brain, once at the end","p50":60.5,"p95":109.5,"server":0.713},{"query":"get_replay (3 queries in parallel)","caller":"Frontend replay page, once","p50":54.2,"p95":79.8,"server":0.081},{"query":"compute_baseline","caller":"Brain, once after calibration","p50":104.6,"p95":110.1,"server":0.527},{"query":"save_report","caller":"Brain, once","p50":53.3,"p95":80.8,"server":null},{"query":"get_report","caller":"Frontend, once","p50":52.4,"p95":58.2,"server":null},{"query":"create_session","caller":"Brain, once","p50":52.2,"p95":59.9,"server":null},{"query":"end_session (+ vitals_5s refresh)","caller":"Brain, once","p50":103.2,"p95":109.6,"server":null},{"query":"network floor: SELECT 1","caller":"-","p50":53.3,"p95":66.1,"server":null}],"compression":[{"dataset":"real mock sessions (from vitals)","sessions":5,"rows":1110,"row_bytes":303104,"col_bytes":106496,"ratio":2.8,"identical":true},{"dataset":"+ 30 synthetic 10-min sessions","sessions":35,"rows":19110,"row_bytes":4046848,"col_bytes":499712,"ratio":8.1,"identical":true}],"qtypes":[{"interview_type":"Class Presentation","kind":"main","questions":4,"high":4,"peak":84.2,"mean":36.7},{"interview_type":"Behavioral","kind":"main","questions":4,"high":4,"peak":83.4,"mean":36.5},{"interview_type":"Quick Demo","kind":"main","questions":3,"high":3,"peak":82.7,"mean":35.1},{"interview_type":null,"kind":"main","questions":19,"high":16,"peak":72.7,"mean":32.3},{"interview_type":"Software Engineering","kind":"main","questions":8,"high":5,"peak":57.8,"mean":27.0},{"interview_type":"Class Presentation","kind":null,"questions":9,"high":4,"peak":50.1,"mean":19.5},{"interview_type":"Behavioral","kind":null,"questions":9,"high":4,"peak":50.1,"mean":19.4},{"interview_type":"Quick Demo","kind":null,"questions":7,"high":3,"peak":47.4,"mean":17.9},{"interview_type":"Quick Demo","kind":"follow_up","questions":2,"high":0,"peak":35.3,"mean":7.6},{"interview_type":"Behavioral","kind":"follow_up","questions":3,"high":0,"peak":32.9,"mean":7.5},{"interview_type":"Software Engineering","kind":null,"questions":18,"high":5,"peak":32.6,"mean":14.8},{"interview_type":"Class Presentation","kind":"follow_up","questions":3,"high":0,"peak":32.2,"mean":7.6},{"interview_type":null,"kind":"follow_up","questions":14,"high":0,"peak":26.0,"mean":7.2},{"interview_type":"Software Engineering","kind":"follow_up","questions":6,"high":0,"peak":16.3,"mean":6.6},{"interview_type":"Behavioral","kind":"calibration","questions":2,"high":0,"peak":9.2,"mean":2.8},{"interview_type":"Class Presentation","kind":"calibration","questions":2,"high":0,"peak":8.7,"mean":2.8},{"interview_type":null,"kind":"calibration","questions":10,"high":0,"peak":7.6,"mean":2.7},{"interview_type":"Software Engineering","kind":"calibration","questions":4,"high":0,"peak":6.8,"mean":2.7},{"interview_type":"Quick Demo","kind":"calibration","questions":2,"high":0,"peak":6.5,"mean":2.6}]}</script>
+<script>
+const D = JSON.parse(document.getElementById('data').textContent);
+const NS = 'http://www.w3.org/2000/svg';
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (parent) parent.appendChild(e); return e; };
+const txt = (parent, x, y, s, attrs = {}) => { const t = el('text', {x, y, 'font-size': 11, ...attrs}, parent); t.textContent = s; return t; };
+const fmtT = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const level = s => s == null ? null : s > 70 ? 'high' : s >= 40 ? 'rising' : 'calm';
+const qLabel = q => q.kind === 'calibration' ? 'Cal' : `Q${q.idx}` + (q.kind === 'follow_up' ? '+' : '');
+function tipAt(box, html, x, y) {
+  let t = box.querySelector('.tip'); if (!t) { t = document.createElement('div'); t.className = 'tip'; box.appendChild(t); }
+  t.innerHTML = html; t.hidden = false;
+  const w = t.offsetWidth, bw = box.clientWidth;
+  t.style.left = Math.max(0, Math.min(bw - w, x + 14)) + 'px'; t.style.top = Math.max(0, y - 10) + 'px';
+}
+const hideTip = box => { const t = box.querySelector('.tip'); if (t) t.hidden = true; };
+
+/* ---------- session timeline ---------- */
+function timeline() {
+  const box = document.getElementById('timeline'); box.querySelector('svg')?.remove();
+  const R = D.replay, t0 = Date.parse(R.session.started_at);
+  const pts = R.series.map(p => ({...p, s: (Date.parse(p.t) - t0) / 1000}));
+  const qs = R.questions.filter(q => q.answer_started_at && q.answered_at).map(q => ({...q,
+    a: (Date.parse(q.answer_started_at) - t0) / 1000, b: (Date.parse(q.answered_at) - t0) / 1000}));
+  const W = Math.max(360, box.clientWidth), L = 40, Rm = 70, top = 26, h1 = 170, gap = 44, h2 = 110, H = top + h1 + gap + h2 + 30;
+  const tMax = Math.max(...pts.map(p => p.s)) + 5;
+  const x = s => L + (W - L - Rm) * s / tMax;
+  const ys = v => top + h1 - h1 * v / 100;
+  const hrs = pts.map(p => p.hr).filter(v => v != null), hLo = Math.floor(Math.min(...hrs, R.session.baseline?.heart_rate ?? 99) - 2),
+        hHi = Math.ceil(Math.max(...hrs) + 2);
+  const yh = v => top + h1 + gap + h2 - h2 * (v - hLo) / (hHi - hLo);
+  const svg = el('svg', {viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Stress and heart rate over the session'}, box);
+  for (const q of qs) {
+    el('rect', {x: x(q.a), y: top, width: Math.max(1, x(q.b) - x(q.a)), height: h1 + gap + h2, fill: css('--wash')}, svg);
+    txt(svg, (x(q.a) + x(q.b)) / 2, top - 8, qLabel(q), {'text-anchor': 'middle', 'font-size': 10.5});
+  }
+  for (const v of [0, 40, 70, 100]) {
+    el('line', {x1: L, x2: W - Rm, y1: ys(v), y2: ys(v), stroke: v === 40 || v === 70 ? css('--axis') : css('--grid'), 'stroke-width': 1}, svg);
+    txt(svg, L - 6, ys(v) + 4, v, {'text-anchor': 'end'});
+  }
+  txt(svg, W - Rm + 6, ys(40) + 4, '40 rising'); txt(svg, W - Rm + 6, ys(70) + 4, '70 high');
+  txt(svg, L, top + h1 + gap - 8, 'Heart rate (bpm)', {'font-weight': 600, fill: css('--ink')});
+  for (const v of [hLo, Math.round((hLo + hHi) / 2), hHi]) txt(svg, L - 6, yh(v) + 4, v, {'text-anchor': 'end'});
+  el('line', {x1: L, x2: W - Rm, y1: top + h1 + gap + h2, y2: top + h1 + gap + h2, stroke: css('--axis')}, svg);
+  if (R.session.baseline) {
+    const b = R.session.baseline.heart_rate;
+    el('line', {x1: L, x2: W - Rm, y1: yh(b), y2: yh(b), stroke: css('--muted'), 'stroke-width': 1}, svg);
+    txt(svg, W - Rm + 6, yh(b) + 4, `baseline ${Math.round(b)}`);
+  }
+  const step = (key, yf) => { let d = '', prev = null;
+    pts.forEach((p, i) => { const v = p[key]; if (v == null) { prev = null; return; }
+      const nx = x(i + 1 < pts.length ? pts[i + 1].s : p.s + 5);
+      d += (prev == null ? `M${x(p.s)},${yf(v)}` : `L${x(p.s)},${yf(v)}`) + `L${nx},${yf(v)}`; prev = v; });
+    return d; };
+  el('path', {d: step('stress_peak', ys), fill: 'none', stroke: css('--peak'), 'stroke-width': 2, 'stroke-linejoin': 'round'}, svg);
+  el('path', {d: step('stress', ys), fill: 'none', stroke: css('--mean'), 'stroke-width': 2, 'stroke-linejoin': 'round'}, svg);
+  el('path', {d: step('hr', yh), fill: 'none', stroke: css('--mean'), 'stroke-width': 2, 'stroke-linejoin': 'round'}, svg);
+  for (let s = 0; s <= tMax; s += 60) txt(svg, x(s), H - 8, fmtT(s), {'text-anchor': 'middle'});
+  const cross = el('line', {y1: top, y2: top + h1 + gap + h2, stroke: css('--muted'), 'stroke-width': 1, visibility: 'hidden'}, svg);
+  const hit = el('rect', {x: L, y: top, width: W - L - Rm, height: h1 + gap + h2, fill: 'transparent'}, svg);
+  const move = ev => {
+    const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * W / r.width;
+    const s = (px - L) / (W - L - Rm) * tMax; let i = pts.findIndex(p => p.s > s) - 1; if (i < 0) i = s < 0 ? 0 : pts.length - 1;
+    const p = pts[i], q = qs.find(q => s >= q.a && s <= q.b);
+    cross.setAttribute('x1', x(p.s + 2.5)); cross.setAttribute('x2', x(p.s + 2.5)); cross.setAttribute('visibility', 'visible');
+    tipAt(box, `<b>${fmtT(p.s)}</b>${q ? ' &middot; ' + qLabel(q) : ''}<br>stress ${p.stress ?? '–'} (peak ${p.stress_peak ?? '–'})<br>` +
+      `HR ${p.hr ?? '–'} bpm &middot; BR ${p.br ?? '–'} &middot; focus ${p.focus ?? '–'}`, (ev.clientX - box.getBoundingClientRect().left), (ev.clientY - box.getBoundingClientRect().top));
+    document.querySelectorAll('#qtable tr[data-q]').forEach(tr => tr.classList.toggle('sel', q && tr.dataset.q === q.id));
+  };
+  hit.addEventListener('pointermove', move);
+  hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); hideTip(box);
+    document.querySelectorAll('#qtable tr.sel').forEach(tr => tr.classList.remove('sel')); });
+}
+
+/* ---------- per-question table ---------- */
+function qtable() {
+  const tb = document.querySelector('#qtable tbody'); tb.innerHTML = '';
+  for (const q of D.replay.questions) {
+    const s = q.stats, lv = level(s.stress_peak), tr = document.createElement('tr'); tr.dataset.q = q.id;
+    tr.innerHTML = `<td>${qLabel(q)}</td><td>${q.kind.replace('_', '-')}</td><td class="q">${q.text}</td>` +
+      `<td class="n">${s.duration_s.toFixed(0)} s</td><td class="n">${s.hr_mean ?? '–'}</td>` +
+      `<td class="n">${s.hr_delta_pct == null ? '–' : (s.hr_delta_pct > 0 ? '+' : '') + s.hr_delta_pct.toFixed(1) + '%'}</td>` +
+      `<td class="n">${s.stress_mean ?? '–'}</td><td class="n">${s.stress_peak ?? '–'}</td>` +
+      `<td>${lv ? `<span class="chip ${lv}">${lv}</span>` : '–'}</td>` +
+      `<td class="n">${s.peak_offset_s == null ? '–' : s.peak_offset_s.toFixed(0) + ' s'}</td>`;
+    tb.appendChild(tr);
+  }
+}
+
+/* ---------- latency dot plot ---------- */
+function latency() {
+  const box = document.getElementById('latency'); box.querySelector('svg')?.remove();
+  const floor = D.latency.find(r => r.query.startsWith('network floor'));
+  const rows = D.latency.filter(r => r !== floor);
+  const W = Math.max(320, box.clientWidth), L = Math.min(230, W * 0.46), Rm = 16, rh = 22, top = 30, H = top + rows.length * rh + 30;
+  const xMax = Math.ceil(Math.max(...rows.map(r => r.p95)) / 20) * 20;
+  const x = v => L + (W - L - Rm) * v / xMax;
+  const svg = el('svg', {viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Round-trip latency per query'}, box);
+  el('rect', {x: x(0), y: top - 6, width: x(floor.p50) - x(0), height: rows.length * rh + 6, fill: css('--wash')}, svg);
+  txt(svg, (x(0) + x(floor.p50)) / 2, top - 12, `network alone ${Math.round(floor.p50)} ms`, {'text-anchor': 'middle', 'font-size': 10});
+  for (let v = 0; v <= xMax; v += 20) {
+    el('line', {x1: x(v), x2: x(v), y1: top - 6, y2: top + rows.length * rh, stroke: css('--grid')}, svg);
+    txt(svg, x(v), H - 10, v === xMax ? `${v} ms` : v, {'text-anchor': 'middle'});
+  }
+  el('line', {x1: x(50), x2: x(50), y1: top - 6, y2: top + rows.length * rh, stroke: css('--ink-2'), 'stroke-width': 1}, svg);
+  txt(svg, x(50) + 4, top - 12, 'target 50', {'font-size': 10, fill: css('--ink')});
+  rows.forEach((r, i) => {
+    const y = top + i * rh + rh / 2;
+    txt(svg, L - 8, y + 4, r.query.replace(/ \(.*\)/, ''), {'text-anchor': 'end', 'font-size': 10.5});
+    el('line', {x1: x(r.p50), x2: x(r.p95), y1: y, y2: y, stroke: css('--axis'), 'stroke-width': 2}, svg);
+    el('circle', {cx: x(r.p95), cy: y, r: 4.5, fill: css('--peak'), stroke: css('--panel'), 'stroke-width': 2}, svg);
+    el('circle', {cx: x(r.p50), cy: y, r: 4.5, fill: css('--mean'), stroke: css('--panel'), 'stroke-width': 2}, svg);
+    const hit = el('rect', {x: 0, y: y - rh / 2, width: W, height: rh, fill: 'transparent'}, svg);
+    hit.addEventListener('pointermove', ev => { const b = box.getBoundingClientRect();
+      tipAt(box, `<b>${r.query}</b><br>${r.caller}<br>round trip p50 ${r.p50} ms &middot; p95 ${r.p95} ms<br>` +
+        `server ${r.server == null ? '1 row by primary key' : r.server.toFixed(2) + ' ms'}`, ev.clientX - b.left, ev.clientY - b.top); });
+    hit.addEventListener('pointerleave', () => hideTip(box));
+  });
+}
+
+/* ---------- horizontal bars (compression, question types) ---------- */
+function bars(id, items, fmt, xMax, label) {
+  const box = document.getElementById(id); box.querySelector('svg')?.remove();
+  const W = Math.max(300, box.clientWidth), L = Math.min(180, W * 0.42), Rm = 110, rh = 30, H = items.length * rh + 10;
+  const x = v => L + (W - L - Rm) * v / xMax;
+  const svg = el('svg', {viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': label}, box);
+  items.forEach((it, i) => {
+    const y = 5 + i * rh, h = Math.min(18, rh - 10), w = Math.max(0, x(it.v) - x(0)), r = Math.min(4, w);
+    txt(svg, L - 8, y + rh / 2 + 4, it.label, {'text-anchor': 'end', 'font-size': 11});
+    el('path', {d: `M${x(0)},${y + (rh - h) / 2}h${w - r}a${r},${r} 0 0 1 ${r},${r}v${h - 2 * r}a${r},${r} 0 0 1 -${r},${r}h-${w - r}z`,
+      fill: it.color}, svg);
+    txt(svg, x(0) + w + 6, y + rh / 2 + 4, fmt(it), {'font-size': 11, fill: css('--ink')});
+    const hit = el('rect', {x: 0, y, width: W, height: rh, fill: 'transparent'}, svg);
+    hit.addEventListener('pointermove', ev => { const b = box.getBoundingClientRect(); tipAt(box, it.tip, ev.clientX - b.left, ev.clientY - b.top); });
+    hit.addEventListener('pointerleave', () => hideTip(box));
+  });
+}
+function compression() {
+  const items = [];
+  for (const c of D.compression) {
+    const short = c.dataset.startsWith('+') ? 'with synthetic' : 'real sessions';
+    // each pair on its own scale: rowstore = full width, columnstore = its share of it
+    items.push({label: `${short}: rowstore`, v: 100, kib: c.row_bytes / 1024, color: css('--bar-muted'),
+      tip: `<b>${c.dataset}</b><br>${c.sessions} sessions, ${c.rows.toLocaleString()} readings<br>rowstore ${(c.row_bytes / 1024).toFixed(0)} KiB (heap + indexes)`});
+    items.push({label: `${short}: columnstore`, v: 100 * c.col_bytes / c.row_bytes, kib: c.col_bytes / 1024, color: css('--mean'), ratio: c.ratio,
+      tip: `<b>${c.dataset}</b><br>columnstore ${(c.col_bytes / 1024).toFixed(0)} KiB, ${c.ratio}x smaller<br>same query results: ${c.identical ? 'yes' : 'NO'}`});
+  }
+  bars('compression', items, it => `${it.kib.toFixed(0)} KiB` + (it.ratio ? ` · ${it.ratio}x smaller` : ''), 100, 'Rowstore vs columnstore size');
+}
+function qtypes() {
+  const names = {calibration: 'Calibration', main: 'Main question', follow_up: 'Follow-up'};
+  const items = D.qtypes.filter(r => r.interview_type == null && r.kind).sort((a, b) => b.peak - a.peak)
+    .map(r => ({label: names[r.kind] || r.kind, v: r.peak, color: css('--mean'),
+      tip: `<b>${names[r.kind] || r.kind}</b><br>${r.questions} answers, ${r.high} went high (&gt; 70)<br>avg stress ${r.mean} · avg peak ${r.peak}`, r}));
+  bars('qtypes', items, it => `${it.v.toFixed(0)} · ${it.r.high}/${it.r.questions} high`, 100, 'Average stress peak per question kind');
+}
+
+function render() { timeline(); latency(); compression(); qtypes(); }
+qtable(); render();
+let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 120); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
+new MutationObserver(render).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+</script>
+</body>
+</html>

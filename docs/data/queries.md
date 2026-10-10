@@ -103,6 +103,13 @@ SELECT bucket, hr, br, focus, stress, stress_peak FROM vitals_5s WHERE session_i
 - **Plan:** real-time continuous aggregate: the materialized part (TimescaleDB's automatic `(session_id, bucket DESC)` index on the materialization hypertable) `UNION ALL` a live `time_bucket` aggregation of raw rows newer than the watermark.
 - The session row, the series and the question stats run **in parallel** (`asyncio.gather` on the pool): three queries, one round trip of wall time.
 
+## Insight: which question type spikes stress most (`get_stress_by_question_type`)
+
+The same time-range join, over every answered question, grouped by question kind and interview type
+(`GROUPING SETS ((kind), (interview_type), (interview_type, kind))`). It counts answers whose peak went over 70.
+**Plan:** one `vitals_session_time` index scan per question (nested loop). **0.5 ms** for 43 answers across 5 sessions.
+Not a Brain contract function; it feeds the demo-slide chart and the dashboard.
+
 ## Latency
 
 Measured on a session with 10 minutes of data, 20 runs each (details and every function: [latency.md](latency.md), chart: [chart4](charts/chart4_query_latency.png)):
