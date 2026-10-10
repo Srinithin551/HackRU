@@ -1,6 +1,6 @@
 """ElevenLabs text-to-speech with a disk cache keyed by voice + text.
 
-`await tts(text)` returns an absolute audio URL, or None if audio isn't available (the frontend still
+`await tts(text)` returns the audio URL, or None if audio isn't available (the frontend still
 shows the text). It never raises, so a TTS outage can't stall the interview.
 """
 
@@ -23,7 +23,6 @@ OUTPUT_FORMAT = "mp3_44100_128"
 _client = None
 _concurrency = threading.BoundedSemaphore(3)   # free-tier ElevenLabs allows few parallel requests
 _inflight: dict[str, asyncio.Task] = {}
-_background: set[asyncio.Task] = set()
 _last_filler: Optional[str] = None
 _warned_unconfigured = False
 
@@ -87,7 +86,7 @@ async def tts(text: str) -> Optional[str]:
         return None
 
     task = _inflight.get(key)
-    if task is None:   # dedupe: prefetch and ask() for the same text share one request
+    if task is None:   # dedupe: concurrent requests for the same text share one ElevenLabs call
         task = asyncio.create_task(asyncio.to_thread(synthesize_to_file, text, path))
         _inflight[key] = task
         task.add_done_callback(lambda _t, k=key: _inflight.pop(k, None))
@@ -101,15 +100,6 @@ async def tts(text: str) -> Optional[str]:
     return None
 
 
-def prefetch(text: str) -> None:
-    """Fire-and-forget: generate audio now so a later tts(text) is instant."""
-    if config.BRAIN_FAKE or not configured() or not text:
-        return
-    t = asyncio.create_task(tts(text))
-    _background.add(t)
-    t.add_done_callback(_background.discard)
-
-
 def next_filler() -> str:
     global _last_filler
     choice = random.choice([f for f in lines.FILLERS if f != _last_filler] or lines.FILLERS)
@@ -120,7 +110,7 @@ def next_filler() -> str:
 def startup_lines() -> list[str]:
     if config.BRAIN_FAKE:
         return fake.all_texts()
-    return [lines.CALIBRATION_LINE, lines.CALIBRATION_EXTRA_LINE, lines.CLOSING_LINE, *lines.FILLERS]
+    return lines.fixed_lines()
 
 
 async def warm_up() -> None:

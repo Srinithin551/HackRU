@@ -33,13 +33,14 @@ export interface Scenario {
   questions: PlannedQuestion[]
 }
 
-export const CALIBRATION_LINE = "Hey, how's HackRU going so far?"
+/** backend/brain/lines.py CALIBRATION_LINE. */
+export const CALIBRATION_LINE = 'Thanks for joining me today. To start, tell me a little about yourself.'
 export const CLOSING_LINE = "That's everything I had. Thanks for walking me through all of that, your report is coming up now."
 export const FILLERS = ['Okay.', 'Got it.', 'Mm, alright.', "Take your time, let's keep going."] as const
 
 const CALIBRATION_ANSWER =
-  "It's going pretty well. We got here Saturday morning, found a table near the power outlets, and we've been " +
-  'building since lunch. The coffee is holding up and the team is getting along, so honestly I am feeling okay about it.'
+  "Sure. I'm a computer science student, and most of what I build is backend work, APIs and data pipelines. " +
+  "Lately I've been working on a project that streams sensor data to a live dashboard, which has been a lot of fun."
 
 type Draft = Omit<PlannedQuestion, 'followUp' | 'followUpAnswer' | 'followUpAnswerMs' | 'overlayOffsetMs'> &
   Partial<Pick<PlannedQuestion, 'followUp' | 'followUpAnswer' | 'followUpAnswerMs' | 'overlayOffsetMs'>>

@@ -5,6 +5,7 @@ makes the interviewer visibly ease off. Every line spoken in fake mode has a pre
 backend/static/fake_audio/ (regenerate with scripts/make_fake_audio.py).
 """
 
+import re
 from typing import Optional
 
 from backend.brain import lines
@@ -24,6 +25,7 @@ FAKE_QUESTIONS = [
 ]
 
 FAKE_LINES = {
+    "redirect": "Hmm, I think we drifted away from the question there. Let's come back to it. Take another shot at what I asked.",
     "ease_off": "That's okay, let me put it more simply. Just walk me through the very first step you'd take.",
     "push": "Okay. Let's go one level deeper. What would break first if the load grew ten times?",
     "follow_up": "Can you give me one specific example of that?",
@@ -35,14 +37,38 @@ def plan(spec: InterviewSpec) -> list[PlannedQuestion]:
     return [q.model_copy() for q in FAKE_QUESTIONS[:n]]
 
 
-def decide(transcript: str, stats: Optional[QuestionStats]) -> Decision:
-    """Same thresholds as the Gemini system prompt, with word count standing in for answer quality."""
+# Words too common to tell whether an answer is about the question.
+_STOPWORDS = {
+    "about", "would", "could", "should", "there", "their", "which", "these", "those", "where", "while",
+    "think", "really", "going", "thing", "things", "something", "because", "maybe", "other", "first",
+    "through", "after", "before", "being", "doing", "still", "might", "every", "never", "always",
+}
+
+
+def _content_stems(text: str) -> set[str]:
+    return {w[:5] for w in re.findall(r"[a-z]+", text.lower()) if len(w) >= 5 and w not in _STOPWORDS}
+
+
+def off_topic(question: str, transcript: str) -> bool:
+    """Crude offline stand-in for Gemini's judgment: a real answer (8+ words) that shares no content
+    words with the question. Only used in fake mode."""
+    if len(transcript.split()) < 8:
+        return False
+    q = _content_stems(question)
+    return bool(q) and not (q & _content_stems(transcript))
+
+
+def decide(transcript: str, stats: Optional[QuestionStats], question: str = "", kind: str = "main") -> Decision:
+    """Same thresholds as the Gemini system prompt, with word count standing in for answer quality.
+    Only main questions are checked for off-topic answers (fake follow-up lines are too generic)."""
     words = len((transcript or "").split())
     quality = 1 if words < 5 else 2 if words < 15 else 3 if words < 40 else 4
     peak = stats.stress_peak if stats else None
     mean = stats.stress_mean if stats else None
 
-    if peak is not None and peak > 70:
+    if kind == "main" and off_topic(question, transcript or ""):
+        action, quality = "redirect", 1
+    elif peak is not None and peak > 70:
         action = "ease_off"
     elif mean is not None and mean < 40 and words >= 25:
         action = "push"
@@ -60,7 +86,7 @@ def decide(transcript: str, stats: Optional[QuestionStats]) -> Decision:
 
 def all_texts() -> list[str]:
     """Every line fake mode can speak. scripts/make_fake_audio.py renders exactly these."""
-    texts = [lines.CALIBRATION_LINE, lines.CALIBRATION_EXTRA_LINE, lines.CLOSING_LINE, *lines.FILLERS]
+    texts = lines.fixed_lines()
     texts += [q.text for q in FAKE_QUESTIONS]
     texts += list(FAKE_LINES.values())
     return list(dict.fromkeys(texts))

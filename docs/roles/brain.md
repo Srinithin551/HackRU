@@ -234,7 +234,7 @@ pip install -r backend/requirements.txt
 cp .env.example .env                                  # fill in keys; BRAIN_FAKE=1 needs none
 BRAIN_FAKE=1 uvicorn backend.main:app --reload        # from the repo root
 python scripts/fake_frontend.py                       # terminal stand-in for the browser
-pytest                                                # 51 tests, < 1 second
+pytest                                                # 65 tests, < 1 second
 ```
 
 `GET /health` reports fake mode, whether Gemini/ElevenLabs keys are set, and which routers are mounted.
@@ -251,7 +251,7 @@ pytest                                                # 51 tests, < 1 second
 | `backend/brain/interviewer.py` | The loop: calibration, questions, filler, decide, resolve, wrap-up, crash recovery |
 | `backend/brain/watcher.py` | Coach flags every 3s while listening |
 | `backend/brain/gemini.py`, `prompts.py` | The three Gemini calls, each with a timeout and a fallback, logged to `backend/logs/` |
-| `backend/brain/voice.py` | ElevenLabs TTS, sha1 disk cache, request dedupe, prefetch, filler rotation |
+| `backend/brain/voice.py` | ElevenLabs TTS, sha1 disk cache, request dedupe, filler rotation |
 | `backend/brain/report.py` | Validates Gemini's report, and builds a numbers-only report when Gemini is unavailable |
 | `backend/brain/fake.py` | `BRAIN_FAKE=1` questions, rule-based decisions, list of every fake-mode line |
 | `backend/brain/specs.py`, `lines.py` | Interview types (counts, difficulty curves, limits, fallback questions) and fixed spoken lines |
@@ -266,15 +266,17 @@ pytest                                                # 51 tests, < 1 second
 - **`question.index` / `total`** = the planned question number and the planned count ("Q 2 of 5"). Calibration is `index: 0`. A follow-up keeps its parent's number, so check `kind`. The replay chart's Q1, Q2... come from Data's sequential `idx`, which counts follow-ups too.
 - **State sequence:**
   - `calibrating` covers the whole calibration (one or two small-talk prompts, no `asking`/`listening` during it);
+  - after the last small-talk answer: `filler` → `thinking` while Gemini writes the bridge into the first question;
   - each question then goes `asking` → `listening` → (answer) → `filler` → `thinking`;
-  - at the end: `thinking` (closing line plays as a `filler` while the report is written) → `done` → `session_ended`.
+  - at the end: `thinking` (one `filler` clip with a reaction to the last answer plus the closing line, played while the report is written) → `done` → `session_ended`.
+- **Question `text` is the whole spoken turn**, e.g. "That reconciliation work sounds tricky. Let's switch gears: how would you…". Show it as-is.
 - **Reconnects:** on connect the hub replays the latest `state`, `question` and `session_ended`. A reload mid-session lands on the right screen.
 - **`POST /start`** is idempotent and returns `status`: `started`, `already_running` or `finished`.
 - **`end_session`** works at any time. There's no closing line in that case.
 - **Timeouts:** an unanswered question times out after 120s, counted from `answer_started`. If no tab is connected at that point, the session ends.
 - **`GET /report`** returns `404 {"detail": "report not ready"}` until it's saved. It's always saved before `session_ended` is sent. On top of the shape above, it has these additive fields:
   - `coach_flags: [{ts, question_id, level, stress, message}]`, for red dots on the replay chart;
-  - `adaptations: [{question_id, action, answer_quality, rationale}]` (the decision made after that question's answer);
+  - `adaptations: [{question_id, action, answer_quality, rationale}]` (the decision made after that question's answer; `action` can be `redirect`, `follow_up`, `ease_off`, `push`, `next`, `wrap_up`);
   - `generated_by: "gemini" | "fallback" | "fake"`.
 
 ### For Data
@@ -286,6 +288,7 @@ pytest                                                # 51 tests, < 1 second
 - **DB pool hook:** if `backend/data/db.py` defines `async def startup()` / `async def shutdown()`, `main.py` calls them in the app lifespan.
 - **Routes:** `backend/data/routes.py` must expose `router = APIRouter()`. `main.py` mounts it automatically when the file exists. The same goes for `backend/sensing/routes.py`.
 - **Calibration timing:** Brain keeps calibration going until at least 35s after `/start` (it asks a second small-talk prompt if the first answer was short), then calls `compute_baseline`. Calibration rows are `kind="calibration"`, `idx=0`, and there can be two of them.
+- **Question text** stored via `insert_question` is the full spoken turn (reaction + question), not just the planned question.
 - **`mock_vitals.py --auto`** can poll `GET /api/sessions/{id}/status` for `phase` and `question.{index,kind}` to know when an answer is in progress.
 
 ### For Sensing
@@ -311,9 +314,16 @@ pytest                                                # 51 tests, < 1 second
 - **Filler line:** "Take your time, let's keep going." became "Alright, let's keep going.", since it plays after the answer ends.
 - **Fake-mode decisions are rule-based**, not a fixed `next`. They follow the same thresholds as the Gemini prompt, so pressing `s` in `mock_vitals.py` makes the fake interviewer ease off.
 - **Fake clips are placeholder macOS voices.** Once the ElevenLabs voice is picked, run `python scripts/make_fake_audio.py --force` and commit the result.
-- **Brain enforces Gemini's rules in code** (`resolve_action`): at most one follow-up per planned question, no `wrap_up` while questions remain, and an empty `spoken_text` becomes `next`. Budget checks skip the Gemini call entirely.
+- **Brain enforces Gemini's rules in code** (`resolve_action`): at most one follow-up and one redirect per planned question, no `wrap_up` while questions remain, and an empty or runaway (70+ word) `spoken_text` becomes `next`. If the rules change Gemini's action, the planned question is asked as written. Budget checks skip the Gemini call entirely.
 - **Crash safety:** if the loop throws, the session still ends with a numbers-only report and `session_ended`.
-- **Prefetching** the next question's audio is done. **ElevenLabs speech-to-text is not** (it needs Frontend's agreement first).
+- **A conversation, not a list.** Gemini writes every turn after the small talk:
+  - **`open_interview`** (fast model, 5s budget) bridges from the small-talk answers into the first planned question.
+  - **`decide_next`** returns the whole next turn: a short reaction to the answer, then the next question (the planned one, reworded to flow) or a follow-up.
+  - The planned questions remain the backbone, so the difficulty curve holds. Any failure falls back to the planned text.
+  - Prefetching was removed, since the next question's wording isn't known in advance. Measured live: 1.2–1.7s from `answer_done` to the next `question`, voice included.
+- **`redirect` action** for answers that don't address the question (off-topic, random, garbled speech-to-text, inappropriate). It acknowledges the answer and steers back, once per planned question. Inappropriate or dismissive answers always get a short professional callout, even when the interviewer moves on. Fake mode approximates this with a word-overlap check on main questions.
+- **Warm-up lines** are generic interview openers ("Thanks for joining me today. To start, tell me a little about yourself."), with a per-type second line. Fake-mode clips were re-rendered in the ElevenLabs voice.
+- **ElevenLabs speech-to-text is not done** (it needs Frontend's agreement first).
 
 ---
 

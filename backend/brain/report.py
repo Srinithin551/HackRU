@@ -75,26 +75,38 @@ def _advice(st: Optional[QuestionStats], transcript: str) -> str:
     return "Push for more specifics: numbers, names, and outcomes make answers memorable."
 
 
-def _what_happened(it: HistoryItem) -> str:
+OFF_TOPIC_ADVICE = "Answer the question that was asked: restate it in a few words first, then give your answer."
+
+
+def _what_happened(it: HistoryItem, off_topic: bool = False) -> str:
     words = len(it.transcript.split())
     if words == 0:
         return "No answer was captured for this question."
+    if off_topic:
+        return "Your answer didn't address the question, so the interviewer steered you back to it."
     secs = round(it.stats.duration_s) if it.stats and it.stats.duration_s else 0
     dur = f" in about {secs} second{'s' if secs != 1 else ''}" if secs else ""
     return f"You answered with about {words} words{dur}."
 
 
-def fallback_feedback(it: HistoryItem) -> QuestionFeedback:
+def fallback_feedback(it: HistoryItem, off_topic: bool = False) -> QuestionFeedback:
     return QuestionFeedback(
         question_id=it.question_id,
-        what_happened=_what_happened(it),
+        what_happened=_what_happened(it, off_topic),
         body_signal=body_signal_text(it.stats),
-        advice=_advice(it.stats, it.transcript),
+        advice=OFF_TOPIC_ADVICE if off_topic else _advice(it.stats, it.transcript),
     )
 
 
-def fallback_tips(items: list[HistoryItem]) -> list[str]:
+def redirected_ids(s: SessionState) -> set[str]:
+    """Questions whose answer the interviewer judged off-topic."""
+    return {a["question_id"] for a in s.adaptations if a["action"] == "redirect"}
+
+
+def fallback_tips(items: list[HistoryItem], off_topic_ids: frozenset = frozenset()) -> list[str]:
     tips = []
+    if any(it.question_id in off_topic_ids for it in items):
+        tips.append(OFF_TOPIC_ADVICE)
     h = hardest(items)
     if h is not None and (h.stats.stress_peak or 0) > 70:
         tips.append(f"Your biggest spike came on {h.label}. Practice that question type out loud until it feels routine.")
@@ -110,6 +122,7 @@ def fallback_tips(items: list[HistoryItem]) -> list[str]:
 
 def fallback_report(s: SessionState, items: list[HistoryItem], generated_by: str = "fallback") -> Report:
     answered = _answered(items)
+    off_topic = redirected_ids(s)
     score = composure_from_stats(items)
     if score is None:
         summary = (f"You answered {len(answered)} question(s). The camera didn't capture enough usable vitals "
@@ -125,8 +138,8 @@ def fallback_report(s: SessionState, items: list[HistoryItem], generated_by: str
         composure_score=score,
         summary=summary,
         hardest_moment=hardest_moment_text(items),
-        per_question=[fallback_feedback(it) for it in answered],
-        top_tips=fallback_tips(items),
+        per_question=[fallback_feedback(it, it.question_id in off_topic) for it in answered],
+        top_tips=fallback_tips(items, frozenset(off_topic)),
         coach_flags=s.flags,
         adaptations=s.adaptations,
         generated_by=generated_by,
@@ -136,18 +149,19 @@ def fallback_report(s: SessionState, items: list[HistoryItem], generated_by: str
 def finalize_draft(s: SessionState, items: list[HistoryItem], draft: ReportDraft) -> Report:
     """Make Gemini's draft safe to serve: valid ids, every question covered, numbers present, 3 tips."""
     answered = _answered(items)
+    off_topic = redirected_ids(s)
     by_id = {fb.question_id: fb for fb in draft.per_question}
     per_question = []
     for it in answered:
         fb = by_id.get(it.question_id)
         if fb is None:
-            fb = fallback_feedback(it)
+            fb = fallback_feedback(it, it.question_id in off_topic)
         elif not _DIGIT.search(fb.body_signal):
             fb = fb.model_copy(update={"body_signal": body_signal_text(it.stats)})
         per_question.append(fb)
 
     tips = [t.strip() for t in draft.top_tips if t and t.strip()][:3]
-    for extra in fallback_tips(items):
+    for extra in fallback_tips(items, frozenset(off_topic)):
         if len(tips) >= 3:
             break
         if extra not in tips:

@@ -4,7 +4,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel
 
-Action = Literal["follow_up", "ease_off", "push", "next", "wrap_up"]
+Action = Literal["redirect", "follow_up", "ease_off", "push", "next", "wrap_up"]
 
 
 # ---------------------------------------------------------------- Gemini call 1: plan_interview
@@ -23,9 +23,13 @@ class InterviewPlan(BaseModel):   # response_schema wrapper (Gemini wants an obj
 
 class Decision(BaseModel):
     action: Action
-    spoken_text: str     # what the interviewer says next (empty if action == "next")
+    spoken_text: str     # the interviewer's whole next turn: a reaction to the answer, then the question
     answer_quality: int  # 1 to 5, Gemini's read of the transcript
     rationale: str       # for logs and the report, never spoken
+
+
+class OpeningLine(BaseModel):    # open_interview: the turn from small talk into the first real question
+    spoken_text: str
 
 
 # ---------------------------------------------------------------- Gemini call 3: final_report

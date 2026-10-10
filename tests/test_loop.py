@@ -7,13 +7,21 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend import config
-from backend.brain import fake
+from backend.brain import fake, gemini, lines, voice
+from backend.brain.models import Decision
+from backend.brain.state import states
 from backend.brain.specs import FALLBACK_BANK
 from backend.contracts import VitalsReading
 from backend.data import queries as data
 from backend.main import app
 
-MEDIUM = " ".join(["word"] * 20)   # fake rules: 20 words, no vitals → "next"
+OFF_TOPIC = "I really like pizza and playing basketball with my friends on the weekends."
+
+
+def on_topic(q) -> str:
+    """An answer that shares words with the question, so fake mode doesn't call it off-topic.
+    Fake rules: 8 to 24 words and no vitals → "next"."""
+    return f"So for that, {q['data']['text']} I handled this once."
 
 
 @pytest.fixture
@@ -37,7 +45,9 @@ def recv_until(ws, type_, log):
             return ev
 
 
-def answer(ws, q, transcript=MEDIUM):
+def answer(ws, q, transcript=None):
+    if transcript is None:
+        transcript = on_topic(q)
     qid = q["data"]["question_id"]
     ws.send_json({"type": "answer_started", "data": {"question_id": qid}})
     ws.send_json({"type": "answer_done", "data": {"question_id": qid, "transcript": transcript}})
@@ -83,7 +93,8 @@ def test_full_fake_session(client):
         assert audio.startswith("/audio/")                    # relative: the frontend proxies /audio
         assert client.get(audio).headers["content-type"] == "audio/mpeg"
 
-        answer(ws, cal, "It's going great, thanks for asking, we built a lot this weekend.")
+        assert cal["data"]["text"] == "Thanks for joining me today. To start, tell me a little about yourself."
+        answer(ws, cal, "I'm a backend engineer, I like building fast APIs and I'm at a hackathon this weekend.")
         questions = run_to_end(ws, log)
 
     assert [q["data"]["kind"] for q in questions] == ["main"] * 3
@@ -117,7 +128,7 @@ def test_stress_spike_triggers_coach_flag_and_ease_off(client):
         assert rows and rows[0]["stress"] > 90
         flag = recv_until(ws, "coach_flag", log)
         assert flag["data"]["level"] == "high" and "Heart rate up" in flag["data"]["message"]
-        ws.send_json({"type": "answer_done", "data": {"question_id": q1["data"]["question_id"], "transcript": MEDIUM}})
+        ws.send_json({"type": "answer_done", "data": {"question_id": q1["data"]["question_id"], "transcript": on_topic(q1)}})
 
         follow = recv_until(ws, "question", log)
         assert follow["data"]["kind"] == "follow_up"
@@ -205,3 +216,74 @@ def test_health_and_audio_route(client):
     assert h["ok"] and h["fake"] is True and "brain" in h["routers"]
     assert client.get("/audio/../../main.py").status_code == 404
     assert client.get("/audio/doesnotexist.mp3").status_code == 404
+
+
+def test_off_topic_answer_is_redirected_once(client):
+    sid = create(client)
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        answer(ws, recv_until(ws, "question", log))                    # calibration
+        q1 = recv_until(ws, "question", log)
+        answer(ws, q1, OFF_TOPIC)
+
+        redirect = recv_until(ws, "question", log)
+        assert redirect["data"]["kind"] == "follow_up" and redirect["data"]["index"] == 1
+        assert redirect["data"]["text"] == fake.FAKE_LINES["redirect"] and redirect["data"]["audio_url"]
+        answer(ws, redirect, OFF_TOPIC)                                # off-topic again: moves on
+        questions = run_to_end(ws, log)
+
+    assert questions[0]["data"]["kind"] == "main" and questions[0]["data"]["index"] == 2
+    report = client.get(f"/api/sessions/{sid}/report").json()
+    assert report["adaptations"][0]["action"] == "redirect"
+    q1_feedback = next(p for p in report["per_question"] if p["question_id"] == q1["data"]["question_id"])
+    assert "didn't address the question" in q1_feedback["what_happened"]
+
+
+def test_turns_after_small_talk_are_written_by_gemini(client, monkeypatch):
+    """Real mode with Gemini stubbed: the opening bridge, Gemini-worded next questions, the redirect cap,
+    and parting words before the closing line."""
+    monkeypatch.setattr(config, "BRAIN_FAKE", False)
+    spoken = []
+
+    async def fake_tts(text):
+        spoken.append(text)
+        return f"/audio/{len(spoken)}.mp3"
+
+    async def opening(s, first):
+        assert [e["kind"] for e in s.exchanges] == ["calibration"]    # bridge sees the small talk
+        return "Love that you build APIs. Speaking of which, what project are you proudest of?"
+
+    script = [
+        Decision(action="redirect", spoken_text="Ha, fair. But back to it: which project are you proudest of?",
+                 answer_quality=1, rationale="off-topic"),
+        Decision(action="redirect", spoken_text="Still off topic. Once more?", answer_quality=1, rationale="again"),
+        Decision(action="next", spoken_text="Makes sense. Bigger picture now: how would you design a chat app for a million users?",
+                 answer_quality=3, rationale="fine"),
+        Decision(action="wrap_up", spoken_text="Thanks, that was a thoughtful answer.", answer_quality=4, rationale="done"),
+    ]
+
+    async def decide(s, kind, question, transcript, stats, window):
+        return script.pop(0)
+
+    monkeypatch.setattr(voice, "tts", fake_tts)
+    monkeypatch.setattr(gemini, "open_interview", opening)
+    monkeypatch.setattr(gemini, "decide_next", decide)
+
+    sid = create(client)
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        answer(ws, recv_until(ws, "question", log), "I build backend APIs and I love hiking.")
+        questions = run_to_end(ws, log)
+
+    texts = [q["data"]["text"] for q in questions]
+    assert texts == [
+        "Love that you build APIs. Speaking of which, what project are you proudest of?",   # bridge
+        "Ha, fair. But back to it: which project are you proudest of?",                     # redirect
+        FALLBACK_BANK["demo"][1][0],         # second redirect capped → planned text, unworded
+        "Makes sense. Bigger picture now: how would you design a chat app for a million users?",
+    ]
+    assert [q["data"]["index"] for q in questions] == [1, 1, 2, 3]
+    assert spoken[-1] == f"Thanks, that was a thoughtful answer. {lines.CLOSING_LINE}"   # one closing clip
+    assert [a["action"] for a in states[sid].adaptations] == ["redirect", "next", "next", "wrap_up"]

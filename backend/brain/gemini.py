@@ -1,4 +1,4 @@
-"""The three Gemini calls. Each one has a timeout and a fallback, so none of them can stall a live session.
+"""The Gemini calls. Each one has a timeout and a fallback, so none of them can stall a live session.
 
 Every prompt and response is appended to backend/logs/gemini-YYYYMMDD.jsonl for 3 AM debugging.
 """
@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from backend import config
 from backend.brain import fake, prompts
 from backend.brain.history import HistoryItem
-from backend.brain.models import Decision, InterviewPlan, PlannedQuestion, Report, ReportDraft
+from backend.brain.models import Decision, InterviewPlan, OpeningLine, PlannedQuestion, Report, ReportDraft
 from backend.brain.report import fallback_report, finalize_draft
 from backend.brain.specs import InterviewSpec, fallback_questions
 from backend.brain.state import SessionState
@@ -25,6 +25,7 @@ log = logging.getLogger("brain.gemini")
 
 PLAN_TIMEOUT_S = 20.0     # runs during the ~40s calibration, so it has room
 DECIDE_TIMEOUT_S = 6.0    # brain.md: fall back to "next" past 6s
+OPEN_TIMEOUT_S = 5.0      # the small-talk → first-question bridge; falls back to the planned text
 REPORT_TIMEOUT_S = 45.0
 MIN_ATTEMPT_S = 1.0       # don't start another model attempt with less time than this left
 
@@ -182,7 +183,7 @@ async def decide_next(s: SessionState, kind: str, question: str, transcript: str
                       stats: Optional[QuestionStats], window: Optional[WindowStats]) -> Decision:
     """Never raises. Falls back to `next` (with the queued question) on timeout or error."""
     if config.BRAIN_FAKE:
-        return fake.decide(transcript, stats)
+        return fake.decide(transcript, stats, question=question, kind=kind)
     context = prompts.decide_context(s, kind, question, transcript, stats, window)
     try:
         d = await generate("decide_next", prompts.DECIDE_SYSTEM, context, Decision,
@@ -194,6 +195,20 @@ async def decide_next(s: SessionState, kind: str, question: str, transcript: str
     except Exception as e:
         log.warning("decide_next fell back to 'next': %s", _short(e))
         return Decision(action="next", spoken_text="", answer_quality=3, rationale=f"fallback: {type(e).__name__}")
+
+
+async def open_interview(s: SessionState, first: PlannedQuestion) -> Optional[str]:
+    """The turn that carries the small talk into the first real question. None means "just ask the
+    planned question as written" (fake mode, no key, or Gemini failed). Never raises."""
+    if config.BRAIN_FAKE or not configured():
+        return None
+    try:
+        line = await generate("open_interview", prompts.OPEN_SYSTEM, prompts.open_context(s, first), OpeningLine,
+                              temperature=0.6, timeout=OPEN_TIMEOUT_S, models=fast_models())
+        return _clean_spoken(line.spoken_text) or None
+    except Exception as e:
+        log.warning("open_interview fell back to the planned question: %s", _short(e))
+        return None
 
 
 # ---------------------------------------------------------------- call 3

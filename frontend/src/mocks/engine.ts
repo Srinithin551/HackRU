@@ -68,8 +68,8 @@ export const DEFAULT_TIMING: EngineTiming = {
   calibrationMinMs: 35_000,
 }
 
-/** backend/brain/lines.py CALIBRATION_EXTRA_LINE. */
-const CALIBRATION_EXTRA_LINE = 'Nice. And what have you been working on this weekend?'
+/** backend/brain/lines.py CALIBRATION_EXTRA_LINES (the non-presentation variant). */
+const CALIBRATION_EXTRA_LINE = 'What got you interested in this kind of work?'
 
 /** Brain's thresholds (PLAN.md §3). */
 export const HIGH_STRESS = 70

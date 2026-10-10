@@ -2,9 +2,9 @@
 
 import pytest
 
-from backend.brain import fake, prompts
+from backend.brain import fake, lines, prompts
 from backend.brain.history import normalize_history, stats_line
-from backend.brain.interviewer import resolve_action
+from backend.brain.interviewer import resolve_action, spoken
 from backend.brain.models import QuestionFeedback, ReportDraft
 from backend.brain.report import fallback_report, finalize_draft
 from backend.brain.specs import fallback_questions, get_spec, normalize_type
@@ -35,19 +35,30 @@ def state(type_="Software Engineering") -> SessionState:
 
 # ---------------------------------------------------------------- resolve_action
 
-@pytest.mark.parametrize("action,text,used,queue,expected", [
-    ("next", "", 0, 2, "next"),
-    ("next", "", 0, 0, "wrap_up"),                  # nothing left to ask
-    ("ease_off", "Let me rephrase.", 0, 2, "ease_off"),
-    ("ease_off", "Let me rephrase.", 1, 2, "next"),  # max one follow-up per planned question
-    ("push", "", 0, 2, "next"),                      # nothing to say → move on
-    ("follow_up", "Example?", 1, 0, "wrap_up"),
-    ("wrap_up", "", 0, 3, "next"),                   # can't wrap up with questions left
-    ("wrap_up", "", 0, 0, "wrap_up"),
-    ("push", "Harder one.", 0, 0, "push"),           # follow-up allowed on the last question
+@pytest.mark.parametrize("action,text,followups,redirects,queue,expected", [
+    ("next", "", 0, 0, 2, "next"),
+    ("next", "", 0, 0, 0, "wrap_up"),                    # nothing left to ask
+    ("ease_off", "Let me rephrase.", 0, 0, 2, "ease_off"),
+    ("ease_off", "Let me rephrase.", 1, 0, 2, "next"),   # max one follow-up per planned question
+    ("push", "", 0, 0, 2, "next"),                       # nothing to say → move on
+    ("follow_up", "Example?", 1, 0, 0, "wrap_up"),
+    ("wrap_up", "", 0, 0, 3, "next"),                    # can't wrap up with questions left
+    ("wrap_up", "", 0, 0, 0, "wrap_up"),
+    ("push", "Harder one.", 0, 0, 0, "push"),            # follow-up allowed on the last question
+    ("redirect", "Back to the question?", 0, 0, 2, "redirect"),
+    ("redirect", "Back to the question?", 1, 0, 2, "redirect"),   # separate allowance from follow-ups
+    ("redirect", "Back to the question?", 0, 1, 2, "next"),       # max one redirect per planned question
+    ("redirect", "Back to the question?", 0, 1, 0, "wrap_up"),
+    ("redirect", "", 0, 0, 2, "next"),
+    ("follow_up", " ".join(["word"] * 80), 0, 0, 2, "next"),     # far too long to be a real turn
 ])
-def test_resolve_action(action, text, used, queue, expected):
-    assert resolve_action(action, text, used, queue) == expected
+def test_resolve_action(action, text, followups, redirects, queue, expected):
+    assert resolve_action(action, text, followups, redirects, queue) == expected
+
+
+def test_spoken_rejects_empty_and_runaway_turns():
+    assert spoken("  Fine.  Next one? ") == "Fine. Next one?"
+    assert spoken("") == "" and spoken(" ".join(["w"] * 71)) == ""
 
 
 # ---------------------------------------------------------------- fake decisions
@@ -68,10 +79,21 @@ def test_fake_decide_follow_up_on_short_answer_and_next_otherwise():
     assert fake.decide(" ".join(["w"] * 20), None).action == "next"
 
 
+def test_fake_decide_redirects_off_topic_main_answers():
+    q = "Walk me through how you'd debug an API that suddenly got ten times slower."
+    d = fake.decide("I really like pizza and playing basketball with my friends on weekends.", None, q, "main")
+    assert d.action == "redirect" and d.spoken_text == fake.FAKE_LINES["redirect"]
+    assert fake.decide("I would debug the slower endpoints first by checking the traces.", None, q, "main").action == "next"
+    assert not fake.off_topic(q, "pizza")                                  # too short to judge
+    assert fake.decide("I really like pizza and basketball with friends on weekends.", None, q,
+                       "follow_up").action == "next"                       # follow-ups aren't checked
+
+
 def test_fake_texts_cover_everything_spoken():
     texts = fake.all_texts()
     assert all(q.text in texts for q in fake.FAKE_QUESTIONS)
     assert all(t in texts for t in fake.FAKE_LINES.values())
+    assert all(t in texts for t in lines.fixed_lines())
     assert len(texts) == len(set(texts))
 
 
@@ -119,12 +141,38 @@ def test_decide_context_has_every_section():
     s = state()
     s.current_planned = fallback_questions(s.spec)[1]
     s.turns, s.actions = 2, ["next", "push"]
+    s.queue = fallback_questions(s.spec)[2:3]
+    s.redirects_on_current = 1
+    s.exchanges = [
+        {"kind": "calibration", "text": "Tell me about yourself.", "transcript": "I like distributed systems."},
+        {"kind": "main", "text": "Q1?", "transcript": "An answer about caching."},
+        {"kind": "main", "text": "Why?", "transcript": "x" * 900},          # the answer being judged
+    ]
     ctx = prompts.decide_context(s, "main", "Why?", "x" * 900, qstats(), window())
     for needle in ("ROLE: Backend Engineer", "TURN: 2/7", "BASELINE: HR 72 bpm", "difficulty 3",
                    "HR mean 84 (+17% vs baseline)", "peak 78 at 12s in", "RIGHT NOW (last 10s): stress 55",
-                   "expression frown", "REMAINING PLANNED QUESTIONS: 0", "PREVIOUS DECISIONS: next, push"):
+                   "expression frown", "PREVIOUS DECISIONS: next, push", "REDIRECTS USED ON THIS QUESTION: 1/1",
+                   'CANDIDATE: "I like distributed systems."', 'CANDIDATE: "An answer about caching."',
+                   "REMAINING PLANNED QUESTIONS (including the next one): 1",
+                   f'NEXT PLANNED QUESTION: "{s.queue[0].text}"'):
         assert needle in ctx, needle
     assert "x" * 601 not in ctx   # transcript truncated
+    assert 'INTERVIEWER: "Why?"' not in ctx   # the judged answer isn't repeated in the history block
+
+
+def test_open_context_includes_small_talk_and_first_question():
+    s = state("Class Presentation")
+    s.exchanges = [{"kind": "calibration", "text": "Tell me about yourself.", "transcript": "I study ecology."}]
+    first = fallback_questions(s.spec)[0]
+    ctx = prompts.open_context(s, first)
+    assert "PRESENTATION TOPIC: Backend Engineer" in ctx and 'CANDIDATE: "I study ecology."' in ctx
+    assert f'FIRST QUESTION: "{first.text}"' in ctx
+
+
+def test_next_planned_line_when_queue_empty():
+    s = state()
+    s.current_planned = fallback_questions(s.spec)[4]
+    assert "NEXT PLANNED QUESTION: none" in prompts.decide_context(s, "main", "Q", "A", None, None)
 
 
 def test_stats_line_handles_missing_vitals():
@@ -199,3 +247,12 @@ def test_finalize_draft_without_vitals_does_not_claim_calm():
                         per_question=[QuestionFeedback(question_id="q1", what_happened="w",
                                                        body_signal="No usable vitals.", advice="a")])
     assert finalize_draft(state(), items, draft).composure_score == 50
+
+
+def test_fallback_report_flags_off_topic_answers():
+    s = state()
+    s.adaptations = [{"question_id": "q1", "action": "redirect", "answer_quality": 1, "rationale": "off-topic"}]
+    r = fallback_report(s, normalize_history(history()))
+    q1 = next(f for f in r.per_question if f.question_id == "q1")
+    assert "didn't address the question" in q1.what_happened and "restate it" in q1.advice
+    assert r.top_tips[0].startswith("Answer the question that was asked")
