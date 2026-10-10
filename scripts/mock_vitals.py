@@ -17,7 +17,7 @@ Behavior (docs/roles/data.md):
     d          focus drops to 0.3 for 8 s, HR unchanged
     f          5 s of nulls with confidence 0
 
-Standard library only, except --auto which uses `websockets` (ships with uvicorn[standard]).
+Standard library only, so anyone can run it without installing anything.
 """
 import argparse
 import json
@@ -184,10 +184,11 @@ def get_json(url: str, timeout: float = 1.5):
 
 
 class AutoSpiker:
-    """--auto: poll /api/sessions/active; spike ~10 s into every other question.
+    """--auto: poll /api/sessions/active, then Brain's /api/sessions/{id}/status for the current
+    question, and spike ~10 s into every other question (Q1, Q3, ...; calibration never spikes).
 
-    Question timing comes from the `question` events on /ws/{session_id} (PLAN.md section 3).
-    If the WebSocket can't be used, fall back to one spike every 60 s.
+    Questions are counted by id, so restarts and reconnects can't double-count them. If the status
+    endpoint keeps failing (Brain not running its loop), fall back to one spike every 60 s.
     """
 
     def __init__(self, base_url: str, log):
@@ -203,6 +204,8 @@ class AutoSpiker:
         self._stop.set()
 
     def _poll_loop(self):
+        seen: set[str] = set()
+        failures, fallback_next = 0, None
         while not self._stop.is_set():
             try:
                 body = get_json(f"{self.base_url}/api/sessions/active")
@@ -212,43 +215,33 @@ class AutoSpiker:
                 sid = self.session_id          # keep last known state on a blip
             if sid != self.session_id:
                 self.session_id = sid
+                seen, failures, fallback_next = set(), 0, None
                 self.log(f"[auto] active session: {sid or 'none'}")
-                if sid:
-                    threading.Thread(target=self._watch_questions, args=(sid,), daemon=True).start()
-            self._stop.wait(AUTO_POLL_S)
-
-    def _watch_questions(self, sid: str):
-        ws_url = self.base_url.replace("https://", "wss://").replace("http://", "ws://") + f"/ws/{sid}"
-        try:
-            from websockets.sync.client import connect
-            with connect(ws_url, open_timeout=3) as ws:
-                self.log(f"[auto] listening for questions on {ws_url}")
-                n_questions = 0
-                while self.session_id == sid and not self._stop.is_set():
-                    try:
-                        msg = json.loads(ws.recv(timeout=AUTO_POLL_S))
-                    except TimeoutError:
-                        continue
-                    if msg.get("type") != "question" or msg.get("data", {}).get("kind") == "calibration":
-                        continue
-                    n_questions += 1
-                    if n_questions % 2 == 1:       # Q1, Q3, Q5...
-                        self.log(f"[auto] question {n_questions}: spike in {AUTO_SPIKE_DELAY_S} s")
-                        self.due.put(time.monotonic() + AUTO_SPIKE_DELAY_S)
-                    else:
-                        self.log(f"[auto] question {n_questions}: staying calm")
-            return
-        except Exception as exc:    # no websockets package, refused, closed: fall back to a timer
-            if self.session_id != sid or self._stop.is_set():
-                return
-            self.log(f"[auto] can't watch questions ({type(exc).__name__}: {exc}); "
-                     f"spiking every {AUTO_FALLBACK_EVERY_S} s instead")
-        next_spike = time.monotonic() + AUTO_FALLBACK_EVERY_S
-        while self.session_id == sid and not self._stop.is_set():
-            if time.monotonic() >= next_spike:
+            if sid and fallback_next is None:
+                try:
+                    q = get_json(f"{self.base_url}/api/sessions/{sid}/status").get("question") or {}
+                    failures = 0
+                    qid, kind = q.get("id"), q.get("kind")
+                    if qid and qid not in seen and kind != "calibration":
+                        seen.add(qid)
+                        if len(seen) % 2 == 1:
+                            self.log(f"[auto] question {len(seen)} ({kind}): spike in {AUTO_SPIKE_DELAY_S} s")
+                            self.due.put(time.monotonic() + AUTO_SPIKE_DELAY_S)
+                        else:
+                            self.log(f"[auto] question {len(seen)} ({kind}): staying calm")
+                except urllib.error.HTTPError as exc:
+                    if exc.code != 404:        # 404 = interview loop not started yet
+                        failures += 1
+                except (urllib.error.URLError, OSError, ValueError):
+                    failures += 1
+                if failures >= 5:
+                    self.log(f"[auto] can't read /api/sessions/{{id}}/status; spiking every "
+                             f"{AUTO_FALLBACK_EVERY_S} s instead")
+                    fallback_next = time.monotonic() + AUTO_FALLBACK_EVERY_S
+            if sid and fallback_next is not None and time.monotonic() >= fallback_next:
                 self.due.put(time.monotonic())
-                next_spike += AUTO_FALLBACK_EVERY_S
-            self._stop.wait(0.5)
+                fallback_next += AUTO_FALLBACK_EVERY_S
+            self._stop.wait(AUTO_POLL_S)
 
     def spikes_due(self) -> int:
         while not self.due.empty():
@@ -266,10 +259,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--events", type=parse_events, default={}, metavar='"20:s,60:d,100:f"',
                     help="fire s/d/f at fixed seconds since start (for when you can't press keys)")
     ap.add_argument("--auto", action="store_true",
-                    help="only send while a session is active; spike ~10 s into every other question")
+                    help="only send while a session is active; spike ~10 s into every other question "
+                         "(polls /api/sessions/active and Brain's /api/sessions/{id}/status)")
     ap.add_argument("--stdout", action="store_true", help="print readings as NDJSON instead of posting")
     ap.add_argument("--fast", action="store_true", help="with --stdout: no sleeping, timestamps 1 s apart")
     ap.add_argument("--seed", type=int, default=None, help="random seed for reproducible noise")
+    ap.add_argument("--events-out", metavar="CSV", help="append each fired event (time, tick, key, event) to this CSV")
     args = ap.parse_args(argv)
     if args.fast and not args.stdout:
         ap.error("--fast only works with --stdout")
@@ -283,6 +278,17 @@ def main(argv: list[str] | None = None) -> int:
         print(msg, file=log_stream, flush=True)
 
     sim = VitalsSimulator(random.Random(args.seed))
+    events_out = open(args.events_out, "a", encoding="utf-8") if args.events_out else None
+    if events_out and events_out.tell() == 0:
+        events_out.write("time,tick,key,event\n")
+
+    def fired(key: str, tick: int, ts: datetime, how: str = "") -> None:
+        sim.trigger(key, tick)
+        log(f"t={tick:4d}s  >>> {EVENTS[key]}{how}")
+        if events_out:
+            events_out.write(f"{ts.isoformat().replace('+00:00', 'Z')},{tick},{key},{EVENTS[key]}\n")
+            events_out.flush()
+
     poster = None if args.stdout else Poster(args.url)
     auto = AutoSpiker(args.url, log) if args.auto else None
     pending_keys: list[str] = []
@@ -313,17 +319,15 @@ def main(argv: list[str] | None = None) -> int:
                         tick += behind
                 if "q" in pending_keys:
                     break
+                ts = t0_wall + timedelta(seconds=tick) if args.fast else datetime.now(timezone.utc)
                 for key in pending_keys + args.events.get(tick, []):
                     if key in EVENTS:
-                        sim.trigger(key, tick)
-                        log(f"t={tick:4d}s  >>> {EVENTS[key]}")
+                        fired(key, tick, ts)
                 pending_keys.clear()
                 if auto:
                     for _ in range(auto.spikes_due()):
-                        sim.trigger("s", tick)
-                        log(f"t={tick:4d}s  >>> SPIKE (auto)")
+                        fired("s", tick, ts, " (auto)")
 
-                ts = t0_wall + timedelta(seconds=tick) if args.fast else datetime.now(timezone.utc)
                 r = sim.reading(tick, ts)
                 if auto and not auto.session_id:
                     status = "waiting for an active session" if tick % 5 == 0 else None
@@ -344,6 +348,8 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if auto:
             auto.stop()
+        if events_out:
+            events_out.close()
     if poster:
         log(f"done: {tick} ticks, {poster.sent} readings sent, {poster.stored} stored by the backend, "
             f"{poster.failed} failed POSTs")

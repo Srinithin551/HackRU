@@ -1,10 +1,13 @@
-"""Every function in PLAN.md section 3 exists with the agreed signature and return type."""
+"""Every function in PLAN.md section 3 exists with the agreed signature, in both the Tiger Data
+version (queries.py) and the in-memory version (fake_queries.py), and returns the agreed types."""
 import asyncio
 import inspect
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from backend.data import queries
-from backend.data._contracts import Baseline, QuestionStats, VitalsReading, WindowStats
+import pytest
+
+from backend.contracts import Baseline, QuestionStats, VitalsReading, WindowStats
+from backend.data import fake_queries, queries
 
 # name -> parameters exactly as written in PLAN.md section 3 (name, default or None)
 CONTRACT = {
@@ -25,62 +28,68 @@ CONTRACT = {
 }
 
 
-def test_signatures_match_plan():
+@pytest.mark.parametrize("module", [queries, fake_queries], ids=["queries", "fake_queries"])
+def test_signatures_match_plan(module):
     for name, expected in CONTRACT.items():
-        fn = getattr(queries, name)
-        assert inspect.iscoroutinefunction(fn), f"{name} must be async"
+        fn = getattr(module, name)
+        assert inspect.iscoroutinefunction(fn), f"{module.__name__}.{name} must be async"
         params = [(p.name, None if p.default is inspect.Parameter.empty else p.default)
                   for p in inspect.signature(fn).parameters.values()]
-        assert params == expected, f"{name}{params} != PLAN.md {expected}"
+        assert params == expected, f"{module.__name__}.{name}{params} != PLAN.md {expected}"
 
 
-def test_return_types():
+def test_pytest_never_touches_the_shared_db():
+    assert queries.FAKE, "under pytest, queries.py must route to fake_queries unless DATA_FAKE=0"
+
+
+def test_fake_end_to_end_shapes():
+    """A whole session through the queries.py facade (in-memory under pytest)."""
     async def run():
-        now = datetime.now(timezone.utc)
+        t0 = datetime.now(timezone.utc) - timedelta(seconds=60)
         sid = await queries.create_session("Likhil", "demo", "SWE Intern")
-        assert isinstance(sid, str)
-        assert await queries.get_active_session() == sid
+        assert isinstance(sid, str) and await queries.get_active_session() == sid
+        fake_queries._sessions[sid]["started_at"] = t0      # pretend the session began a minute ago
 
-        rows = await queries.insert_vitals([
-            VitalsReading(ts=now, heart_rate=72, breathing_rate=14, focus=0.8,
-                          expression="neutral", confidence=0.95),
-            VitalsReading(ts=now, confidence=0.0),                       # face lost
-        ])
-        assert isinstance(rows, list) and len(rows) == 2
+        calm = [VitalsReading(ts=t0 + timedelta(seconds=i), heart_rate=72, breathing_rate=14, focus=0.8,
+                              expression="neutral", confidence=0.95) for i in range(40)]
+        rows = await queries.insert_vitals(calm + [VitalsReading(ts=t0 + timedelta(seconds=40), confidence=0.0)])
+        assert len(rows) == 41
         for r in rows:
             assert set(r) == {"time", "session_id", "heart_rate", "breathing_rate", "focus",
                               "expression", "confidence", "stress"}
-            assert r["session_id"] == sid and isinstance(r["time"], datetime)
-        assert rows[1]["stress"] is None
+            assert r["session_id"] == sid and r["stress"] is None        # no baseline yet
 
         b = await queries.compute_baseline(sid)
-        assert isinstance(b, Baseline)
-        assert isinstance(await queries.get_baseline(sid), Baseline)
-
-        w = await queries.get_window_stats(sid)
-        assert isinstance(w, WindowStats) and w.seconds == 15
-        assert 20 <= w.stress <= 60
-        assert (await queries.get_window_stats(sid, 10)).seconds == 10
+        assert isinstance(b, Baseline) and b.n_samples == 30 and b.heart_rate == pytest.approx(72)
+        assert await queries.get_baseline(sid) == b
 
         qid = await queries.insert_question(sid, 1, "main", "Tell me about a bug you fixed.")
-        assert isinstance(qid, str)
-        assert await queries.mark_answer_started(qid, now) is None
-        assert await queries.mark_answered(qid, now, "I once...") is None
+        start = t0 + timedelta(seconds=45)
+        await queries.mark_answer_started(qid, start)
+        spike = [VitalsReading(ts=start + timedelta(seconds=i), heart_rate=90, breathing_rate=18.2, focus=0.5,
+                               expression="frown", confidence=0.95) for i in range(10)]
+        rows = await queries.insert_vitals(spike)
+        assert rows[0]["stress"] == pytest.approx(84.5, abs=0.1)
+        await queries.mark_answered(qid, start + timedelta(seconds=12), "I once...")
+
+        w = await queries.get_window_stats(sid)
+        assert isinstance(w, WindowStats) and w.seconds == 15 and w.stress == pytest.approx(84.5, abs=0.1)
+        assert w.hr_delta_pct == pytest.approx(25, abs=0.1) and w.dominant_expression == "frown"
 
         qs = await queries.get_question_stats(qid)
-        assert isinstance(qs, QuestionStats) and qs.question_id == qid
+        assert isinstance(qs, QuestionStats) and qs.question_id == qid and qs.n_samples == 10
+        assert qs.duration_s == 12 and qs.stress_peak == pytest.approx(84.5, abs=0.1)
 
         hist = await queries.get_session_history(sid)
-        assert isinstance(hist, list) and len(hist) == 1
-        assert set(hist[0]) == {"idx", "kind", "text", "transcript", "stats"}
-        assert isinstance(hist[0]["stats"], QuestionStats)
+        assert [set(h) for h in hist] == [{"question_id", "idx", "kind", "text", "transcript", "stats"}]
+        assert hist[0]["question_id"] == qid and isinstance(hist[0]["stats"], QuestionStats)
 
         assert await queries.get_report(sid) is None
-        assert await queries.save_report(sid, {"composure_score": 80}) is None
+        await queries.save_report(sid, {"composure_score": 80})
         assert await queries.get_report(sid) == {"composure_score": 80}
 
-        assert await queries.end_session(sid) is None
+        await queries.end_session(sid)
         assert await queries.get_active_session() is None
-        assert await queries.insert_vitals([VitalsReading(ts=now, heart_rate=70)]) == []
+        assert await queries.insert_vitals([VitalsReading(ts=t0, heart_rate=70)]) == []
 
     asyncio.run(run())

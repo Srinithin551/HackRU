@@ -107,5 +107,5 @@ def test_stdout_fast_mode(capsys):
     assert all((b - a).total_seconds() == 1 for a, b in zip(ts, ts[1:]))
     assert lines[11]["expression"] == "frown" and lines[30]["confidence"] == 0
     # every line validates against the PLAN.md contract
-    from backend.data._contracts import VitalsBatch
+    from backend.contracts import VitalsBatch
     VitalsBatch(readings=lines)

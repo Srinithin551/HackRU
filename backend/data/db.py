@@ -1,43 +1,57 @@
 """asyncpg connection pool for Tiger Data (Postgres + TimescaleDB).
 
-Created once on FastAPI startup (min_size=2, max_size=10). Every query function
-takes connections from it. Scripts can call init_pool() / close_pool() directly.
+main.py's lifespan calls startup() / shutdown(), so the pool (min_size=2,
+max_size=10) is created once when FastAPI starts. Every query function takes
+connections from it. Scripts can call init_pool() / close_pool() directly.
 
-The connection string comes from TIGER_DATABASE_URL (env, or backend/.env).
-Never print or log it.
+TIGER_DATABASE_URL comes from backend/config.py (.env at the repo root or in
+backend/). Never print or log it.
 """
 import asyncio
 import json
 import logging
 import os
-from pathlib import Path
+import sys
 
 import asyncpg
 
-log = logging.getLogger(__name__)
+from backend import config
 
-ENV_FILE = Path(__file__).resolve().parents[1] / ".env"     # backend/.env
+log = logging.getLogger("data.db")
+
 _pool: asyncpg.Pool | None = None
 _lock = asyncio.Lock()
 
 
 def database_url() -> str:
-    if not os.environ.get("TIGER_DATABASE_URL") and ENV_FILE.exists():
-        from dotenv import load_dotenv
-        load_dotenv(ENV_FILE)
-    url = os.environ.get("TIGER_DATABASE_URL")
+    url = config.TIGER_DATABASE_URL or os.getenv("TIGER_DATABASE_URL", "")
     if not url:
-        raise RuntimeError(f"TIGER_DATABASE_URL is not set (put it in {ENV_FILE})")
+        raise RuntimeError("TIGER_DATABASE_URL is not set (put it in .env at the repo root or backend/.env)")
     return url
+
+
+def use_fake() -> bool:
+    """True when Data should run in memory (fake_queries.py) instead of Tiger Data.
+
+    DATA_FAKE=1 forces it and DATA_FAKE=0 forbids it. Otherwise it's on under pytest, so
+    tests never write into the shared database, and when no TIGER_DATABASE_URL is set.
+    """
+    flag = os.getenv("DATA_FAKE", "").strip().lower()
+    if flag in ("1", "true", "yes", "on"):
+        return True
+    if flag in ("0", "false", "no", "off"):
+        return False
+    return "pytest" in sys.modules or not (config.TIGER_DATABASE_URL or os.getenv("TIGER_DATABASE_URL"))
 
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
     # jsonb <-> dict, so sessions.report round-trips as a Python dict
-    await conn.set_type_codec("jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
+    await conn.set_type_codec("jsonb", schema="pg_catalog", decoder=json.loads,
+                              encoder=lambda v: json.dumps(v, default=str))
 
 
 async def init_pool() -> asyncpg.Pool:
-    """Create the pool once. Safe to call repeatedly; call it from FastAPI startup."""
+    """Create the pool once. Safe to call repeatedly."""
     global _pool
     async with _lock:
         if _pool is None:
@@ -56,3 +70,15 @@ async def close_pool() -> None:
     if _pool is not None:
         await _pool.close()
         _pool = None
+
+
+async def startup() -> None:
+    """FastAPI lifespan hook (main.py)."""
+    if use_fake():
+        log.warning("Data is running IN MEMORY (DATA_FAKE or no TIGER_DATABASE_URL): nothing is saved")
+        return
+    await init_pool()
+
+
+async def shutdown() -> None:
+    await close_pool()
