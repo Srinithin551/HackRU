@@ -1,5 +1,7 @@
 # StressTest
 
+Gemini API key: AQ.Ab8RN6ImQnloXoRWfMJX0aBXWkCbaqHNRRU_DpBlVqhJcke5Ng
+
 **An AI interviewer that can see you sweat.**
 
 StressTest runs a live mock interview with an AI voice while your webcam tracks your heart rate, breathing, focus, and facial expression. When you're done, you get a replay timeline showing exactly which questions spiked your stress, plus specific coaching on how to answer them better.
