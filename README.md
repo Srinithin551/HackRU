@@ -86,28 +86,28 @@ SELECT create_hypertable('vitals', 'time');
 
 ### Prerequisites
 - Node.js 18+
-- Python 3.10+
+- Python 3.12 (`brew install python@3.12`)
+- ffmpeg (only to regenerate fake-mode audio: `brew install ffmpeg`)
 - API keys: Presage, ElevenLabs, Gemini, Tiger Data connection string
 
 ### Environment variables
 
-Create a `.env` file in the backend:
-
-```
-PRESAGE_API_KEY=
-ELEVENLABS_API_KEY=
-ELEVENLABS_VOICE_ID=
-GEMINI_API_KEY=
-TIGER_DATABASE_URL=
-```
+Copy `.env.example` to `.env` at the repo root and fill in the keys (Gemini, ElevenLabs, Presage, Tiger Data).
+With `BRAIN_FAKE=1` the backend runs end to end with no keys at all.
 
 ### Run locally
 
 ```bash
-# backend
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload
+# backend (from the repo root)
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r backend/requirements.txt
+BRAIN_FAKE=1 uvicorn backend.main:app --reload    # drop BRAIN_FAKE once keys are in .env
+
+# drive a session from the terminal (no frontend needed)
+python scripts/fake_frontend.py
+
+# tests
+pytest
 
 # frontend
 cd frontend

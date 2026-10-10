@@ -1,0 +1,22 @@
+# env / secrets
+.env
+*.env.local
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# generated audio + logs
+backend/static/audio/*
+!backend/static/audio/.gitkeep
+backend/logs/*
+!backend/logs/.gitkeep
+
+# node
+node_modules/
+dist/
+
+# os
+.DS_Store
