@@ -78,9 +78,9 @@ export interface QuestionStats {
 // ---------------------------------------------------------------------------
 
 /**
- * Interview types offered on the setup page. PLAN.md does not pin the wire values;
- * `demo` matches brain.md ("interview_type="demo" ... 3 main questions").
- * The other slugs still need a thumbs-up from Brain.
+ * Interview types offered on the setup page. Brain's specs.normalize_type() maps
+ * these onto its specs: software_engineering → swe, behavioral → behavioral,
+ * class_presentation → presentation, demo → demo (3 questions, 240 s).
  */
 export const INTERVIEW_TYPES = [
   { value: 'software_engineering', label: 'Software Engineering' },
@@ -101,8 +101,25 @@ export interface CreateSessionResponse {
   session_id: string
 }
 
+/** POST /api/sessions/{id}/start. Brain made it idempotent: repeat calls report the current status. */
+export interface StartSessionResponse {
+  session_id: string
+  status: 'started' | 'already_running' | 'finished'
+}
+
 /** `null` when no session is active. */
 export type ActiveSessionResponse = { session_id: string } | null
+
+/** GET /health (backend/main.py). Useful to show which pieces are real vs fake. */
+export interface HealthResponse {
+  ok: boolean
+  /** BRAIN_FAKE=1: canned questions, rule-based decisions, no API keys needed. */
+  fake: boolean
+  gemini: boolean
+  elevenlabs: boolean
+  /** Mounted routers, e.g. ["brain", "data", "sensing"]. */
+  routers: string[]
+}
 
 // ---------------------------------------------------------------------------
 // REST: GET /api/sessions/{id}/replay (owner: Data, shape from data.md)
@@ -179,6 +196,28 @@ export interface Report {
   per_question: QuestionFeedback[]
   /** Exactly 3. */
   top_tips: string[]
+  // Additive fields from Brain's build (brain.md "As built"). Optional so the mock and older
+  // reports still type-check.
+  /** For the red/amber dots on the replay chart. */
+  coach_flags?: ReportCoachFlag[]
+  /** The decision made after each answer (ease_off, push, follow_up, next, wrap_up). */
+  adaptations?: Adaptation[]
+  generated_by?: 'gemini' | 'fallback' | 'fake'
+}
+
+export interface ReportCoachFlag {
+  ts: IsoDateTime
+  question_id: string | null
+  level: CoachLevel
+  stress: number
+  message: string
+}
+
+export interface Adaptation {
+  question_id: string
+  action: 'follow_up' | 'ease_off' | 'push' | 'next' | 'wrap_up'
+  answer_quality: number
+  rationale: string
 }
 
 // ---------------------------------------------------------------------------
@@ -187,18 +226,29 @@ export interface Report {
 
 export type SessionState = 'calibrating' | 'asking' | 'listening' | 'thinking' | 'done'
 
+/**
+ * Brain's state sequence (brain.md "As built"):
+ *   calibrating (whole calibration, 1-2 small-talk prompts, no asking/listening)
+ *   → per question: asking → listening → [answer] → filler event → thinking
+ *   → end: thinking (closing line plays as a filler while the report is written) → done → session_ended
+ */
 export interface QuestionEvent {
   question_id: string
-  /** 0 for calibration; follow-ups also increment it, so it can exceed `total`. */
+  /** Planned question number: 0 for calibration, then 1..total. A follow-up keeps its parent's number (check `kind`). */
   index: number
+  /** Planned question count ("Q 2 of 5"). */
   total: number
   kind: QuestionKind
   text: string
-  /** Path like "/audio/ab12cd34.mp3"; resolve with apiUrl() before playing. */
-  audio_url: string
+  /**
+   * Absolute URL (PUBLIC_BASE_URL + "/audio/<hash>.mp3"), or null when TTS is unavailable:
+   * then show the text and send answer_started right away. Play it via resolveAudioUrl().
+   */
+  audio_url: string | null
 }
 
 export interface FillerEvent {
+  /** Filler or closing line. Doesn't change the question on screen. */
   audio_url: string
 }
 

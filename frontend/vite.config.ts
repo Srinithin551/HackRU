@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
     '/api': { target, changeOrigin: true },
     '/audio': { target, changeOrigin: true },
     '/ws': { target, changeOrigin: true, ws: true },
+    '/health': { target, changeOrigin: true },
   }
 
   return {

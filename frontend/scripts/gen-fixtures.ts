@@ -1,7 +1,11 @@
 /**
- * Generates src/mocks/replay_sample.json and src/mocks/report_sample.json by
+ * Generates src/mocks/generated_replay.json and src/mocks/generated_report.json by
  * running one full mock session in virtual time (seeded, so the output is
- * byte-identical on every run).
+ * byte-identical on every run). They are a matched pair (same question ids), which
+ * is what the mock API serves for unknown session ids.
+ *
+ * Not to be confused with src/mocks/replay_sample.json: that one is Data's export
+ * of a real Tiger Data session (the contract sample) and is never overwritten here.
  *
  *   node scripts/gen-fixtures.ts
  *
@@ -51,8 +55,8 @@ const write = (name: string, value: unknown) => {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
   console.log(`wrote ${relative(root, path)}`)
 }
-write('replay_sample.json', replay)
-write('report_sample.json', report)
+write('generated_replay.json', replay)
+write('generated_report.json', report)
 
 const peak = replay.series.reduce((best, p) => Math.max(best, p.stress_peak ?? 0), 0)
 const flagLevels = recording.flags.map((f) => f.level).join(', ') || 'none'

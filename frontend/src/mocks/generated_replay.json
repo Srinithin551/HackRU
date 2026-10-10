@@ -3,7 +3,7 @@
     "id": "9139b209-a564-446d-8516-a8e93778c1fd",
     "user_name": "Shreyas",
     "started_at": "2026-10-10T18:00:00Z",
-    "ended_at": "2026-10-10T18:04:17.685Z",
+    "ended_at": "2026-10-10T18:04:21.685Z",
     "baseline": {
       "heart_rate": 74.4,
       "breathing_rate": 13.9,
@@ -421,8 +421,16 @@
     },
     {
       "t": "2026-10-10T18:04:15Z",
-      "hr": 73,
+      "hr": 72.7,
       "br": 13.4,
+      "focus": 0.86,
+      "stress": 0,
+      "stress_peak": 0
+    },
+    {
+      "t": "2026-10-10T18:04:20Z",
+      "hr": 71.8,
+      "br": 13.5,
       "focus": 0.87,
       "stress": 0,
       "stress_peak": 0

@@ -21,6 +21,24 @@ export function apiUrl(path: string): string {
   return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`
 }
 
+/**
+ * Where to load interviewer audio from. Brain sends absolute URLs built from its
+ * PUBLIC_BASE_URL (e.g. "http://localhost:8000/audio/ab12.mp3"). In proxy mode
+ * (API_BASE empty) we keep only the path, so the browser fetches it from its own
+ * origin through the Vite proxy: same origin, so Web Audio can read it for the
+ * waveform. Mock audio ("mock-tts:...") and null pass through unchanged.
+ */
+export function resolveAudioUrl(url: string | null): string | null {
+  if (!url || url.startsWith('mock-tts:')) return url
+  if (API_BASE) return apiUrl(url)
+  try {
+    const parsed = new URL(url, window.location.origin)
+    return parsed.pathname.startsWith('/audio/') ? parsed.pathname : url
+  } catch {
+    return url
+  }
+}
+
 /** WebSocket URL for a session: ws(s):// derived from API_BASE, or from the page origin. */
 export function wsUrl(sessionId: string): string {
   const origin = API_BASE

@@ -48,8 +48,12 @@ export interface EngineTiming {
   answerTimeoutMs: number
   /** Filler → next question (Gemini decide_next latency). */
   thinkingMs: number
-  /** Closing line → session_ended (final_report latency). */
+  /** final_report latency: wrap-up → done + session_ended. */
   reportMs: number
+  /** Brain's CLOSING_PAUSE_S: lets the closing line finish before the report is announced. */
+  closingPauseMs: number
+  /** Brain's CALIBRATION_MIN_S: a short first answer gets a second small-talk prompt. */
+  calibrationMinMs: number
 }
 
 export const DEFAULT_TIMING: EngineTiming = {
@@ -60,7 +64,12 @@ export const DEFAULT_TIMING: EngineTiming = {
   answerTimeoutMs: 120_000,
   thinkingMs: 1_500,
   reportMs: 2_500,
+  closingPauseMs: 4_000,
+  calibrationMinMs: 35_000,
 }
+
+/** backend/brain/lines.py CALIBRATION_EXTRA_LINE. */
+const CALIBRATION_EXTRA_LINE = 'Nice. And what have you been working on this weekend?'
 
 /** Brain's thresholds (PLAN.md §3). */
 export const HIGH_STRESS = 70
@@ -145,6 +154,7 @@ export class MockSessionEngine {
   private current: ActiveQuestion | null = null
   private plannedIndex = -1
   private idx = 0
+  private extraCalibrationAsked = false
   private listening = false
   private baseline: Baseline | null = null
   private lastFlagAt = Number.NEGATIVE_INFINITY
@@ -275,20 +285,26 @@ export class MockSessionEngine {
     const active: ActiveQuestion = { record, planned, plannedIndex, anchored: false, done: false, timeoutId: null }
     this.current = active
 
+    // Mirrors interviewer.ask(): calibration stays in 'calibrating' (no asking/listening, so the
+    // overlay doesn't flicker); every other question goes asking → question → listening.
+    const calibrating = kind === 'calibration'
+    if (!calibrating) this.emitState('asking')
     this.emit({
       type: 'question',
       data: {
         question_id: record.id,
-        index: record.idx,
+        // Brain's planned_number: 0 during calibration, then 1..total. A follow-up keeps its
+        // parent's number (the sequential idx, which counts follow-ups, is only in the replay).
+        index: plannedIndex === null ? 0 : plannedIndex + 1,
         total: this.totalQuestions,
         kind,
         text,
         audio_url: mockAudioUrl(text),
       },
     })
-    // Brain broadcasts listening right away; the client opens the mic when the audio ends.
+    // The client opens the mic itself when the audio ends.
     this.listening = true
-    this.emitState('listening')
+    if (!calibrating) this.emitState('listening')
 
     active.timeoutId = this.later(() => this.finishAnswer(active, ''), this.timing.answerTimeoutMs)
 
@@ -321,6 +337,13 @@ export class MockSessionEngine {
     this.listening = false
 
     if (active.record.kind === 'calibration') {
+      // interviewer.calibrate(): keep chatting until CALIBRATION_MIN_S so Data gets enough samples.
+      const elapsed = this.now() - (this.recording.session.started_at ?? this.now())
+      if (elapsed < this.timing.calibrationMinMs && !this.extraCalibrationAsked) {
+        this.extraCalibrationAsked = true
+        this.ask(CALIBRATION_EXTRA_LINE, 'calibration', null, null)
+        return
+      }
       this.finishCalibration()
       this.askNextPlanned()
       return
@@ -368,31 +391,39 @@ export class MockSessionEngine {
     this.ask(planned.text, 'main', planned, next)
   }
 
+  /** Brain's wrap-up: 'thinking', closing line as a filler, a pause, then the report. */
   private wrapUp(): void {
     this.stopWatcher()
     this.current = null
+    this.emitState('thinking')
     this.emit({ type: 'filler', data: { audio_url: mockAudioUrl(CLOSING_LINE) } })
-    this.finish()
+    this.state = 'done'
+    this.later(() => this.finish(), this.timing.closingPauseMs)
   }
 
+  /** end_session: no closing line, straight to the report. */
   private endEarly(): void {
     if (this.state !== 'running') return
     this.clearFlowTimers()
     this.stopWatcher()
     this.current = null
-    this.listening = false
+    this.emitState('thinking')
+    this.state = 'done'
     this.finish()
   }
 
-  /** state done → (report generation) → session_ended. */
+  /**
+   * Report generation, then interviewer.finish(): 'done' and session_ended back to back.
+   * The report already exists when session_ended arrives (getReport stops returning null).
+   */
   private finish(): void {
     this.listening = false
     this.state = 'done'
-    this.emitState('done')
     this.later(() => {
       this.recording.session.ended_at = this.now()
       this.state = 'ended'
       this.clearAllTimers()
+      this.emitState('done')
       const id = encodeURIComponent(this.config.sessionId)
       const ended: ServerEvent = {
         type: 'session_ended',
@@ -488,7 +519,9 @@ export class MockSessionEngine {
     )
   }
 
+  /** Like interviewer.set_state(): repeating the current state is a no-op. */
   private emitState(state: SessionState): void {
+    if (this.lastState?.type === 'state' && this.lastState.data.state === state) return
     const event: ServerEvent = { type: 'state', data: { state } }
     this.lastState = event
     this.emit(event)

@@ -18,14 +18,16 @@ import type {
   ActiveSessionResponse,
   CreateSessionRequest,
   CreateSessionResponse,
+  HealthResponse,
   ReplayResponse,
   Report,
+  StartSessionResponse,
 } from './types.ts'
 
 /** The REST surface the frontend uses (PLAN.md §3). Implemented over HTTP and by src/mocks/mockApi.ts. */
 export interface Api {
   createSession(body: CreateSessionRequest): Promise<CreateSessionResponse>
-  startSession(sessionId: string): Promise<void>
+  startSession(sessionId: string): Promise<StartSessionResponse>
   getActiveSession(): Promise<ActiveSessionResponse>
   getReplay(sessionId: string): Promise<ReplayResponse>
   /** Resolves to null while the report is still being generated. */
@@ -64,9 +66,7 @@ const sessionPath = (id: string) => `/api/sessions/${encodeURIComponent(id)}`
 
 const httpApi: Api = {
   createSession: (body) => request('/api/sessions', { method: 'POST', body: JSON.stringify(body) }),
-  startSession: async (id) => {
-    await request(`${sessionPath(id)}/start`, { method: 'POST' })
-  },
+  startSession: (id) => request(`${sessionPath(id)}/start`, { method: 'POST' }),
   getActiveSession: () => request('/api/sessions/active'),
   getReplay: (id) => request(`${sessionPath(id)}/replay`, {}, 20_000),
   getReport: async (id) => {
@@ -86,14 +86,23 @@ export const getActiveSession = () => impl.getActiveSession()
 export const getReplay = (sessionId: string) => impl.getReplay(sessionId)
 export const getReport = (sessionId: string) => impl.getReport(sessionId)
 
-const startRequests = new Map<string, Promise<void>>()
+/**
+ * GET /health: which backend pieces are live (fake mode, Gemini, ElevenLabs, mounted routers).
+ * In mock mode there is no backend, so it reports a fake one.
+ */
+export async function getHealth(): Promise<HealthResponse> {
+  if (IS_MOCK) return { ok: true, fake: true, gemini: false, elevenlabs: false, routers: ['mock'] }
+  return request('/health', {}, 3_000)
+}
+
+const startRequests = new Map<string, Promise<StartSessionResponse>>()
 
 /**
- * POST /api/sessions/{id}/start, at most once per session per page load. React
- * StrictMode mounts effects twice in dev, and a second /start would launch a
- * second interview loop on the backend.
+ * POST /api/sessions/{id}/start, at most once per session per page load. Brain's
+ * endpoint is idempotent too (returns already_running), but deduping here avoids
+ * a pointless request when React StrictMode mounts effects twice in dev.
  */
-export function startSession(sessionId: string): Promise<void> {
+export function startSession(sessionId: string): Promise<StartSessionResponse> {
   let pending = startRequests.get(sessionId)
   if (!pending) {
     pending = impl.startSession(sessionId).catch((err: unknown) => {

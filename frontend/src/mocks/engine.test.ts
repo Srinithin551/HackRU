@@ -50,17 +50,24 @@ describe('MockSessionEngine (demo, auto-answer)', () => {
     expect(events[0]).toEqual({ type: 'state', data: { state: 'calibrating' } })
     const questions = questionsOf(events)
     expect(questions.map((q) => q.kind)).toEqual(['calibration', 'main', 'main', 'follow_up', 'main'])
-    expect(questions[0].index).toBe(0)
-    for (let i = 1; i < questions.length; i++) expect(questions[i].index).toBeGreaterThan(questions[i - 1].index)
+    // Brain's planned_number: the follow-up keeps its parent's number, so index never exceeds total.
+    expect(questions.map((q) => q.index)).toEqual([0, 1, 2, 2, 3])
     for (const q of questions) expect(q.total).toBe(3)
-    expect(questions[questions.length - 1].index).toBeGreaterThan(3)
     expect(new Set(questions.map((q) => q.question_id)).size).toBe(questions.length)
   })
 
-  it('broadcasts listening right after every question', async () => {
+  it('wraps every non-calibration question in asking → question → listening; calibration stays calibrating', async () => {
     const flow = flowOf((await runAuto()).events)
     flow.forEach((event, i) => {
-      if (event.type === 'question') expect(flow[i + 1]).toEqual({ type: 'state', data: { state: 'listening' } })
+      if (event.type !== 'question') return
+      if (event.data.kind === 'calibration') {
+        // Nothing but 'calibrating' up to here, and no 'listening' right after a calibration question.
+        expect(flow.slice(0, i).some((e) => e.type === 'state' && e.data.state !== 'calibrating')).toBe(false)
+        expect(flow[i + 1]).not.toEqual({ type: 'state', data: { state: 'listening' } })
+        return
+      }
+      expect(flow[i - 1]).toEqual({ type: 'state', data: { state: 'asking' } })
+      expect(flow[i + 1]).toEqual({ type: 'state', data: { state: 'listening' } })
     })
   })
 
