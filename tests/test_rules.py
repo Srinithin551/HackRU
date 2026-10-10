@@ -96,6 +96,8 @@ def test_flag_message_names_the_driver():
 
 @pytest.mark.parametrize("label,key", [
     ("Software Engineering", "swe"), ("Behavioral", "behavioral"), ("Class Presentation", "presentation"),
+    # the slugs the frontend actually sends (frontend/src/types.ts INTERVIEW_TYPES)
+    ("software_engineering", "swe"), ("class_presentation", "presentation"),
     ("Quick Demo", "demo"), ("demo", "demo"), ("", "swe"), ("something else", "swe"),
 ])
 def test_normalize_type(label, key):
@@ -182,9 +184,18 @@ def test_finalize_draft_repairs_gemini_output():
         top_tips=["one", "  "],
     )
     r = finalize_draft(state(), items, draft)
-    assert r.composure_score == 100
+    assert r.composure_score == 70                                  # 55 from stats + at most 15
     assert [f.question_id for f in r.per_question] == ["q1", "q2"]  # bogus dropped, q1 filled in, order kept
     assert any(ch.isdigit() for ch in r.per_question[1].body_signal)
     assert "88" in r.hardest_moment
     assert len(r.top_tips) == 3 and r.top_tips[0] == "one"
     assert r.generated_by == "gemini"
+
+
+def test_finalize_draft_without_vitals_does_not_claim_calm():
+    items = normalize_history([{"question_id": "q1", "idx": 1, "kind": "main", "text": "Q", "transcript": "A",
+                                "stats": qstats(n_samples=0, stress_mean=None, stress_peak=None)}])
+    draft = ReportDraft(composure_score=100, summary="s", hardest_moment="none", top_tips=["a", "b", "c"],
+                        per_question=[QuestionFeedback(question_id="q1", what_happened="w",
+                                                       body_signal="No usable vitals.", advice="a")])
+    assert finalize_draft(state(), items, draft).composure_score == 50
