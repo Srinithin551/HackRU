@@ -1,599 +1,695 @@
 {
   "session": {
-    "id": "9139b209-a564-446d-8516-a8e93778c1fd",
-    "user_name": "Shreyas",
-    "started_at": "2026-10-10T18:00:00Z",
-    "ended_at": "2026-10-10T18:04:17.685Z",
+    "id": "21531403-398d-4098-a5e6-93271b8d40c5",
+    "user_name": "Demo Candidate",
+    "started_at": "2026-10-10T18:17:15.854276Z",
+    "ended_at": "2026-10-10T18:22:10.697796Z",
     "baseline": {
-      "heart_rate": 74.4,
-      "breathing_rate": 13.9,
-      "focus": 0.81
+      "heart_rate": 72.2,
+      "breathing_rate": 14.1,
+      "focus": 0.805
     }
   },
   "series": [
     {
-      "t": "2026-10-10T18:00:00Z",
-      "hr": 74.8,
-      "br": 14.1,
-      "focus": 0.82,
-      "stress": 2.6,
-      "stress_peak": 3.5
-    },
-    {
-      "t": "2026-10-10T18:00:05Z",
-      "hr": 73.6,
-      "br": 14.1,
-      "focus": 0.76,
-      "stress": 3,
-      "stress_peak": 4
-    },
-    {
-      "t": "2026-10-10T18:00:10Z",
-      "hr": 73.2,
-      "br": 14.7,
-      "focus": 0.73,
-      "stress": 7.1,
-      "stress_peak": 9.8
-    },
-    {
-      "t": "2026-10-10T18:00:15Z",
-      "hr": 72.9,
-      "br": 14.3,
-      "focus": 0.75,
-      "stress": 4.6,
+      "t": "2026-10-10T18:17:15Z",
+      "hr": 72.0,
+      "br": 14.6,
+      "focus": 0.801,
+      "stress": 4.4,
       "stress_peak": 6.2
     },
     {
-      "t": "2026-10-10T18:00:20Z",
-      "hr": 73.6,
+      "t": "2026-10-10T18:17:20Z",
+      "hr": 71.7,
       "br": 13.7,
-      "focus": 0.79,
-      "stress": 0.8,
-      "stress_peak": 2
+      "focus": 0.802,
+      "stress": 0.7,
+      "stress_peak": 1.7
     },
     {
-      "t": "2026-10-10T18:00:25Z",
-      "hr": 74.3,
-      "br": 13.6,
-      "focus": 0.84,
-      "stress": 0.6,
-      "stress_peak": 1.6
-    },
-    {
-      "t": "2026-10-10T18:00:30Z",
-      "hr": 75.9,
-      "br": 13.5,
-      "focus": 0.82,
-      "stress": 4.2,
-      "stress_peak": 6.7
-    },
-    {
-      "t": "2026-10-10T18:00:35Z",
-      "hr": 76,
-      "br": 13.6,
-      "focus": 0.9,
-      "stress": 4.3,
-      "stress_peak": 5.6
-    },
-    {
-      "t": "2026-10-10T18:00:40Z",
-      "hr": 73.8,
-      "br": 14.3,
-      "focus": 0.87,
-      "stress": 3,
-      "stress_peak": 7
-    },
-    {
-      "t": "2026-10-10T18:00:45Z",
-      "hr": 69.7,
-      "br": 14.4,
-      "focus": 0.86,
-      "stress": 2.8,
-      "stress_peak": 3.8
-    },
-    {
-      "t": "2026-10-10T18:00:50Z",
-      "hr": 68.3,
-      "br": 14.9,
-      "focus": 0.84,
-      "stress": 5.6,
-      "stress_peak": 7
-    },
-    {
-      "t": "2026-10-10T18:00:55Z",
-      "hr": 69.7,
-      "br": 13.5,
-      "focus": 0.85,
-      "stress": 0.3,
-      "stress_peak": 1.6
-    },
-    {
-      "t": "2026-10-10T18:01:00Z",
-      "hr": 72.6,
-      "br": 14,
-      "focus": 0.82,
-      "stress": 1.3,
-      "stress_peak": 5.4
-    },
-    {
-      "t": "2026-10-10T18:01:05Z",
-      "hr": 75,
-      "br": 14.8,
-      "focus": 0.82,
-      "stress": 6.9,
-      "stress_peak": 8.3
-    },
-    {
-      "t": "2026-10-10T18:01:10Z",
-      "hr": 74.2,
-      "br": 15.6,
-      "focus": 0.87,
-      "stress": 9.2,
-      "stress_peak": 12.4
-    },
-    {
-      "t": "2026-10-10T18:01:15Z",
-      "hr": 73.5,
-      "br": 15,
-      "focus": 0.9,
-      "stress": 6.3,
-      "stress_peak": 8.9
-    },
-    {
-      "t": "2026-10-10T18:01:20Z",
-      "hr": 74.3,
-      "br": 13.4,
-      "focus": 0.86,
-      "stress": 0.6,
-      "stress_peak": 1.6
-    },
-    {
-      "t": "2026-10-10T18:01:25Z",
-      "hr": 73.5,
-      "br": 14,
-      "focus": 0.89,
-      "stress": 0.6,
-      "stress_peak": 1.3
-    },
-    {
-      "t": "2026-10-10T18:01:30Z",
-      "hr": 74.2,
-      "br": 14.6,
-      "focus": 0.83,
-      "stress": 3.8,
-      "stress_peak": 3.8
-    },
-    {
-      "t": "2026-10-10T18:01:35Z",
-      "hr": 75.8,
-      "br": 14.5,
-      "focus": 0.8,
-      "stress": 7.5,
-      "stress_peak": 9.2
-    },
-    {
-      "t": "2026-10-10T18:01:40Z",
-      "hr": 74.6,
-      "br": 13.2,
-      "focus": 0.81,
+      "t": "2026-10-10T18:17:25Z",
+      "hr": 71.9,
+      "br": 14.0,
+      "focus": 0.805,
       "stress": 1.6,
-      "stress_peak": 4.7
+      "stress_peak": 5.1
     },
     {
-      "t": "2026-10-10T18:01:45Z",
-      "hr": 74.9,
-      "br": 13.5,
-      "focus": 0.78,
-      "stress": 3,
-      "stress_peak": 5
+      "t": "2026-10-10T18:17:30Z",
+      "hr": 72.9,
+      "br": 14.1,
+      "focus": 0.811,
+      "stress": 3.0,
+      "stress_peak": 4.8
     },
     {
-      "t": "2026-10-10T18:01:50Z",
-      "hr": 74.6,
-      "br": 13.7,
-      "focus": 0.75,
-      "stress": 3.5,
+      "t": "2026-10-10T18:17:35Z",
+      "hr": 72.2,
+      "br": 14.2,
+      "focus": 0.81,
+      "stress": 2.3,
+      "stress_peak": 5.0
+    },
+    {
+      "t": "2026-10-10T18:17:40Z",
+      "hr": 71.8,
+      "br": 14.4,
+      "focus": 0.832,
+      "stress": 2.2,
+      "stress_peak": 4.9
+    },
+    {
+      "t": "2026-10-10T18:17:45Z",
+      "hr": 72.4,
+      "br": 14.0,
+      "focus": 0.8,
+      "stress": 2.5,
       "stress_peak": 4.6
     },
     {
-      "t": "2026-10-10T18:01:55Z",
-      "hr": 74,
-      "br": 14.4,
-      "focus": 0.78,
-      "stress": 4,
-      "stress_peak": 4.7
-    },
-    {
-      "t": "2026-10-10T18:02:00Z",
-      "hr": 77.2,
-      "br": 14.6,
-      "focus": 0.8,
-      "stress": 12.2,
-      "stress_peak": 32
-    },
-    {
-      "t": "2026-10-10T18:02:05Z",
-      "hr": 82.8,
-      "br": 15.9,
-      "focus": 0.7,
-      "stress": 37.6,
-      "stress_peak": 42.3
-    },
-    {
-      "t": "2026-10-10T18:02:10Z",
-      "hr": 80.7,
-      "br": 15.7,
-      "focus": 0.73,
-      "stress": 30,
-      "stress_peak": 33.9
-    },
-    {
-      "t": "2026-10-10T18:02:15Z",
-      "hr": 77.5,
-      "br": 15.2,
-      "focus": 0.79,
-      "stress": 16.4,
-      "stress_peak": 22.7
-    },
-    {
-      "t": "2026-10-10T18:02:20Z",
-      "hr": 73.8,
-      "br": 14.7,
-      "focus": 0.82,
-      "stress": 4.6,
-      "stress_peak": 8.4
-    },
-    {
-      "t": "2026-10-10T18:02:25Z",
-      "hr": 71.4,
+      "t": "2026-10-10T18:17:50Z",
+      "hr": 72.8,
       "br": 14.1,
-      "focus": 0.8,
-      "stress": 2.1,
-      "stress_peak": 4.3
+      "focus": 0.797,
+      "stress": 4.0,
+      "stress_peak": 6.6
     },
     {
-      "t": "2026-10-10T18:02:30Z",
-      "hr": 71,
-      "br": 14.1,
-      "focus": 0.69,
-      "stress": 5.7,
-      "stress_peak": 7.2
+      "t": "2026-10-10T18:17:55Z",
+      "hr": 72.0,
+      "br": 14.0,
+      "focus": 0.81,
+      "stress": 2.2,
+      "stress_peak": 4.6
     },
     {
-      "t": "2026-10-10T18:02:35Z",
+      "t": "2026-10-10T18:18:00Z",
+      "hr": 72.3,
+      "br": 14.0,
+      "focus": 0.796,
+      "stress": 2.4,
+      "stress_peak": 7.6
+    },
+    {
+      "t": "2026-10-10T18:18:05Z",
       "hr": 71.7,
-      "br": 13.9,
-      "focus": 0.74,
-      "stress": 3.2,
-      "stress_peak": 5.2
+      "br": 14.0,
+      "focus": 0.805,
+      "stress": 2.7,
+      "stress_peak": 5.0
     },
     {
-      "t": "2026-10-10T18:02:40Z",
-      "hr": 73.3,
-      "br": 13.8,
-      "focus": 0.76,
-      "stress": 1.8,
-      "stress_peak": 2.8
-    },
-    {
-      "t": "2026-10-10T18:02:45Z",
-      "hr": 74.8,
-      "br": 14.3,
-      "focus": 0.74,
-      "stress": 6.5,
-      "stress_peak": 9.1
-    },
-    {
-      "t": "2026-10-10T18:02:50Z",
-      "hr": 73.2,
-      "br": 15.1,
-      "focus": 0.78,
-      "stress": 8.3,
-      "stress_peak": 10.2
-    },
-    {
-      "t": "2026-10-10T18:02:55Z",
-      "hr": 72.9,
-      "br": 15.1,
-      "focus": 0.78,
-      "stress": 7.8,
-      "stress_peak": 10.9
-    },
-    {
-      "t": "2026-10-10T18:03:00Z",
-      "hr": 71.8,
-      "br": 14.5,
-      "focus": 0.8,
-      "stress": 3.6,
-      "stress_peak": 6.2
-    },
-    {
-      "t": "2026-10-10T18:03:05Z",
-      "hr": 71.5,
-      "br": 15.3,
+      "t": "2026-10-10T18:18:10Z",
+      "hr": 71.9,
+      "br": 13.6,
       "focus": 0.79,
-      "stress": 8.7,
-      "stress_peak": 9.8
+      "stress": 2.4,
+      "stress_peak": 5.7
     },
     {
-      "t": "2026-10-10T18:03:10Z",
-      "hr": 74.4,
-      "br": 15,
-      "focus": 0.78,
-      "stress": 7.9,
-      "stress_peak": 12
-    },
-    {
-      "t": "2026-10-10T18:03:15Z",
-      "hr": 80.2,
-      "br": 16.7,
-      "focus": 0.64,
-      "stress": 38.2,
-      "stress_peak": 67.6
-    },
-    {
-      "t": "2026-10-10T18:03:20Z",
-      "hr": 91.9,
-      "br": 18.4,
-      "focus": 0.5,
-      "stress": 83.4,
-      "stress_peak": 87.5
-    },
-    {
-      "t": "2026-10-10T18:03:25Z",
-      "hr": 93.5,
-      "br": 17.5,
-      "focus": 0.5,
-      "stress": 81.6,
-      "stress_peak": 83.4
-    },
-    {
-      "t": "2026-10-10T18:03:30Z",
-      "hr": 97.1,
-      "br": 18,
-      "focus": 0.51,
-      "stress": 84.2,
-      "stress_peak": 85.7
-    },
-    {
-      "t": "2026-10-10T18:03:35Z",
-      "hr": 91.3,
-      "br": 18,
-      "focus": 0.59,
-      "stress": 75.3,
-      "stress_peak": 81.3
-    },
-    {
-      "t": "2026-10-10T18:03:40Z",
-      "hr": 82.3,
-      "br": 17.1,
-      "focus": 0.72,
-      "stress": 42.2,
-      "stress_peak": 54.7
-    },
-    {
-      "t": "2026-10-10T18:03:45Z",
-      "hr": 75,
-      "br": 14.2,
-      "focus": 0.8,
-      "stress": 6,
-      "stress_peak": 15.3
-    },
-    {
-      "t": "2026-10-10T18:03:50Z",
-      "hr": 72.1,
-      "br": 14.2,
-      "focus": 0.8,
-      "stress": 2.5,
-      "stress_peak": 3.8
-    },
-    {
-      "t": "2026-10-10T18:03:55Z",
-      "hr": 72.3,
+      "t": "2026-10-10T18:18:15Z",
+      "hr": 71.9,
       "br": 14.3,
-      "focus": 0.82,
-      "stress": 2.6,
-      "stress_peak": 4.9
-    },
-    {
-      "t": "2026-10-10T18:04:00Z",
-      "hr": 72.3,
-      "br": 13.5,
-      "focus": 0.87,
-      "stress": 0,
-      "stress_peak": 0
-    },
-    {
-      "t": "2026-10-10T18:04:05Z",
-      "hr": 72,
-      "br": 14.2,
-      "focus": 0.86,
-      "stress": 1.9,
+      "focus": 0.805,
+      "stress": 3.2,
       "stress_peak": 5.4
     },
     {
-      "t": "2026-10-10T18:04:10Z",
-      "hr": 71.5,
-      "br": 14.4,
-      "focus": 0.86,
-      "stress": 2.9,
-      "stress_peak": 4.9
+      "t": "2026-10-10T18:18:20Z",
+      "hr": 72.2,
+      "br": 13.8,
+      "focus": 0.782,
+      "stress": 2.3,
+      "stress_peak": 5.0
     },
     {
-      "t": "2026-10-10T18:04:15Z",
-      "hr": 73,
-      "br": 13.4,
-      "focus": 0.87,
-      "stress": 0,
-      "stress_peak": 0
+      "t": "2026-10-10T18:18:25Z",
+      "hr": 71.8,
+      "br": 14.2,
+      "focus": 0.803,
+      "stress": 2.6,
+      "stress_peak": 6.1
+    },
+    {
+      "t": "2026-10-10T18:18:30Z",
+      "hr": 72.7,
+      "br": 13.9,
+      "focus": 0.796,
+      "stress": 4.1,
+      "stress_peak": 15.6
+    },
+    {
+      "t": "2026-10-10T18:18:35Z",
+      "hr": 84.1,
+      "br": 16.8,
+      "focus": 0.599,
+      "stress": 55.8,
+      "stress_peak": 82.2
+    },
+    {
+      "t": "2026-10-10T18:18:40Z",
+      "hr": 86.9,
+      "br": 17.6,
+      "focus": 0.527,
+      "stress": 70.4,
+      "stress_peak": 76.3
+    },
+    {
+      "t": "2026-10-10T18:18:45Z",
+      "hr": 83.4,
+      "br": 16.2,
+      "focus": 0.602,
+      "stress": 50.4,
+      "stress_peak": 60.7
+    },
+    {
+      "t": "2026-10-10T18:18:50Z",
+      "hr": 77.5,
+      "br": 15.7,
+      "focus": 0.702,
+      "stress": 27.7,
+      "stress_peak": 35.6
+    },
+    {
+      "t": "2026-10-10T18:18:55Z",
+      "hr": 73.1,
+      "br": 14.5,
+      "focus": 0.771,
+      "stress": 7.0,
+      "stress_peak": 14.1
+    },
+    {
+      "t": "2026-10-10T18:19:00Z",
+      "hr": 71.8,
+      "br": 14.0,
+      "focus": 0.801,
+      "stress": 1.8,
+      "stress_peak": 4.3
+    },
+    {
+      "t": "2026-10-10T18:19:05Z",
+      "hr": 72.5,
+      "br": 13.8,
+      "focus": 0.817,
+      "stress": 2.8,
+      "stress_peak": 8.0
+    },
+    {
+      "t": "2026-10-10T18:19:10Z",
+      "hr": 72.3,
+      "br": 13.8,
+      "focus": 0.779,
+      "stress": 2.1,
+      "stress_peak": 4.5
+    },
+    {
+      "t": "2026-10-10T18:19:15Z",
+      "hr": 72.2,
+      "br": 14.5,
+      "focus": 0.792,
+      "stress": 3.7,
+      "stress_peak": 5.7
+    },
+    {
+      "t": "2026-10-10T18:19:20Z",
+      "hr": 72.2,
+      "br": 14.2,
+      "focus": 0.803,
+      "stress": 2.2,
+      "stress_peak": 4.0
+    },
+    {
+      "t": "2026-10-10T18:19:25Z",
+      "hr": 72.2,
+      "br": 13.7,
+      "focus": 0.794,
+      "stress": 1.7,
+      "stress_peak": 4.6
+    },
+    {
+      "t": "2026-10-10T18:19:30Z",
+      "hr": 73.0,
+      "br": 13.9,
+      "focus": 0.809,
+      "stress": 3.0,
+      "stress_peak": 6.8
+    },
+    {
+      "t": "2026-10-10T18:19:35Z",
+      "hr": 73.1,
+      "br": 14.4,
+      "focus": 0.764,
+      "stress": 8.3,
+      "stress_peak": 27.6
+    },
+    {
+      "t": "2026-10-10T18:19:40Z",
+      "hr": 86.2,
+      "br": 17.5,
+      "focus": 0.555,
+      "stress": 66.6,
+      "stress_peak": 86.8
+    },
+    {
+      "t": "2026-10-10T18:19:45Z",
+      "hr": 86.1,
+      "br": 17.3,
+      "focus": 0.558,
+      "stress": 66.0,
+      "stress_peak": 73.8
+    },
+    {
+      "t": "2026-10-10T18:19:50Z",
+      "hr": 81.3,
+      "br": 16.5,
+      "focus": 0.626,
+      "stress": 45.7,
+      "stress_peak": 52.0
+    },
+    {
+      "t": "2026-10-10T18:19:55Z",
+      "hr": 77.2,
+      "br": 15.2,
+      "focus": 0.695,
+      "stress": 24.6,
+      "stress_peak": 30.4
+    },
+    {
+      "t": "2026-10-10T18:20:00Z",
+      "hr": 73.0,
+      "br": 14.0,
+      "focus": 0.776,
+      "stress": 4.9,
+      "stress_peak": 12.9
+    },
+    {
+      "t": "2026-10-10T18:20:05Z",
+      "hr": 72.0,
+      "br": 14.3,
+      "focus": 0.792,
+      "stress": 2.6,
+      "stress_peak": 6.2
+    },
+    {
+      "t": "2026-10-10T18:20:10Z",
+      "hr": 72.7,
+      "br": 14.0,
+      "focus": 0.809,
+      "stress": 2.9,
+      "stress_peak": 6.2
+    },
+    {
+      "t": "2026-10-10T18:20:15Z",
+      "hr": 71.7,
+      "br": 14.0,
+      "focus": 0.81,
+      "stress": 1.1,
+      "stress_peak": 2.6
+    },
+    {
+      "t": "2026-10-10T18:20:20Z",
+      "hr": 71.7,
+      "br": 14.5,
+      "focus": 0.792,
+      "stress": 4.1,
+      "stress_peak": 8.3
+    },
+    {
+      "t": "2026-10-10T18:20:25Z",
+      "hr": 71.5,
+      "br": 14.1,
+      "focus": 0.79,
+      "stress": 1.7,
+      "stress_peak": 4.8
+    },
+    {
+      "t": "2026-10-10T18:20:30Z",
+      "hr": 71.7,
+      "br": 14.1,
+      "focus": 0.799,
+      "stress": 2.4,
+      "stress_peak": 5.1
+    },
+    {
+      "t": "2026-10-10T18:20:35Z",
+      "hr": 72.4,
+      "br": 14.0,
+      "focus": 0.789,
+      "stress": 3.1,
+      "stress_peak": 10.7
+    },
+    {
+      "t": "2026-10-10T18:20:40Z",
+      "hr": 75.8,
+      "br": 14.8,
+      "focus": 0.738,
+      "stress": 18.0,
+      "stress_peak": 42.8
+    },
+    {
+      "t": "2026-10-10T18:20:45Z",
+      "hr": 86.6,
+      "br": 17.5,
+      "focus": 0.529,
+      "stress": 69.4,
+      "stress_peak": 81.0
+    },
+    {
+      "t": "2026-10-10T18:20:50Z",
+      "hr": 85.9,
+      "br": 17.2,
+      "focus": 0.581,
+      "stress": 63.4,
+      "stress_peak": 78.6
+    },
+    {
+      "t": "2026-10-10T18:20:55Z",
+      "hr": 80.9,
+      "br": 16.1,
+      "focus": 0.646,
+      "stress": 41.1,
+      "stress_peak": 46.3
+    },
+    {
+      "t": "2026-10-10T18:21:00Z",
+      "hr": 76.3,
+      "br": 15.1,
+      "focus": 0.745,
+      "stress": 19.7,
+      "stress_peak": 28.0
+    },
+    {
+      "t": "2026-10-10T18:21:05Z",
+      "hr": 72.7,
+      "br": 13.8,
+      "focus": 0.801,
+      "stress": 2.8,
+      "stress_peak": 5.3
+    },
+    {
+      "t": "2026-10-10T18:21:10Z",
+      "hr": 71.4,
+      "br": 14.3,
+      "focus": 0.805,
+      "stress": 2.3,
+      "stress_peak": 6.2
+    },
+    {
+      "t": "2026-10-10T18:21:15Z",
+      "hr": 71.4,
+      "br": 14.2,
+      "focus": 0.791,
+      "stress": 2.7,
+      "stress_peak": 5.0
+    },
+    {
+      "t": "2026-10-10T18:21:20Z",
+      "hr": 71.8,
+      "br": 14.1,
+      "focus": 0.785,
+      "stress": 2.2,
+      "stress_peak": 5.2
+    },
+    {
+      "t": "2026-10-10T18:21:25Z",
+      "hr": 72.1,
+      "br": 14.2,
+      "focus": 0.81,
+      "stress": 2.8,
+      "stress_peak": 6.8
+    },
+    {
+      "t": "2026-10-10T18:21:30Z",
+      "hr": 72.3,
+      "br": 14.6,
+      "focus": 0.797,
+      "stress": 4.1,
+      "stress_peak": 5.7
+    },
+    {
+      "t": "2026-10-10T18:21:35Z",
+      "hr": 72.1,
+      "br": 13.8,
+      "focus": 0.796,
+      "stress": 2.1,
+      "stress_peak": 5.9
+    },
+    {
+      "t": "2026-10-10T18:21:40Z",
+      "hr": 72.3,
+      "br": 13.9,
+      "focus": 0.781,
+      "stress": 3.0,
+      "stress_peak": 4.7
+    },
+    {
+      "t": "2026-10-10T18:21:45Z",
+      "hr": 75.9,
+      "br": 15.1,
+      "focus": 0.747,
+      "stress": 18.6,
+      "stress_peak": 45.3
+    },
+    {
+      "t": "2026-10-10T18:21:50Z",
+      "hr": 87.5,
+      "br": 17.8,
+      "focus": 0.545,
+      "stress": 72.4,
+      "stress_peak": 83.7
+    },
+    {
+      "t": "2026-10-10T18:21:55Z",
+      "hr": 85.7,
+      "br": 16.8,
+      "focus": 0.585,
+      "stress": 60.5,
+      "stress_peak": 67.6
+    },
+    {
+      "t": "2026-10-10T18:22:00Z",
+      "hr": 80.7,
+      "br": 16.1,
+      "focus": 0.657,
+      "stress": 40.1,
+      "stress_peak": 47.3
+    },
+    {
+      "t": "2026-10-10T18:22:05Z",
+      "hr": 76.5,
+      "br": 15.1,
+      "focus": 0.719,
+      "stress": 20.7,
+      "stress_peak": 31.2
+    },
+    {
+      "t": "2026-10-10T18:22:10Z",
+      "hr": 74.5,
+      "br": 13.8,
+      "focus": 0.785,
+      "stress": 7.3,
+      "stress_peak": 7.3
     }
   ],
   "questions": [
     {
-      "id": "2355146c-1d9c-4853-a867-2e76bc31c1c0",
+      "id": "264b7a5a-86e3-4dbb-b13b-7e0bc40c035e",
       "idx": 0,
       "kind": "calibration",
-      "text": "Hey, how's HackRU going so far?",
-      "transcript": "It's going pretty well. We got here Saturday morning, found a table near the power outlets, and we've been building since lunch. The coffee is holding up and the team is getting along, so honestly I am feeling okay about it.",
-      "answer_started_at": "2026-10-10T18:00:02.708Z",
-      "answered_at": "2026-10-10T18:00:40.708Z",
+      "text": "Hey, thanks for coming in. Before we get started, how's HackRU going so far?",
+      "transcript": "It's going really well. We've been building an interview coach that reads your heart rate from the webcam.",
+      "answer_started_at": "2026-10-10T18:17:18.869171Z",
+      "answered_at": "2026-10-10T18:17:48.879785Z",
       "stats": {
-        "question_id": "2355146c-1d9c-4853-a867-2e76bc31c1c0",
-        "duration_s": 38,
-        "n_samples": 38,
-        "hr_mean": 74.3,
-        "hr_peak": 76.6,
-        "hr_delta_pct": -0.2,
-        "br_mean": 13.9,
-        "focus_mean": 0.8,
-        "stress_mean": 3.5,
-        "stress_peak": 9.8,
-        "peak_offset_s": 10.3
+        "question_id": "264b7a5a-86e3-4dbb-b13b-7e0bc40c035e",
+        "duration_s": 30.0,
+        "n_samples": 30,
+        "hr_mean": 72.2,
+        "hr_peak": 74.0,
+        "hr_delta_pct": 0.0,
+        "br_mean": 14.1,
+        "focus_mean": 0.809,
+        "stress_mean": 2.2,
+        "stress_peak": 5.4,
+        "peak_offset_s": 0.9
       }
     },
     {
-      "id": "615805cd-7c07-41a3-9ed9-8fa6f388f892",
+      "id": "4341c857-0da8-4ed4-ae55-5dddb738d586",
+      "idx": 0,
+      "kind": "calibration",
+      "text": "Nice. And what have you been working on this weekend?",
+      "transcript": "I built a FastAPI backend for a hackathon project. The part I'm proudest of is the real-time pipeline: readings come in every second, get scored against a personal baseline, and stream to a live chart over WebSockets. I learned a lot about keeping latency low.",
+      "answer_started_at": "2026-10-10T18:17:51.050195Z",
+      "answered_at": "2026-10-10T18:18:21.057624Z",
+      "stats": {
+        "question_id": "4341c857-0da8-4ed4-ae55-5dddb738d586",
+        "duration_s": 30.0,
+        "n_samples": 30,
+        "hr_mean": 72.0,
+        "hr_peak": 74.0,
+        "hr_delta_pct": -0.2,
+        "br_mean": 14.0,
+        "focus_mean": 0.8,
+        "stress_mean": 2.7,
+        "stress_peak": 7.6,
+        "peak_offset_s": 12.7
+      }
+    },
+    {
+      "id": "f50a5cc6-c885-4861-ac75-084c02de9164",
       "idx": 1,
       "kind": "main",
-      "text": "Walk me through a project you shipped recently and the part you personally owned.",
-      "transcript": "I built the dashboard for a campus food pantry. I owned the React frontend and the inventory API, and we cut the time volunteers spent on stock counts from an hour to about ten minutes.",
-      "answer_started_at": "2026-10-10T18:00:46.493Z",
-      "answered_at": "2026-10-10T18:01:12.493Z",
+      "text": "Tell me about a project you built recently and the part you're proudest of.",
+      "transcript": "Um, I'm not sure.",
+      "answer_started_at": "2026-10-10T18:18:23.641122Z",
+      "answered_at": "2026-10-10T18:18:53.648273Z",
       "stats": {
-        "question_id": "615805cd-7c07-41a3-9ed9-8fa6f388f892",
-        "duration_s": 26,
-        "n_samples": 26,
-        "hr_mean": 71.6,
-        "hr_peak": 76.2,
-        "hr_delta_pct": -3.8,
-        "br_mean": 14.5,
-        "focus_mean": 0.84,
-        "stress_mean": 4.3,
-        "stress_peak": 12.4,
-        "peak_offset_s": 25.5
+        "question_id": "f50a5cc6-c885-4861-ac75-084c02de9164",
+        "duration_s": 30.0,
+        "n_samples": 30,
+        "hr_mean": 79.2,
+        "hr_peak": 89.4,
+        "hr_delta_pct": 9.8,
+        "br_mean": 15.6,
+        "focus_mean": 0.675,
+        "stress_mean": 34.0,
+        "stress_peak": 82.2,
+        "peak_offset_s": 16.1
       }
     },
     {
-      "id": "9e39ddd6-3fb4-428b-b1b3-8f1b3e0f3634",
+      "id": "fdc209de-2381-45c7-860c-0a442b24c1d7",
       "idx": 2,
-      "kind": "main",
-      "text": "How would you debug a page that suddenly takes eight seconds to load in production?",
-      "transcript": "First I would check whether it is the network or the main thread using the performance panel, then compare with the last deploy. Usually it is a new bundle or an API call that lost its cache.",
-      "answer_started_at": "2026-10-10T18:01:20.162Z",
-      "answered_at": "2026-10-10T18:01:47.162Z",
+      "kind": "follow_up",
+      "text": "That's okay, let me put it more simply. Just walk me through the very first step you'd take.",
+      "transcript": "First I'd check whether the slowdown is everywhere or one endpoint, then look at recent deploys, database query plans, and connection pool saturation. I'd add timing around each layer to find where the time goes.",
+      "answer_started_at": "2026-10-10T18:18:55.980785Z",
+      "answered_at": "2026-10-10T18:19:25.991219Z",
       "stats": {
-        "question_id": "9e39ddd6-3fb4-428b-b1b3-8f1b3e0f3634",
-        "duration_s": 27,
-        "n_samples": 23,
-        "hr_mean": 74.7,
-        "hr_peak": 76.3,
-        "hr_delta_pct": 0.4,
-        "br_mean": 13.8,
-        "focus_mean": 0.83,
+        "question_id": "fdc209de-2381-45c7-860c-0a442b24c1d7",
+        "duration_s": 30.0,
+        "n_samples": 30,
+        "hr_mean": 72.2,
+        "hr_peak": 73.9,
+        "hr_delta_pct": 0.1,
+        "br_mean": 14.1,
+        "focus_mean": 0.797,
         "stress_mean": 2.9,
-        "stress_peak": 9.2,
+        "stress_peak": 14.1,
+        "peak_offset_s": 0.8
+      }
+    },
+    {
+      "id": "af0a26ef-2a65-4645-acde-cfdf7098b53c",
+      "idx": 3,
+      "kind": "main",
+      "text": "Walk me through how you'd debug an API that suddenly got ten times slower.",
+      "transcript": "I'd shard users across chat servers, keep connections on WebSockets, put messages in a durable queue, and store history in a partitioned database so reads stay fast.",
+      "answer_started_at": "2026-10-10T18:19:28.365529Z",
+      "answered_at": "2026-10-10T18:19:58.381260Z",
+      "stats": {
+        "question_id": "af0a26ef-2a65-4645-acde-cfdf7098b53c",
+        "duration_s": 30.0,
+        "n_samples": 30,
+        "hr_mean": 79.2,
+        "hr_peak": 91.1,
+        "hr_delta_pct": 9.8,
+        "br_mean": 15.7,
+        "focus_mean": 0.671,
+        "stress_mean": 34.5,
+        "stress_peak": 86.8,
+        "peak_offset_s": 16.4
+      }
+    },
+    {
+      "id": "ae760380-ed01-43c3-b8e1-78934ffc8f96",
+      "idx": 4,
+      "kind": "follow_up",
+      "text": "That's okay, let me put it more simply. Just walk me through the very first step you'd take.",
+      "transcript": "My biggest failure was missing a launch deadline because I didn't flag a risk early. Now I raise blockers the day I see them.",
+      "answer_started_at": "2026-10-10T18:20:00.611120Z",
+      "answered_at": "2026-10-10T18:20:30.632961Z",
+      "stats": {
+        "question_id": "ae760380-ed01-43c3-b8e1-78934ffc8f96",
+        "duration_s": 30.0,
+        "n_samples": 30,
+        "hr_mean": 72.1,
+        "hr_peak": 75.8,
+        "hr_delta_pct": -0.1,
+        "br_mean": 14.1,
+        "focus_mean": 0.795,
+        "stress_mean": 2.9,
+        "stress_peak": 12.9,
+        "peak_offset_s": 1.2
+      }
+    },
+    {
+      "id": "ee6c206d-ba9c-49d8-8f9c-34d2218af860",
+      "idx": 5,
+      "kind": "main",
+      "text": "How would you design a chat app that has to support a million users?",
+      "transcript": "It's going really well. We've been building an interview coach that reads your heart rate from the webcam.",
+      "answer_started_at": "2026-10-10T18:20:32.970945Z",
+      "answered_at": "2026-10-10T18:21:02.983953Z",
+      "stats": {
+        "question_id": "ee6c206d-ba9c-49d8-8f9c-34d2218af860",
+        "duration_s": 30.0,
+        "n_samples": 30,
+        "hr_mean": 79.4,
+        "hr_peak": 89.1,
+        "hr_delta_pct": 10.1,
+        "br_mean": 15.8,
+        "focus_mean": 0.672,
+        "stress_mean": 35.1,
+        "stress_peak": 81.0,
         "peak_offset_s": 15.8
       }
     },
     {
-      "id": "7fa0a7ed-46c7-46be-88fe-b605a094d8e4",
-      "idx": 3,
-      "kind": "main",
-      "text": "Tell me about a time you disagreed with a teammate on a technical decision. What happened?",
-      "transcript": "We disagreed about using a global store versus local state. I wrote a small prototype of both, we compared them on the real screens, and we went with local state plus one context.",
-      "answer_started_at": "2026-10-10T18:01:55.216Z",
-      "answered_at": "2026-10-10T18:02:23.216Z",
-      "stats": {
-        "question_id": "7fa0a7ed-46c7-46be-88fe-b605a094d8e4",
-        "duration_s": 28,
-        "n_samples": 28,
-        "hr_mean": 77.9,
-        "hr_peak": 84.3,
-        "hr_delta_pct": 4.7,
-        "br_mean": 15.1,
-        "focus_mean": 0.77,
-        "stress_mean": 18.5,
-        "stress_peak": 42.3,
-        "peak_offset_s": 9.8
-      }
-    },
-    {
-      "id": "53f2df52-30a5-492d-bc30-9e4001f5a5a4",
-      "idx": 4,
-      "kind": "main",
-      "text": "How would you design a rate limiter for an API that serves ten thousand requests per second?",
-      "transcript": "I would use a token bucket per API key stored in Redis, with a Lua script so the check and decrement are atomic, and return a retry after header when the bucket is empty.",
-      "answer_started_at": "2026-10-10T18:02:31.654Z",
-      "answered_at": "2026-10-10T18:03:01.654Z",
-      "stats": {
-        "question_id": "53f2df52-30a5-492d-bc30-9e4001f5a5a4",
-        "duration_s": 30,
-        "n_samples": 30,
-        "hr_mean": 73,
-        "hr_peak": 75.5,
-        "hr_delta_pct": -1.9,
-        "br_mean": 14.4,
-        "focus_mean": 0.76,
-        "stress_mean": 5.3,
-        "stress_peak": 10.9,
-        "peak_offset_s": 23.3
-      }
-    },
-    {
-      "id": "15d00d14-e58d-4988-b16e-4eefa364260c",
-      "idx": 5,
-      "kind": "main",
-      "text": "Explain how you would find the longest substring without repeating characters, and its time complexity.",
-      "transcript": "Okay so, um, I would check every substring, no wait, that is too slow. Maybe a hash map of characters... I think there is a window you slide, but I am blanking on how to move the left side.",
-      "answer_started_at": "2026-10-10T18:03:09.323Z",
-      "answered_at": "2026-10-10T18:03:39.323Z",
-      "stats": {
-        "question_id": "15d00d14-e58d-4988-b16e-4eefa364260c",
-        "duration_s": 30,
-        "n_samples": 30,
-        "hr_mean": 88.1,
-        "hr_peak": 97.7,
-        "hr_delta_pct": 18.4,
-        "br_mean": 17.3,
-        "focus_mean": 0.59,
-        "stress_mean": 61.8,
-        "stress_peak": 87.5,
-        "peak_offset_s": 13.7
-      }
-    },
-    {
-      "id": "5f5a63cf-ba60-43ad-a837-f371d2af8b31",
+      "id": "583b429a-8248-4a6a-ba6e-f234cf557745",
       "idx": 6,
       "kind": "follow_up",
-      "text": "No rush. Let's simplify it: what would you keep track of as you move through the string one character at a time?",
-      "transcript": "I would keep the last index of each character in a map and a left pointer. When I see a repeat, I jump left past it. That is one pass, so linear time.",
-      "answer_started_at": "2026-10-10T18:03:49.685Z",
-      "answered_at": "2026-10-10T18:04:13.685Z",
+      "text": "That's okay, let me put it more simply. Just walk me through the very first step you'd take.",
+      "transcript": "I built a FastAPI backend for a hackathon project. The part I'm proudest of is the real-time pipeline: readings come in every second, get scored against a personal baseline, and stream to a live chart over WebSockets. I learned a lot about keeping latency low.",
+      "answer_started_at": "2026-10-10T18:21:05.206784Z",
+      "answered_at": "2026-10-10T18:21:35.215664Z",
       "stats": {
-        "question_id": "5f5a63cf-ba60-43ad-a837-f371d2af8b31",
-        "duration_s": 24,
-        "n_samples": 24,
-        "hr_mean": 72,
-        "hr_peak": 73.7,
-        "hr_delta_pct": -3.2,
+        "question_id": "583b429a-8248-4a6a-ba6e-f234cf557745",
+        "duration_s": 30.0,
+        "n_samples": 30,
+        "hr_mean": 72.0,
+        "hr_peak": 74.0,
+        "hr_delta_pct": -0.3,
         "br_mean": 14.2,
-        "focus_mean": 0.84,
-        "stress_mean": 2.1,
-        "stress_peak": 5.4,
-        "peak_offset_s": 19.3
+        "focus_mean": 0.798,
+        "stress_mean": 2.8,
+        "stress_peak": 6.8,
+        "peak_offset_s": 20.6
       }
-    }
-  ],
-  "coach_flags": [
-    {
-      "ts": "2026-10-10T18:03:22.708Z",
-      "level": "rising",
-      "message": "Heart rate up 10% from your baseline. Take a breath, you have time."
     },
     {
-      "ts": "2026-10-10T18:03:37.708Z",
-      "level": "high",
-      "message": "Heart rate up 28% from your baseline. Slow down."
+      "id": "fb32c08a-9adb-4c27-b661-514f8fe02ebd",
+      "idx": 7,
+      "kind": "main",
+      "text": "Tell me about your biggest failure, and why I should still hire you.",
+      "transcript": "Um, I'm not sure.",
+      "answer_started_at": "2026-10-10T18:21:37.444968Z",
+      "answered_at": "2026-10-10T18:22:07.471191Z",
+      "stats": {
+        "question_id": "fb32c08a-9adb-4c27-b661-514f8fe02ebd",
+        "duration_s": 30.0,
+        "n_samples": 30,
+        "hr_mean": 79.5,
+        "hr_peak": 90.3,
+        "hr_delta_pct": 10.2,
+        "br_mean": 15.7,
+        "focus_mean": 0.677,
+        "stress_mean": 34.7,
+        "stress_peak": 83.7,
+        "peak_offset_s": 15.3
+      }
     }
   ]
 }
