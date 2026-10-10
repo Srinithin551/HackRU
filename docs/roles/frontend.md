@@ -1,6 +1,6 @@
 # Role: Frontend
 
-**Owner:** _teammate_
+**Owner:** Shreyas Sahoo
 **You own:** everything the judges see, plus the domain, deploy, and demo video.
 **Files:** `frontend/*`
 **Sponsor prizes you carry:** .Tech domain, DEV post (and you make every other sponsor visible on screen)
