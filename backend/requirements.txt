@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic>=2
+python-dotenv
+asyncpg
+google-genai
+elevenlabs
+
+# dev / tests
+pytest
+httpx
