@@ -39,8 +39,8 @@ def test_missing_focus_renormalizes():
 
 
 def test_low_confidence_is_none():
-    assert stress_score(reading(confidence=0.49), B) is None
-    assert stress_score(reading(confidence=0.5), B) is not None
+    assert stress_score(reading(confidence=0.69), B) is None      # cutoff is 0.7
+    assert stress_score(reading(confidence=0.7), B) is not None
 
 
 def test_no_baseline_or_no_inputs_is_none():

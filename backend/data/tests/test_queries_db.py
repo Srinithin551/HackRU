@@ -57,9 +57,12 @@ def test_full_session_on_tiger_data():
 
         # calibration: 40 calm readings + 2 face-lost, no baseline yet -> stress NULL
         cal = [calm(t0 + timedelta(seconds=i)) for i in range(40)]
-        cal += [calm(t0 + timedelta(seconds=40 + i), conf=0.0) for i in range(2)]
+        cal += [calm(t0 + timedelta(seconds=40), conf=0.0), calm(t0 + timedelta(seconds=41), conf=0.69)]
         rows = await queries.insert_vitals(cal)
         assert len(rows) == 42 and all(r["stress"] is None and r["session_id"] == sid for r in rows)
+        # confidence < 0.7 is returned for the live chart but never stored
+        assert await pool.fetchval("SELECT count(*) FROM vitals WHERE session_id = $1::uuid", sid) == 40
+        assert await pool.fetchval("SELECT count(*) FROM vitals WHERE session_id = $1::uuid AND confidence < 0.7", sid) == 0
 
         b = await queries.compute_baseline(sid)
         assert isinstance(b, Baseline) and b.n_samples == 30        # first 10 s skipped
@@ -67,10 +70,9 @@ def test_full_session_on_tiger_data():
         assert await queries.get_baseline(sid) == b
         stored = await pool.fetchrow("SELECT baseline_hr, baseline_n FROM sessions WHERE id = $1::uuid", sid)
         assert stored["baseline_n"] == 30
-        # backfill: every good calibration row now has stress ~0; face-lost rows stay NULL
+        # backfill: every stored calibration row now has stress ~0
         backfilled = await pool.fetch("SELECT confidence, stress FROM vitals WHERE session_id = $1::uuid", sid)
-        assert all(r["stress"] == 0 for r in backfilled if r["confidence"] >= 0.5)
-        assert all(r["stress"] is None for r in backfilled if r["confidence"] < 0.5)
+        assert backfilled and all(r["stress"] == 0 for r in backfilled)
 
         # question 1: a stressed answer over the last 20 s
         qid = await queries.insert_question(sid, 1, "main", "Design a rate limiter.")
@@ -120,6 +122,16 @@ def test_baseline_falls_back_to_population_defaults():
         await queries.insert_vitals([calm(now - timedelta(seconds=100 - i)) for i in range(5)])
         b = await queries.compute_baseline(sid)
         assert (b.heart_rate, b.breathing_rate, b.focus, b.n_samples) == (75.0, 15.0, 0.75, 0)
+    run(body)
+
+
+def test_confidence_exactly_at_cutoff_is_stored_and_counted():
+    """vitals.confidence is REAL: 0.7 is stored as 0.69999999, and must still pass the 0.7 filters."""
+    async def body(sid, now, pool):
+        await queries.insert_vitals([calm(now - timedelta(seconds=5 - i), conf=0.7) for i in range(5)])
+        assert await pool.fetchval("SELECT count(*) FROM vitals WHERE session_id = $1::uuid", sid) == 5
+        w = await queries.get_window_stats(sid, 15)
+        assert w.n_samples == 5
     run(body)
 
 

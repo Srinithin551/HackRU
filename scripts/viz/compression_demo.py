@@ -65,6 +65,8 @@ def synthetic_rows(n_sessions: int) -> list[tuple]:
             if i in events:
                 sim.trigger(events[i], i)
             r = sim.reading(i, t0 + timedelta(seconds=i))
+            if r["confidence"] < metrics.MIN_CONFIDENCE:      # never stored, same as insert_vitals
+                continue
             s = metrics.stress_score(VitalsReading(**r), BASE)
             stress = None if s is None else round(s, 1)
             rows.append((t0 + timedelta(seconds=i), sid, r["heart_rate"], r["breathing_rate"], r["focus"],

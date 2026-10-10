@@ -89,7 +89,8 @@ async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
             "expression": r.expression, "confidence": r.confidence,
         }
         row["stress"] = _stress(row, _sessions[sid]["baseline"])
-        _vitals[sid].append(row)
+        if r.confidence >= MIN_CONFIDENCE:          # below 0.7 is broadcast but never stored
+            _vitals[sid].append(row)
         rows.append(row)
     return rows
 
