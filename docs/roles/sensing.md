@@ -1,6 +1,6 @@
 # Role: Sensing
 
-**Owner:** _teammate_
+**Owner:** Sharvil
 **You own:** getting real vitals out of Presage and into the backend, reliably, once per second.
 **Files:** `backend/sensing/routes.py`, `sensing_client/` (or a browser module handed to Frontend)
 **Sponsor prize you carry:** Presage
