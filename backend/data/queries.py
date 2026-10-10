@@ -223,16 +223,15 @@ async def compute_baseline(session_id: str) -> Baseline:
                      breathing_rate=row["br"] or DEFAULT_BASELINE["breathing_rate"],
                      focus=row["focus"] if row["focus"] is not None else DEFAULT_BASELINE["focus"],
                      n_samples=n)
-    await pool.execute(
-        "UPDATE sessions SET baseline_hr = $2, baseline_br = $3, baseline_focus = $4, baseline_n = $5 "
-        "WHERE id = $1", sid, b.heart_rate, b.breathing_rate, b.focus, b.n_samples)
     _baselines[str(sid)] = b               # cache first, so rows inserted from now on get stress
     _baseline_misses.pop(str(sid), None)
 
-    # Backfill: the calibration rows were stored with stress NULL (no baseline yet).
-    pending = await pool.fetch(
-        "SELECT time, heart_rate, breathing_rate, focus, confidence FROM vitals "
-        "WHERE session_id = $1 AND stress IS NULL AND confidence >= 0.5", sid)
+    # Store it and read the rows still missing stress (the calibration rows) in parallel: one round trip.
+    _, pending = await asyncio.gather(
+        pool.execute("UPDATE sessions SET baseline_hr = $2, baseline_br = $3, baseline_focus = $4, "
+                     "baseline_n = $5 WHERE id = $1", sid, b.heart_rate, b.breathing_rate, b.focus, b.n_samples),
+        pool.fetch("SELECT time, heart_rate, breathing_rate, focus, confidence FROM vitals "
+                   "WHERE session_id = $1 AND stress IS NULL AND confidence >= 0.5", sid))
     times, scores = [], []
     for p in pending:
         s = stress_score(VitalsReading(ts=p["time"], heart_rate=p["heart_rate"],

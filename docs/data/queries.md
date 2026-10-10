@@ -105,4 +105,14 @@ SELECT bucket, hr, br, focus, stress, stress_peak FROM vitals_5s WHERE session_i
 
 ## Latency
 
-Filled in by Phase 6 (`scripts/viz/bench_queries.py`).
+Measured on a session with 10 minutes of data, 20 runs each (details and every function: [latency.md](latency.md), chart: [chart4](charts/chart4_query_latency.png)):
+
+| Query | Server execution | Round trip p50 / p95 from the dev laptop |
+|---|---|---|
+| `get_window_stats` | 0.07 ms | 52.6 / 54.8 ms |
+| `get_question_stats` | 0.17 ms | 52.4 / 54.2 ms |
+| `insert_vitals` | 0.14 ms | 53.8 / 79.1 ms |
+| replay series (`vitals_5s`) | 0.08 ms | 54.2 / 79.8 ms (whole endpoint) |
+| network floor `SELECT 1` | | 53.3 / 66.1 ms |
+
+At 10 minutes of data the `get_window_stats` plan is an index scan on `vitals_session_time` with both conditions in the index. For `get_question_stats` the planner sometimes prefers TimescaleDB's default `vitals_time_idx (time DESC)` plus a session filter: with one interview at a time that reads the same ~60 rows, both in under 0.2 ms.
