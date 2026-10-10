@@ -10,6 +10,7 @@ import pytest
 
 from backend.contracts import Baseline, QuestionStats, VitalsReading, WindowStats
 from backend.data import db, queries
+from test_queries_contract import assert_replay_shape
 
 pytestmark = pytest.mark.skipif(
     not (db.config.TIGER_DATABASE_URL), reason="no TIGER_DATABASE_URL: real-DB tests skipped")
@@ -101,6 +102,16 @@ def test_full_session_on_tiger_data():
 
         await queries.end_session(sid)
         assert await queries.get_active_session() != sid
+
+        # replay: end_session materialized the whole session, so the backfilled calibration
+        # stress is in vitals_5s right away (not after the next 30 s policy refresh)
+        replay = await queries.get_replay(sid)
+        assert_replay_shape(replay)
+        assert replay["session"]["baseline"] == {"heart_rate": 72.0, "breathing_rate": 14.0, "focus": 0.8}
+        cal_buckets = [p for p in replay["series"] if p["t"] < (now - timedelta(seconds=85)).isoformat()]
+        assert cal_buckets and all(p["stress"] == 0 for p in cal_buckets if p["hr"] is not None)
+        assert max(p["stress_peak"] or 0 for p in replay["series"]) == pytest.approx(84.5, abs=0.1)
+        assert [q["id"] for q in replay["questions"]] == [qid] and replay["questions"][0]["stats"] == qs.model_dump()
     run(body)
 
 

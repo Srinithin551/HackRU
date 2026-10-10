@@ -10,11 +10,12 @@ DATA_FAKE=0 (so nobody's tests write into the shared database).
 Every vitals query filters on session_id and a time range, so it is an index
 range scan on vitals_session_time (session_id, time DESC).
 """
+import asyncio
 import functools
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from backend.contracts import Baseline, QuestionStats, VitalsReading, WindowStats
 from backend.data import db, fake_queries
@@ -110,8 +111,17 @@ async def end_session(session_id: str) -> None:
     if sid is None:
         return
     pool = await db.get_pool()
-    await pool.execute("UPDATE sessions SET ended_at = now() WHERE id = $1 AND ended_at IS NULL", sid)
+    row = await pool.fetchrow("UPDATE sessions SET ended_at = now() WHERE id = $1 AND ended_at IS NULL "
+                              "RETURNING started_at, ended_at", sid)
     _active = (0.0, None)
+    if row is not None:
+        # Materialize the whole session in vitals_5s now, so the replay is exact immediately
+        # (incl. the stress backfilled after calibration) instead of after the next 30 s refresh.
+        try:
+            await pool.execute("CALL refresh_continuous_aggregate('vitals_5s', $1::timestamptz, $2::timestamptz)",
+                               row["started_at"] - timedelta(seconds=5), row["ended_at"] + timedelta(seconds=5))
+        except Exception:
+            log.warning("end_session: vitals_5s refresh failed; the 30 s policy will catch up", exc_info=True)
 
 
 # ---------------------------------------------------------------- vitals
@@ -392,3 +402,53 @@ async def get_report(session_id: str) -> dict | None:
         return None
     pool = await db.get_pool()
     return await pool.fetchval("SELECT report FROM sessions WHERE id = $1", sid)
+
+
+# ---------------------------------------------------------------- replay (GET /api/sessions/{id}/replay)
+
+REPLAY_SESSION_SQL = """
+SELECT id, user_name, started_at, ended_at, baseline_hr, baseline_br, baseline_focus, baseline_n
+FROM sessions WHERE id = $1
+"""
+# 5-second rollups from the continuous aggregate (real-time, so the newest rows are included)
+REPLAY_SERIES_SQL = """
+SELECT bucket, hr, br, focus, stress, stress_peak FROM vitals_5s WHERE session_id = $1 ORDER BY bucket
+"""
+
+
+def _iso(dt: datetime | None) -> str | None:
+    return None if dt is None else dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+async def get_replay(session_id: str) -> dict | None:
+    """The replay chart payload (data.md shape): session + baseline, vitals_5s series, questions + stats.
+    None if the session doesn't exist."""
+    if FAKE:
+        return await fake_queries.get_replay(session_id)
+    sid = _uuid(session_id)
+    if sid is None:
+        return None
+    pool = await db.get_pool()
+    s, series, qrows = await asyncio.gather(          # three queries in parallel: one round trip
+        pool.fetchrow(REPLAY_SESSION_SQL, sid),
+        pool.fetch(REPLAY_SERIES_SQL, sid),
+        pool.fetch(QUESTION_STATS_SQL + "WHERE q.session_id = $1 ORDER BY q.idx, q.created_at", sid))
+    if s is None:
+        return None
+    b = None
+    if s["baseline_hr"] is not None:
+        b = Baseline(heart_rate=s["baseline_hr"], breathing_rate=s["baseline_br"],
+                     focus=s["baseline_focus"], n_samples=s["baseline_n"] or 0)
+    return {
+        "session": {"id": str(s["id"]), "user_name": s["user_name"], "started_at": _iso(s["started_at"]),
+                    "ended_at": _iso(s["ended_at"]),
+                    "baseline": None if b is None else {"heart_rate": _r(b.heart_rate),
+                                                        "breathing_rate": _r(b.breathing_rate),
+                                                        "focus": _r(b.focus, 3)}},
+        "series": [{"t": _iso(p["bucket"]), "hr": _r(p["hr"]), "br": _r(p["br"]), "focus": _r(p["focus"], 3),
+                    "stress": _r(p["stress"]), "stress_peak": _r(p["stress_peak"])} for p in series],
+        "questions": [{"id": str(q["id"]), "idx": q["idx"], "kind": q["kind"], "text": q["text"],
+                       "transcript": q["transcript"], "answer_started_at": _iso(q["answer_started_at"]),
+                       "answered_at": _iso(q["answered_at"]), "stats": _question_stats(q, b).model_dump()}
+                      for q in qrows],
+    }

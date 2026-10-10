@@ -2,6 +2,8 @@
 version (queries.py) and the in-memory version (fake_queries.py), and returns the agreed types."""
 import asyncio
 import inspect
+import json
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -92,4 +94,48 @@ def test_fake_end_to_end_shapes():
         assert await queries.get_active_session() is None
         assert await queries.insert_vitals([VitalsReading(ts=t0, heart_rate=70)]) == []
 
+        assert_replay_shape(await queries.get_replay(sid))
+        assert await queries.get_replay(str(uuid.uuid4())) is None
+
     asyncio.run(run())
+
+
+# The replay JSON shape agreed with Frontend (docs/roles/data.md, "Replay endpoint")
+REPLAY_KEYS = {
+    "top": {"session", "series", "questions"},
+    "session": {"id", "user_name", "started_at", "ended_at", "baseline"},
+    "baseline": {"heart_rate", "breathing_rate", "focus"},
+    "series": {"t", "hr", "br", "focus", "stress", "stress_peak"},
+    "question": {"id", "idx", "kind", "text", "transcript", "answer_started_at", "answered_at", "stats"},
+}
+
+
+def assert_replay_shape(r: dict) -> None:
+    assert set(r) == REPLAY_KEYS["top"]
+    assert set(r["session"]) == REPLAY_KEYS["session"]
+    assert r["session"]["baseline"] is None or set(r["session"]["baseline"]) == REPLAY_KEYS["baseline"]
+    assert r["series"], "series should not be empty"
+    assert all(set(p) == REPLAY_KEYS["series"] and p["t"].endswith("Z") for p in r["series"])
+    assert [p["t"] for p in r["series"]] == sorted(p["t"] for p in r["series"])
+    for q in r["questions"]:
+        assert set(q) == REPLAY_KEYS["question"]
+        assert set(q["stats"]) == set(QuestionStats.model_fields)
+    json.dumps(r)                                   # serializable as-is
+
+
+def test_routes_through_brains_app():
+    """GET /api/sessions/active and /replay, mounted by Brain's main.py (in-memory under pytest)."""
+    from fastapi.testclient import TestClient
+    from backend.main import app
+
+    with TestClient(app) as client:
+        sid = asyncio.run(queries.create_session("Route test", "demo", "SWE"))
+        assert client.get("/api/sessions/active").json() == {"session_id": sid}
+        now = datetime.now(timezone.utc)
+        asyncio.run(queries.insert_vitals([VitalsReading(ts=now, heart_rate=72, confidence=0.9)]))
+        r = client.get(f"/api/sessions/{sid}/replay")
+        assert r.status_code == 200
+        assert_replay_shape(r.json())
+        assert client.get(f"/api/sessions/{uuid.uuid4()}/replay").status_code == 404
+        asyncio.run(queries.end_session(sid))
+        assert client.get("/api/sessions/active").json() is None

@@ -210,3 +210,43 @@ async def save_report(session_id, report: dict) -> None:
 async def get_report(session_id) -> Optional[dict]:
     s = _sessions.get(session_id)
     return s["report"] if s else None
+
+
+# ---------------------------------------------------------------- replay
+
+def _iso(dt: Optional[datetime]) -> Optional[str]:
+    return None if dt is None else dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+async def get_replay(session_id) -> Optional[dict]:
+    """Same shape as queries.get_replay, bucketed in memory like time_bucket('5 seconds')."""
+    s = _sessions.get(session_id)
+    if s is None:
+        return None
+    buckets: dict[datetime, list[dict]] = defaultdict(list)
+    for v in _vitals.get(session_id, []):
+        ts = v["time"]
+        buckets[ts - timedelta(seconds=ts.timestamp() % 5)].append(v)
+    series = []
+    for bucket in sorted(buckets):
+        rows = buckets[bucket]
+        stresses = [v["stress"] for v in rows if v["stress"] is not None]
+        series.append({"t": _iso(bucket), "hr": _r(_mean(v["heart_rate"] for v in rows)),
+                       "br": _r(_mean(v["breathing_rate"] for v in rows)),
+                       "focus": _r(_mean(v["focus"] for v in rows), 3), "stress": _r(_mean(stresses)),
+                       "stress_peak": max(stresses) if stresses else None})
+    b = s["baseline"]
+    qs = sorted((q for q in _questions.values() if q["session_id"] == session_id),
+                key=lambda q: (q["idx"], q["created_at"]))
+    return {
+        "session": {"id": session_id, "user_name": s.get("user_name"), "started_at": _iso(s["started_at"]),
+                    "ended_at": _iso(s["ended_at"]),
+                    "baseline": None if b is None else {"heart_rate": _r(b.heart_rate),
+                                                        "breathing_rate": _r(b.breathing_rate),
+                                                        "focus": _r(b.focus, 3)}},
+        "series": series,
+        "questions": [{"id": q["id"], "idx": q["idx"], "kind": q["kind"], "text": q["text"],
+                       "transcript": q["transcript"], "answer_started_at": _iso(q["answer_started_at"]),
+                       "answered_at": _iso(q["answered_at"]),
+                       "stats": (await get_question_stats(q["id"])).model_dump()} for q in qs],
+    }
