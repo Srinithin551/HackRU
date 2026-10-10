@@ -1,6 +1,6 @@
 # Role: Data
 
-**Owner:** _teammate_
+**Owner:** Likhil
 **You own:** Tiger Data, the schema, the stress score, every query Brain uses, the replay endpoint, and the mock vitals generator.
 **Files:** `backend/data/*`, `scripts/mock_vitals.py`
 **Sponsor prize you carry:** Tiger Data
