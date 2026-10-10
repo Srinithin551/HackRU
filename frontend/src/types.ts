@@ -198,6 +198,8 @@ export interface Report {
   top_tips: string[]
   // Additive fields from Brain's build (brain.md "As built"). Optional so the mock and older
   // reports still type-check.
+  /** False when no usable vitals were captured: composure_score is then a neutral 50, not a verdict. */
+  composure_measured?: boolean
   /** For the red/amber dots on the replay chart. */
   coach_flags?: ReportCoachFlag[]
   /** The decision made after each answer (coach, redirect, ease_off, push, follow_up, next, wrap_up). */
@@ -215,6 +217,8 @@ export interface ReportCoachFlag {
 
 export interface Adaptation {
   question_id: string
+  /** The live coaching that was spoken, when action is "coach". */
+  coaching?: string
   /**
    * coach = the answer was wrong, off-topic or inappropriate: the interviewer stepped out of the interview,
    * said what would happen in a real one and what to say instead, then moved on.
@@ -244,7 +248,14 @@ export interface QuestionEvent {
   /** Planned question count ("Q 2 of 5"). */
   total: number
   kind: QuestionKind
+  /** The question, with at most a short lead-in. Never contains coaching. */
   text: string
+  /**
+   * Feedback on the previous answer, said outside the interview frame ("Let me step out of the interview
+   * for a second…"): what would happen in a real interview and what a strong answer includes.
+   * Spoken first, in the same clip as `text`. Null when there's no coaching.
+   */
+  coaching?: string | null
   /**
    * Absolute URL (PUBLIC_BASE_URL + "/audio/<hash>.mp3"), or null when TTS is unavailable:
    * then show the text and send answer_started right away. Play it via resolveAudioUrl().

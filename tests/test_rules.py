@@ -4,7 +4,8 @@ import pytest
 
 from backend.brain import fake, lines, prompts
 from backend.brain.history import normalize_history, stats_line
-from backend.brain.interviewer import final_coaching, resolve_action, spoken
+from backend.brain.interviewer import resolve_action
+from backend.brain.turns import final_coaching, split_coaching, spoken
 from backend.brain.models import QuestionFeedback, ReportDraft
 from backend.brain.report import fallback_report, finalize_draft
 from backend.brain.specs import fallback_questions, get_spec, normalize_type
@@ -56,7 +57,7 @@ def state(type_="Software Engineering") -> SessionState:
     ("coach", "Stepping out: that would cost you.", 0, 0, 0, "coach"),   # last question: feedback, then closing
     ("coach", "", 0, 0, 2, "next"),
     ("coach", "", 0, 0, 0, "wrap_up"),
-    ("coach", " ".join(["word"] * 120), 0, 0, 2, "coach"),      # coaching gets a longer allowance
+    ("coach", " ".join(["word"] * 100), 0, 0, 2, "coach"),      # coaching gets a longer allowance
     ("coach", " ".join(["word"] * 150), 0, 0, 2, "next"),
 ])
 def test_resolve_action(action, text, followups, redirects, queue, expected):
@@ -90,8 +91,8 @@ def test_fake_decide_coaches_wrong_answers_and_reasks_empty_ones():
     q = "Walk me through how you'd debug an API that suddenly got ten times slower."
     d = fake.decide("I really like pizza and playing basketball with my friends on weekends.", None, q, "main",
                     next_question="Next one?")
-    assert d.action == "coach" and d.spoken_text == fake.coach_turn("Next one?")
-    assert d.spoken_text.startswith("Let me step out of the interview") and d.spoken_text.endswith("Next one?")
+    assert d.action == "coach" and d.coaching == fake.FAKE_COACH and d.spoken_text == "Next one?"
+    assert d.coaching.startswith("Let me step out of the interview")
     assert fake.decide("not sure", None, q, "main").action == "coach"                # very weak
     assert fake.decide("", None, q, "main").spoken_text == fake.FAKE_LINES["redirect"]
     assert fake.decide("I would debug the slower endpoints first by checking the traces.", None, q, "main").action == "next"
@@ -106,7 +107,7 @@ def test_fake_texts_cover_everything_spoken():
     assert all(t in texts for t in fake.FAKE_LINES.values())
     assert all(t in texts for t in lines.fixed_lines())
     assert all(fake.coach_turn(q.text) in texts for q in fake.FAKE_QUESTIONS[1:])
-    assert fake.coach_turn(None) in texts
+    assert f"{final_coaching(fake.FAKE_COACH)} {lines.CLOSING_LINE}" in texts
     assert len(texts) == len(set(texts))
 
 
@@ -304,3 +305,24 @@ def test_small_talk_context_names_what_they_are_interviewing_for():
     assert "INTERVIEWING FOR: Backend Engineer" in ctx and 'CANDIDATE: "I\'m a CS major at Rutgers."' in ctx
     assert "PRESENTATION TOPIC:" in prompts.small_talk_context(state("Class Presentation"))
     assert "major" in prompts.SMALL_TALK_SYSTEM and '"got it"' in prompts.SMALL_TALK_SYSTEM
+
+
+@pytest.mark.parametrize("raw,coaching,question", [
+    ("Let me step out. That would cost you. Okay, back in the interview. How would you shard it?",
+     "Let me step out. That would cost you. Okay, back in the interview.", "How would you shard it?"),
+    ("Let me step out. That would cost you. Say X instead.", "Let me step out. That would cost you. Say X instead.", ""),
+])
+def test_split_coaching(raw, coaching, question):
+    assert split_coaching(raw) == (coaching, question)
+
+
+def test_reports_say_whether_composure_was_measured():
+    measured = fallback_report(state(), normalize_history(history()))
+    assert measured.composure_measured is True
+    no_vitals = normalize_history([{"question_id": "q1", "idx": 1, "kind": "main", "text": "Q", "transcript": "A",
+                                    "stats": qstats(n_samples=0, stress_mean=None, stress_peak=None)}])
+    assert fallback_report(state(), no_vitals).composure_measured is False
+    draft = ReportDraft(composure_score=90, summary="s", hardest_moment="none", top_tips=["a", "b", "c"],
+                        per_question=[])
+    assert finalize_draft(state(), no_vitals, draft).composure_measured is False
+    assert finalize_draft(state(), normalize_history(history()), draft).composure_measured is True

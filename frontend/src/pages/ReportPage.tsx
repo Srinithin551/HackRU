@@ -152,8 +152,12 @@ function SessionReport({ sessionId }: { sessionId: string }) {
               <ScoreRing score={report.composure_score} />
               <div>
                 <p className="label-caps">Composure</p>
-                <p className="mt-1 text-title font-semibold">{verdict(report.composure_score)}</p>
-                <p className="text-caption text-ink-muted">0–100 · higher is calmer</p>
+                <p className="mt-1 text-title font-semibold">
+                  {report.composure_measured === false ? 'Not measured' : verdict(report.composure_score)}
+                </p>
+                <p className="text-caption text-ink-muted">
+                  {report.composure_measured === false ? 'No usable vitals this session' : '0–100 · higher is calmer'}
+                </p>
               </div>
             </div>
             <p className="mt-3 text-body text-ink-secondary">{report.summary}</p>

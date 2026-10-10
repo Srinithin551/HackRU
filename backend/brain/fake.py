@@ -11,6 +11,7 @@ from typing import Optional
 from backend.brain import lines
 from backend.brain.models import Decision, PlannedQuestion
 from backend.brain.specs import InterviewSpec
+from backend.brain.turns import final_coaching
 from backend.contracts import QuestionStats
 
 FAKE_QUESTIONS = [
@@ -31,8 +32,8 @@ FAKE_LINES = {
     "follow_up": "Can you give me one specific example of that?",
 }
 
-# Coaching, said outside the interview frame. In fake mode the next question is appended, and every
-# combination is pre-recorded as one clip, so a coaching turn is still a single clip.
+# Coaching, said outside the interview frame, then the next question in the same clip. Every combination
+# is pre-recorded, so a coaching turn is still a single clip.
 FAKE_COACH = ("Let me step out of the interview for a second. In a real interview, an answer like that would cost "
               "you, because it doesn't answer what was asked. A strong answer leads with your main point and backs "
               "it with one concrete example. Okay, back in the interview.")
@@ -89,10 +90,14 @@ def decide(transcript: str, stats: Optional[QuestionStats], question: str = "", 
         action = "follow_up"
     else:
         action = "next"
-    text = coach_turn(next_question) if action == "coach" else FAKE_LINES.get(action, "")
+    if action == "coach":
+        coaching, text = FAKE_COACH, next_question or ""
+    else:
+        coaching, text = "", FAKE_LINES.get(action, "")
     return Decision(
         action=action,
         spoken_text=text,
+        coaching=coaching,
         answer_quality=quality,
         rationale=f"fake rules: words={words} stress_peak={peak} stress_mean={mean}",
     )
@@ -103,5 +108,6 @@ def all_texts() -> list[str]:
     texts = lines.fixed_lines()
     texts += [q.text for q in FAKE_QUESTIONS]
     texts += list(FAKE_LINES.values())
-    texts += [coach_turn(None)] + [coach_turn(q.text) for q in FAKE_QUESTIONS[1:]]
+    texts += [coach_turn(q.text) for q in FAKE_QUESTIONS[1:]]             # coaching + next question, one clip
+    texts += [f"{final_coaching(FAKE_COACH)} {lines.CLOSING_LINE}"]         # coaching on the last answer + closing
     return list(dict.fromkeys(texts))

@@ -141,6 +141,7 @@ def fallback_report(s: SessionState, items: list[HistoryItem], generated_by: str
                    f"for a composure score of {score}.{worst}")
     return Report(
         composure_score=score,
+        composure_measured=composure_from_stats(items) is not None,
         summary=summary,
         hardest_moment=hardest_moment_text(items),
         per_question=[fallback_feedback(it, reacted.get(it.question_id)) for it in answered],
@@ -184,6 +185,7 @@ def finalize_draft(s: SessionState, items: list[HistoryItem], draft: ReportDraft
 
     return Report(
         composure_score=score,
+        composure_measured=base is not None,
         summary=draft.summary.strip() or fallback_report(s, items).summary,
         hardest_moment=hardest_text,
         per_question=per_question,

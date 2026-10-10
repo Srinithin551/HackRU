@@ -16,10 +16,11 @@ from pydantic import BaseModel
 from backend import config
 from backend.brain import fake, prompts
 from backend.brain.history import HistoryItem
-from backend.brain.models import Decision, InterviewPlan, OpeningLine, PlannedQuestion, Report, ReportDraft
+from backend.brain.models import Decision, DecisionReply, InterviewPlan, OpeningLine, PlannedQuestion, Report, ReportDraft
 from backend.brain.report import fallback_report, finalize_draft
 from backend.brain.specs import InterviewSpec, fallback_questions
 from backend.brain.state import SessionState
+from backend.brain.turns import split_coaching
 from backend.contracts import QuestionStats, WindowStats
 
 log = logging.getLogger("brain.gemini")
@@ -214,12 +215,13 @@ async def decide_next(s: SessionState, kind: str, question: str, transcript: str
                            next_question=s.queue[0].text if s.queue else None)
     context = prompts.decide_context(s, kind, question, transcript, stats, window)
     try:
-        d = await generate("decide_next", prompts.DECIDE_SYSTEM, context, Decision,
+        d = await generate("decide_next", prompts.DECIDE_SYSTEM, context, DecisionReply,
                            temperature=0.4, timeout=DECIDE_TIMEOUT_S, models=fast_models())
-        return d.model_copy(update={
-            "spoken_text": _clean_turn(d.spoken_text),
-            "answer_quality": max(1, min(5, d.answer_quality)),
-        })
+        text, coaching = _clean_turn(d.spoken_text), _clean_spoken(d.coaching)
+        if d.action == "coach" and not coaching:
+            coaching, text = split_coaching(text)   # it put everything in spoken_text anyway
+        return Decision(action=d.action, spoken_text=text, coaching=coaching if d.action == "coach" else "",
+                        answer_quality=max(1, min(5, d.answer_quality)), rationale=d.rationale)
     except Exception as e:
         log.warning("decide_next fell back to 'next': %s", _short(e))
         return Decision(action="next", spoken_text="", answer_quality=3, rationale=f"fallback: {type(e).__name__}")

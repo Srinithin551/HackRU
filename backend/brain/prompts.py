@@ -12,7 +12,7 @@ TRANSCRIPT_LIMIT = 600
 EXCHANGE_LIMIT = 220      # per side, for the recent-conversation block
 RECENT_EXCHANGES = 2
 MAX_TURN_WORDS = 45       # normal turns; interviewer.py rejects anything far longer
-MAX_COACH_WORDS = 95      # coaching turns: step out, what would happen, what to say instead, step back in, next question
+MAX_COACH_WORDS = 75      # the coaching part: step out, what would happen, what to say instead, step back in
 
 SPOKEN_RULES = (
     "Everything you write in question text or spoken_text is read aloud by a text-to-speech voice, so: "
@@ -68,7 +68,8 @@ Choose exactly one action, checking in this order:
   briefly. Allowed once per planned question: if REDIRECTS USED is 1/1, choose coach instead.
 - coach: the answer is wrong, off-topic, rude or inappropriate, dismissive, not a serious attempt, or very weak
   (answer_quality 1 or 2). An answer about something other than what was asked is off-topic even if it's
-  technically sound or reuses a good earlier answer. Give immediate feedback, stepping outside the interview:
+  technically sound or reuses a good earlier answer. Give immediate feedback, stepping outside the interview.
+  Steps 1 to 4 go in `coaching`; step 5 goes in spoken_text (they're spoken back to back as one turn):
   1. Mark the step out clearly, in your own words (e.g. "Let me step out of the interview for a second.").
   2. Say what would realistically happen if they gave that answer in a real interview, honestly and specifically.
      Describe only what they actually said; never invent things they didn't say.
@@ -77,10 +78,10 @@ Choose exactly one action, checking in this order:
      new column first, backfill in batches, switch reads over, then drop the old one"). Not "you should have
      explained it calmly".
   4. Mark the step back in (e.g. "Okay, back in the interview.").
-  5. Ask the NEXT PLANNED QUESTION (reworded to flow if you like).
-  If there is no next planned question, end right after step 3: don't step back in and don't say the
-  interview is over or that you're out of time (the closing line follows automatically).
-  If stress peak > 70, be warm about it: blanking under pressure is normal. Under {MAX_COACH_WORDS} words in total.
+  5. In spoken_text: the NEXT PLANNED QUESTION (reworded to flow if you like), with no coaching in it.
+  If there is no next planned question, end `coaching` right after step 3 (don't step back in, don't say the
+  interview is over or that you're out of time; the closing line follows automatically) and leave spoken_text empty.
+  If stress peak > 70, be warm about it: blanking under pressure is normal. `coaching` under {MAX_COACH_WORDS} words.
 - ease_off: stress peak > 70 and the answer was partly there (answer_quality 3). Rephrase the same question more
   simply or offer a small hint, warm tone.
 - push: stress mean < 40 AND answer_quality >= 4. Ask a harder follow-up on the same topic.
@@ -98,7 +99,8 @@ spoken_text is your whole next turn, said out loud as one natural reply:
   use a simple transition ("Let's switch gears.") rather than a forced segue.
 - redirect, ease_off, push, follow_up: then ask your one question.
 - wrap_up: only the brief reaction (under 15 words) and no question. The closing line is added automatically.
-- Under {MAX_TURN_WORDS} words in total, except coach. At most one question.
+- Under {MAX_TURN_WORDS} words. At most one question.
+coaching: empty ("") for every action except coach.
 
 {VOICE_STYLE}
 {SPOKEN_RULES}

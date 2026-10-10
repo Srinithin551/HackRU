@@ -234,7 +234,7 @@ pip install -r backend/requirements.txt
 cp .env.example .env                                  # fill in keys; BRAIN_FAKE=1 needs none
 BRAIN_FAKE=1 uvicorn backend.main:app --reload        # from the repo root
 python scripts/fake_frontend.py                       # terminal stand-in for the browser
-pytest                                                # 93 tests, < 2 seconds
+pytest                                                # 99 tests, < 2 seconds
 ```
 
 `GET /health` reports fake mode, whether Gemini/ElevenLabs keys are set, and which routers are mounted.
@@ -270,7 +270,8 @@ pytest                                                # 93 tests, < 2 seconds
   - each question then goes `asking` → `listening` → (answer) → `thinking`. **No filler clips** ("Okay.", "Got it."): they sounded scripted and overlapped the next question;
   - at the end: `thinking` → one `filler` clip (reaction or coaching on the last answer, plus the closing line) → `done` → `session_ended`. **`session_ended` is only sent after that clip has finished playing** (its length comes from the file size), so navigating to the report never cuts it off.
 - **One voice at a time.** The server sends at most one clip per turn, and the next one only after `answer_done`. `frontend/src/lib/playClip.ts` is also a single channel: starting any clip stops the previous one (covered by `playClip.test.ts`). Verified in a real browser: 7 clips in a session, never more than 1 playing.
-- **Question `text` is the whole spoken turn**, e.g. "That reconciliation work sounds tricky. Let's switch gears: how would you…". Show it as-is.
+- **Question `text` is the question** with at most a short lead-in, e.g. "That reconciliation work sounds tricky. Let's switch gears: how would you…". It never contains coaching.
+- **`question.coaching`** (string or null): feedback on the previous answer, said outside the interview frame. It is spoken first, in the same clip as `text`. The Live page shows it as a "Coaching on your last answer" note under the question.
 - **Reconnects:** on connect the hub replays the latest `state`, `question` and `session_ended`. A reload mid-session lands on the right screen.
 - **`POST /start`** is idempotent and returns `status`: `started`, `already_running` or `finished`.
 - **`end_session`** works at any time. There's no closing line in that case.
@@ -278,7 +279,9 @@ pytest                                                # 93 tests, < 2 seconds
 - **`GET /report`** returns `404 {"detail": "report not ready"}` until it's saved. It's always saved before `session_ended` is sent. On top of the shape above, it has these additive fields:
   - `coach_flags: [{ts, question_id, level, stress, message}]`, for red dots on the replay chart;
   - `adaptations: [{question_id, action, answer_quality, rationale}]` (the decision made after that question's answer; `action` can be `coach`, `redirect`, `follow_up`, `ease_off`, `push`, `next`, `wrap_up`);
-  - `generated_by: "gemini" | "fallback" | "fake"`.
+  - `generated_by: "gemini" | "fallback" | "fake"`;
+  - `composure_measured: bool`. When false, no usable vitals were captured, so `composure_score` is a neutral 50 and shouldn't be read as a verdict (the Report page shows "Not measured");
+  - `adaptations[].coaching`: the coaching that was spoken, for `coach` actions.
 
 ### For Data
 
@@ -289,7 +292,7 @@ pytest                                                # 93 tests, < 2 seconds
 - **DB pool hook:** if `backend/data/db.py` defines `async def startup()` / `async def shutdown()`, `main.py` calls them in the app lifespan.
 - **Routes:** `backend/data/routes.py` must expose `router = APIRouter()`. `main.py` mounts it automatically when the file exists. The same goes for `backend/sensing/routes.py`.
 - **Calibration timing:** Brain keeps calibration going until at least 35s after `/start` (it asks a second small-talk prompt if the first answer was short), then calls `compute_baseline`. Calibration rows are `kind="calibration"`, `idx=0`, and there can be two of them.
-- **Question text** stored via `insert_question` is the full spoken turn (reaction + question), not just the planned question.
+- **Question text** stored via `insert_question` is the question as asked (with any short lead-in), never the coaching, so replay and report lists show real questions.
 - **`mock_vitals.py --auto`** can poll `GET /api/sessions/{id}/status` for `phase` and `question.{index,kind}` to know when an answer is in progress.
 
 ### For Sensing

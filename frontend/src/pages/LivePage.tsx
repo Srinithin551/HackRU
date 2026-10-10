@@ -219,8 +219,9 @@ function InterviewerPanel({
         {live.phase === 'thinking' && !live.speaking ? <ThinkingDots /> : <Waveform active={live.speaking} />}
       </div>
 
-      {/* The question */}
-      <div className="border-t border-hairline pt-5">
+      {/* When space is tight, "Asked so far" gives up its space first, then this scrolls. The answer
+          controls below never move off screen. */}
+      <div className="min-h-0 overflow-y-auto border-t border-hairline pt-5">
         <div className="flex items-center justify-between gap-2">
           <span className="label-caps">{counterLabel(q)}</span>
           {q?.kind === 'follow_up' && (
@@ -240,10 +241,17 @@ function InterviewerPanel({
         <p className="mt-3 text-question font-medium tracking-tight text-balance">
           {q ? q.text : 'Connecting to your interviewer…'}
         </p>
+        {/* Spoken before the question, shown after it: the question is what they have to answer. */}
+        {q?.coaching && (
+          <div className="mt-3 max-h-[20vh] overflow-y-auto rounded-control border-l-2 border-rising bg-rising-subtle px-3 py-2.5">
+            <p className="label-caps text-rising">Coaching on your last answer · outside the interview</p>
+            <p className="mt-1 text-caption text-ink-secondary">{q.coaching}</p>
+          </div>
+        )}
       </div>
 
       {/* Answer controls */}
-      <div className="flex flex-col gap-2.5">
+      <div className="flex shrink-0 flex-col gap-2.5">
         {typedMode && (
           <textarea
             value={typed}
@@ -267,7 +275,7 @@ function InterviewerPanel({
 
       {/* Asked so far */}
       {earlier.length > 0 && (
-        <div className="mt-auto min-h-0 overflow-y-auto border-t border-hairline pt-4">
+        <div className="mt-auto min-h-0 shrink-[100] overflow-y-auto border-t border-hairline pt-4">
           <p className="label-caps">Asked so far</p>
           <ol className="mt-2 flex flex-col gap-2">
             {earlier.map((a) => (

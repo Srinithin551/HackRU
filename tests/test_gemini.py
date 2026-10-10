@@ -65,7 +65,7 @@ def test_plan_cleans_pads_and_pins_difficulty(fake_gemini):
 
 def test_decide_parses_and_clamps(fake_gemini):
     fake_gemini({"action": "push", "spoken_text": "Okay. What breaks first at ten times the load?",
-                 "answer_quality": 9, "rationale": "calm and strong"})
+                 "answer_quality": 9, "rationale": "calm and strong", "coaching": ""})
     d = asyncio.run(gemini.decide_next(state(), "main", "Q", "answer", None, None))
     assert d.action == "push" and d.answer_quality == 5
 
@@ -80,13 +80,13 @@ def test_decide_times_out_to_next(fake_gemini, monkeypatch):
 
 
 def test_bad_json_falls_back(fake_gemini):
-    fake_gemini({"action": "dance", "spoken_text": "", "answer_quality": 3, "rationale": ""})
+    fake_gemini({"action": "dance", "spoken_text": "", "answer_quality": 3, "rationale": "", "coaching": ""})
     assert asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None)).action == "next"
 
 
 def test_thinking_level_rejected_retries_without_it(fake_gemini):
     models = fake_gemini(RuntimeError("400 INVALID_ARGUMENT: thinking_level is not supported for this model"),
-                         {"action": "next", "spoken_text": "", "answer_quality": 3, "rationale": "ok"})
+                         {"action": "next", "spoken_text": "", "answer_quality": 3, "rationale": "ok", "coaching": ""})
     d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
     assert d.rationale == "ok"
     assert models.models == ["fast-model", "fast-model"]   # same model, retried without thinking_level
@@ -97,7 +97,7 @@ def test_thinking_level_rejected_retries_without_it(fake_gemini):
 def test_overloaded_model_fails_over_to_the_other(fake_gemini):
     models = fake_gemini(RuntimeError("503 UNAVAILABLE: model is experiencing high demand"),
                          {"action": "ease_off", "spoken_text": "Let's slow down.", "answer_quality": 2,
-                          "rationale": "stressed"})
+                          "rationale": "stressed", "coaching": ""})
     d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
     assert d.action == "ease_off"
     assert models.models == ["fast-model", "main-model"]   # decide_next tries the fast model first
@@ -143,7 +143,7 @@ def test_stock_openers_are_stripped(raw, want):
 
 def test_decide_turn_has_stock_openers_removed(fake_gemini):
     fake_gemini({"action": "next", "spoken_text": "Got it, makes sense. Let's switch gears. Why Go?",
-                 "answer_quality": 4, "rationale": "solid"})
+                 "answer_quality": 4, "rationale": "solid", "coaching": ""})
     d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
     assert d.spoken_text == "Let's switch gears. Why Go?"
 
@@ -158,3 +158,25 @@ def test_small_talk_uses_the_fast_model_and_cleans_the_turn(fake_gemini):
 def test_small_talk_failure_returns_none(fake_gemini):
     fake_gemini(RuntimeError("503"), RuntimeError("503"))
     assert asyncio.run(gemini.small_talk_follow_up(state())) is None
+
+
+def test_coach_decision_keeps_coaching_separate_from_the_question(fake_gemini):
+    fake_gemini({"action": "coach", "coaching": "Let me step out for a second. That answer would cost you. Okay, back in.",
+                 "spoken_text": "How would you shard it?", "answer_quality": 1, "rationale": "wrong"})
+    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "pizza", None, None))
+    assert d.coaching == "Let me step out for a second. That answer would cost you. Okay, back in."
+    assert d.spoken_text == "How would you shard it?"
+
+
+def test_coach_blob_in_spoken_text_is_split(fake_gemini):
+    fake_gemini({"action": "coach", "coaching": "",
+                 "spoken_text": "Let me step out for a second. That would cost you. Okay, back in the interview. How would you shard it?",
+                 "answer_quality": 1, "rationale": "wrong"})
+    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "pizza", None, None))
+    assert d.coaching == "Let me step out for a second. That would cost you. Okay, back in the interview."
+    assert d.spoken_text == "How would you shard it?"
+
+
+def test_coaching_is_dropped_for_other_actions(fake_gemini):
+    fake_gemini({"action": "next", "coaching": "stray", "spoken_text": "Why Go?", "answer_quality": 4, "rationale": "ok"})
+    assert asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None)).coaching == ""

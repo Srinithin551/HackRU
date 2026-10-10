@@ -246,8 +246,9 @@ def test_off_topic_answer_gets_coaching_then_the_next_question(client):
         coached = recv_until(ws, "question", log)
         d = coached["data"]
         assert d["kind"] == "main" and d["index"] == 2                  # coaching moves on
-        assert d["text"] == fake.coach_turn(fake.FAKE_QUESTIONS[1].text)
-        assert d["text"].startswith("Let me step out of the interview") and d["audio_url"]   # one clip
+        assert d["text"] == fake.FAKE_QUESTIONS[1].text                 # the screen shows the question...
+        assert d["coaching"] == fake.FAKE_COACH                         # ...and the coaching separately
+        assert d["audio_url"]                                           # both spoken in one clip
         questions = [coached] + run_to_end(ws, log, first_question=coached)[1:]
     assert_one_voice(log)
 
@@ -332,15 +333,17 @@ def test_coaching_mid_interview_and_on_the_last_question(client, monkeypatch):
         return f"/audio/{len(spoken)}.mp3"
 
     coach_mid = ("Let me step out of the interview for a second. In a real interview that answer would sink you. "
-                 "Name a project and what you shipped. Okay, back in. How would you design a chat app for a million users?")
+                 "Name a project and what you shipped. Okay, back in.")
+    next_q = "How would you design a chat app for a million users?"
     coach_last = ("Stepping out for a second: in a real interview, refusing to answer ends things. "
                   "A strong answer owns one real failure and what you changed.")
     coach_last_raw = coach_last + " Okay, back in the interview. So, what's your biggest failure?"   # ignored the prompt
 
     async def decide(s, kind, question, transcript, stats, window):
-        return {1: Decision(action="coach", spoken_text=coach_mid, answer_quality=1, rationale="wrong"),
+        return {1: Decision(action="coach", coaching=coach_mid, spoken_text=next_q, answer_quality=1, rationale="wrong"),
                 2: Decision(action="next", spoken_text="", answer_quality=4, rationale="ok"),
-                3: Decision(action="coach", spoken_text=coach_last_raw, answer_quality=1, rationale="refused")}[s.planned_number]
+                3: Decision(action="coach", coaching=coach_last_raw, spoken_text="", answer_quality=1,
+                            rationale="refused")}[s.planned_number]
 
     async def opening(s, first):
         return None
@@ -357,9 +360,12 @@ def test_coaching_mid_interview_and_on_the_last_question(client, monkeypatch):
         questions = run_to_end(ws, log)
     assert_one_voice(log)
 
-    assert [q["data"]["text"] for q in questions] == [
-        FALLBACK_BANK["demo"][0][0], coach_mid, FALLBACK_BANK["demo"][2][0]]
+    assert [q["data"]["text"] for q in questions] == [FALLBACK_BANK["demo"][0][0], next_q, FALLBACK_BANK["demo"][2][0]]
+    assert [q["data"]["coaching"] for q in questions] == [None, coach_mid, None]
+    assert f"{coach_mid} {next_q}" in spoken                         # coaching + question: one clip
     assert [q["data"]["kind"] for q in questions] == ["main", "main", "main"]
+    report = client.get(f"/api/sessions/{sid}/report").json()
+    assert report["adaptations"][0]["coaching"] == coach_mid
     assert spoken[-1] == f"{coach_last} {lines.CLOSING_LINE}"
     assert [a["action"] for a in states[sid].adaptations] == ["coach", "next", "coach"]
 
