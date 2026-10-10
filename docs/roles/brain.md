@@ -1,0 +1,254 @@
+# Role: Brain
+
+**Owner:** Srinithin
+**You own:** the interview loop, Gemini, ElevenLabs, the WebSocket hub, and the backend skeleton.
+**Files:** `backend/main.py`, `config.py`, `contracts.py`, `ws.py`, `backend/brain/*`
+**Sponsor prizes you carry:** Gemini, ElevenLabs
+
+Read [../PLAN.md](../PLAN.md) first. Everything here plugs into those contracts.
+
+---
+
+## What you consume and what you provide
+
+| You consume | From | How |
+|---|---|---|
+| Live stress, baseline, per-question stats | Data | `backend/data/queries.py` functions (stubbed hour 1, real later) |
+| `answer_started`, `answer_done`, `end_session` | Frontend | WebSocket |
+| Nothing directly from Sensing | | Sensing goes through Data |
+
+| You provide | To | How |
+|---|---|---|
+| App skeleton, `contracts.py`, `ws.broadcast()` | Everyone | Hour 1 |
+| `question`, `filler`, `state`, `coach_flag`, `session_ended` events | Frontend | WebSocket |
+| `/audio/*.mp3` | Frontend | Static files |
+| `GET /api/sessions/{id}/report` | Frontend | REST |
+| `BRAIN_FAKE=1` mode | Frontend | Env flag |
+
+---
+
+## Hour 1 (do this before anything else, everyone is waiting on it)
+
+1. `backend/` skeleton with FastAPI, CORS open for `localhost:5173`, `/audio` static mount, `/health`.
+2. `contracts.py` copied exactly from PLAN.md.
+3. `ws.py` hub:
+   ```python
+   connections: dict[str, set[WebSocket]] = defaultdict(set)
+   inbox: dict[str, asyncio.Queue] = defaultdict(asyncio.Queue)   # client→server events per session
+
+   async def broadcast(session_id: str, type_: str, data: dict): ...
+   @router.websocket("/ws/{session_id}")   # accept, add to set, push every incoming message into inbox[session_id]
+   ```
+   Sensing's ingest route and your loop both call `broadcast()`.
+4. `requirements.txt`: `fastapi uvicorn[standard] pydantic python-dotenv asyncpg google-genai elevenlabs`
+5. `.env.example`, `.gitignore` (`.env`, `backend/static/audio/*.mp3`, `node_modules`).
+6. Push to `main`, post in chat: "skeleton is up, pull now."
+
+## Hours 1 to 2: fake mode
+
+`BRAIN_FAKE=1` runs the whole loop with 4 hardcoded questions, a fixed "next question" decision, a canned report, and mp3s you generate once and commit to `backend/static/fake_audio/`. Frontend builds the entire live page against this. Ship it before touching Gemini.
+
+---
+
+## The interview loop (`brain/interviewer.py`)
+
+```python
+async def run_session(session_id: str):
+    s = SessionState(session_id)
+    await broadcast(session_id, "state", {"state": "calibrating"})
+
+    # 1. Plan questions in the background while calibration runs
+    plan_task = asyncio.create_task(gemini.plan_interview(s.interview_type, s.role_title))
+
+    # 2. Calibration (baseline)
+    qid = await data.insert_question(session_id, 0, "calibration", CALIBRATION_LINE)
+    await ask(s, qid, CALIBRATION_LINE, kind="calibration")
+    await wait_answer(s, qid)                    # handles answer_started / answer_done
+    await data.compute_baseline(session_id)
+
+    watcher = asyncio.create_task(watch_stress(s))   # coach flags from here on
+    plan = await plan_task
+    s.queue = list(plan)                          # PlannedQuestion objects
+
+    # 3. Main loop
+    next_text, kind = s.queue.pop(0).text, "main"
+    while True:
+        s.idx += 1
+        qid = await data.insert_question(session_id, s.idx, kind, next_text)
+        await ask(s, qid, next_text, kind)
+        transcript = await wait_answer(s, qid)
+        await play_filler(s)                      # instant, masks Gemini latency
+        await broadcast(session_id, "state", {"state": "thinking"})
+
+        stats = await data.get_question_stats(qid)
+        window = await data.get_window_stats(session_id, 15)
+        decision = await gemini.decide_next(s, transcript, stats, window)
+
+        if decision.action == "wrap_up" or s.turns >= MAX_TURNS or s.elapsed() > MAX_SECONDS:
+            break
+        next_text, kind = resolve(decision, s)    # follow_up/ease_off/push → decision.spoken_text; next → queue
+
+    # 4. Wrap up
+    watcher.cancel()
+    await ask_closing_line(s)
+    report = await gemini.final_report(s, await data.get_session_history(session_id))
+    await data.save_report(session_id, report)
+    await data.end_session(session_id)
+    await broadcast(session_id, "session_ended",
+                    {"report_url": f"/api/sessions/{session_id}/report",
+                     "replay_url": f"/api/sessions/{session_id}/replay"})
+```
+
+Limits: `MAX_TURNS = 7` (excluding calibration), `MAX_SECONDS = 480`. Keep the demo under 3 minutes by using an `interview_type="demo"` option with 3 main questions.
+
+`wait_answer` reads from `ws.inbox[session_id]`: on `answer_started` call `data.mark_answer_started`, on `answer_done` call `data.mark_answered` and return the transcript. Ignore events for other question ids. Add a timeout (120s) so a dropped tab doesn't hang the loop.
+
+## Stress watcher (`brain/watcher.py`)
+
+This is the "Gemini has constant access to the data" piece. It runs every 3 seconds while the user is answering:
+
+```python
+async def watch_stress(s):
+    last_flag = 0
+    while True:
+        await asyncio.sleep(3)
+        if s.phase != "listening": continue
+        w = await data.get_window_stats(s.session_id, 10)
+        s.live_window = w                       # decide_next sees the latest
+        if w.stress is None: continue
+        level = "high" if w.stress > 70 else "rising" if w.stress > 40 else None
+        if level and time.time() - last_flag > 12:
+            await broadcast(s.session_id, "coach_flag",
+                {"ts": now_iso(), "level": level, "message": flag_message(w)})
+            s.flags.append((s.current_qid, level, w.stress))
+            last_flag = time.time()
+```
+
+`flag_message` is a template, not Gemini (latency): e.g. `"Heart rate up 22% from your baseline. Slow down."` Coach flags are on screen only. Never interrupt the user with voice.
+
+---
+
+## Gemini (`brain/gemini.py`, `brain/prompts.py`)
+
+Use the `google-genai` SDK with JSON output (`response_mime_type="application/json"` plus a `response_schema` from Pydantic). Use a Flash model for everything. Log every prompt and response to `backend/logs/` so you can debug at 3 AM.
+
+### Call 1: `plan_interview` (during calibration)
+
+```python
+class PlannedQuestion(BaseModel):
+    text: str          # spoken aloud, max ~30 words
+    topic: str
+    difficulty: int    # 1 to 5
+```
+
+Prompt gist: "You are a {role_title} interviewer. Write {n} {interview_type} questions in increasing difficulty (2, 3, 3, 4, 5). Each must be speakable in under 12 seconds. No lists, no code blocks, no markdown." Temperature 0.8.
+
+### Call 2: `decide_next` (after every answer)
+
+```python
+class Decision(BaseModel):
+    action: Literal["follow_up", "ease_off", "push", "next", "wrap_up"]
+    spoken_text: str     # what the interviewer says next (empty if action == "next")
+    answer_quality: int  # 1 to 5, Gemini's read of the transcript
+    rationale: str       # for logs and the report, never spoken
+```
+
+Context you send (keep it compact, under ~1,500 tokens):
+
+```
+ROLE: {role_title}   TYPE: {interview_type}   TURN: {turn}/{max}   ELAPSED: {s}s
+BASELINE: HR {72} bpm, BR {14}/min
+QUESTION ({kind}, difficulty {d}): "{text}"
+ANSWER TRANSCRIPT: "{transcript, truncated to 600 chars}"
+BODY DURING ANSWER: HR mean {84} (+17%), peak {91}, stress mean {46}, peak {78} at {12}s in, focus {0.62}
+RIGHT NOW (last 10s): stress {55}, expression {frown}
+REMAINING PLANNED QUESTIONS: {count}
+PREVIOUS DECISIONS: {last 3 actions}
+```
+
+Rules in the system prompt:
+
+- `ease_off` if stress_peak > 70 **and** answer_quality <= 2: rephrase more simply or give a small hint, warm tone.
+- `push` if stress_mean < 40 **and** answer_quality >= 4: a harder follow-up on the same topic.
+- `follow_up` if the answer was vague but the person seems okay: ask for a specific example.
+- `next` otherwise. Max one follow-up per planned question.
+- `wrap_up` when no planned questions remain.
+- `spoken_text` sounds like a real human interviewer: short, natural, no praise inflation, under 30 words.
+
+Temperature 0.4. **Target: Gemini returns in under 2 seconds.** If it takes longer than 6s, fall back to `next` with the queued question.
+
+### Call 3: `final_report`
+
+```python
+class QuestionFeedback(BaseModel):
+    question_id: str
+    what_happened: str   # 1-2 sentences about the answer content
+    body_signal: str     # MUST cite numbers, e.g. "HR jumped 22% above baseline 8s in"
+    advice: str          # one concrete thing to do next time
+
+class Report(BaseModel):
+    composure_score: int          # 0 to 100, higher is calmer
+    summary: str                  # 2-3 sentences
+    hardest_moment: str           # the single biggest spike, with numbers
+    per_question: list[QuestionFeedback]
+    top_tips: list[str]           # exactly 3
+```
+
+Input: full `get_session_history()` plus the coach flags. Temperature 0.5. This is the slowest call, so emit `state: thinking` and let the frontend show a loading screen. Serve it from `GET /api/sessions/{id}/report` (returns `data.get_report()`).
+
+---
+
+## ElevenLabs (`brain/voice.py`)
+
+```python
+async def tts(text: str) -> str:
+    key = sha1(f"{VOICE_ID}:{text}").hexdigest()[:16]
+    path = AUDIO_DIR / f"{key}.mp3"
+    if not path.exists():
+        audio = client.text_to_speech.convert(voice_id=VOICE_ID, model_id=MODEL, text=text,
+                                              output_format="mp3_44100_128")
+        path.write_bytes(b"".join(audio))
+    return f"/audio/{key}.mp3"
+```
+
+- Pick one calm, professional voice and keep it for the whole project. Pick it in the first 2 hours with the team.
+- Use a low-latency model (check ElevenLabs docs for the current fast one).
+- At startup, pre-generate and cache: the calibration line, the closing line, and 4 to 5 fillers ("Okay.", "Got it.", "Mm, alright.", "Take your time, let's keep going."). Rotate fillers so they don't repeat back to back.
+- Run TTS in a thread (`asyncio.to_thread`) so it doesn't block the event loop.
+- Stretch: generate the next planned question's audio while the user is still answering, so "next" decisions play instantly.
+- Stretch for the ElevenLabs prize: use ElevenLabs speech-to-text for the user's answer instead of the browser's, so the app uses ElevenLabs both ways. Coordinate with Frontend first.
+
+`ask(s, qid, text, kind)` = `tts(text)` → `broadcast("question", {...})` → set `s.phase = "listening"` → broadcast `state: listening`.
+
+---
+
+## Your checklist
+
+**Sat 1 to 2 PM**
+- [ ] Skeleton, `contracts.py`, `ws.py`, requirements, env example pushed
+- [ ] Gemini key and ElevenLabs key working with a hello-world script
+
+**2 to 6 PM**
+- [ ] `BRAIN_FAKE=1` mode end to end with Frontend
+- [ ] `voice.py` with caching + pre-generated fillers
+- [ ] `plan_interview` returning good questions for SWE, behavioral, demo types
+- [ ] Interview loop running against Data's stubs and `mock_vitals.py`
+
+**6 PM: Integration 1** with real Presage + real Tiger Data
+
+**6 PM to 12 AM**
+- [ ] `decide_next` with all five actions working (test each by pressing `s` in mock_vitals to fake a spike)
+- [ ] Watcher + coach flags
+- [ ] `final_report` with numbers in every `body_signal`
+- [ ] Latency pass: answer_done → next question audio playing in under 4 seconds
+
+**12 AM: Integration 2** full session
+
+**After**
+- [ ] Prompt polish on real transcripts
+- [ ] Prefetch next question audio
+- [ ] Write the Gemini + ElevenLabs sections of the Devpost
+
+## Done means
+
+A judge does a 3-question demo session. The interviewer speaks naturally, at least one answer triggers a visible adaptation (ease_off or push) tied to a real stress spike, and the report quotes the actual heart rate numbers from that spike.
