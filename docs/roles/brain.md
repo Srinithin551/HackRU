@@ -222,6 +222,98 @@ async def tts(text: str) -> str:
 
 ---
 
+## As built: integration reference
+
+Everything above is implemented on the `brain` branch. This section is what the other roles need to plug in; where the build differs from the plan above, it says so.
+
+### Run it
+
+```bash
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r backend/requirements.txt
+cp .env.example .env                                  # fill in keys; BRAIN_FAKE=1 needs none
+BRAIN_FAKE=1 uvicorn backend.main:app --reload        # from the repo root
+python scripts/fake_frontend.py                       # terminal stand-in for the browser
+pytest                                                # 46 tests, < 1 second
+```
+
+`GET /health` reports fake mode, whether Gemini/ElevenLabs keys are set, and which routers are mounted.
+
+### Files
+
+| File | What it does |
+|---|---|
+| `backend/main.py` | App, CORS (`CORS_ORIGINS` + any localhost port), `/health`, `/audio/{file}.mp3`, mounts routers |
+| `backend/config.py` | All env vars (`.env` at repo root or `backend/.env`) |
+| `backend/contracts.py` | PLAN.md section 3, verbatim |
+| `backend/ws.py` | `broadcast()`, `inbox`, `/ws/{session_id}` |
+| `backend/brain/routes.py` | `POST /api/sessions`, `POST /api/sessions/{id}/start`, `GET /api/sessions/{id}/report`, debug `GET /api/sessions/{id}/status` |
+| `backend/brain/interviewer.py` | The loop: calibration, questions, filler, decide, resolve, wrap-up, crash recovery |
+| `backend/brain/watcher.py` | Coach flags every 3s while listening |
+| `backend/brain/gemini.py`, `prompts.py` | The three Gemini calls, each with a timeout and a fallback, logged to `backend/logs/` |
+| `backend/brain/voice.py` | ElevenLabs TTS, sha1 disk cache, request dedupe, prefetch, filler rotation |
+| `backend/brain/report.py` | Validates Gemini's report, and builds a numbers-only report when Gemini is unavailable |
+| `backend/brain/fake.py` | `BRAIN_FAKE=1` questions, rule-based decisions, list of every fake-mode line |
+| `backend/brain/specs.py`, `lines.py` | Interview types (counts, difficulty curves, limits, fallback questions) and fixed spoken lines |
+| `scripts/make_fake_audio.py` | Renders fake-mode clips into `backend/static/fake_audio/` (ElevenLabs if keyed, else macOS `say`) |
+| `scripts/fake_frontend.py` | Runs a whole session over REST + WebSocket from the terminal (`--type` to type answers, `--end-after N`) |
+
+### For Frontend
+
+- **`audio_url` is absolute** (`PUBLIC_BASE_URL` + `/audio/<hash>.mp3`) so it works as an `<audio>` src from the Vite origin. It is **`null`** if TTS failed or ElevenLabs isn't configured. In that case show the text and send `answer_started` right away. `new URL(audio_url, API_BASE)` handles both.
+- **`question.index` / `total`** = the planned question number and the planned count ("Q 2 of 5"). Calibration is `index: 0`. A follow-up keeps its parent's number, so check `kind`. The replay chart's Q1, Q2... come from Data's sequential `idx`, which counts follow-ups too.
+- **State sequence:**
+  - `calibrating` covers the whole calibration (one or two small-talk prompts, no `asking`/`listening` during it);
+  - each question then goes `asking` → `listening` → (answer) → `filler` → `thinking`;
+  - at the end: `thinking` (closing line plays as a `filler` while the report is written) → `done` → `session_ended`.
+- **Reconnects:** on connect the hub replays the latest `state`, `question` and `session_ended`. A reload mid-session lands on the right screen.
+- **`POST /start`** is idempotent and returns `status`: `started`, `already_running` or `finished`.
+- **`end_session`** works at any time. There's no closing line in that case.
+- **Timeouts:** an unanswered question times out after 120s, counted from `answer_started`. If no tab is connected at that point, the session ends.
+- **`GET /report`** returns `404 {"detail": "report not ready"}` until it's saved. It's always saved before `session_ended` is sent. On top of the shape above, it has these additive fields:
+  - `coach_flags: [{ts, question_id, level, stress, message}]`, for red dots on the replay chart;
+  - `adaptations: [{question_id, action, answer_quality, rationale}]` (the decision made after that question's answer);
+  - `generated_by: "gemini" | "fallback" | "fake"`.
+
+### For Data
+
+- Brain only touches `backend/data/queries.py`. **An in-memory stub is there now** with the exact signatures. It computes real stats from inserted vitals, so mock vitals produce real stress numbers. Replace the bodies and keep the signatures. Brain needs no change.
+- Return ids as `str`, not asyncpg `UUID` objects: `create_session`, `insert_question` and `QuestionStats.question_id`. Brain coerces at its boundary, but Pydantic won't turn a UUID into a `str` field.
+- `get_session_history` items: please include `question_id` (the stub does). `stats` may be a `QuestionStats` or a dict.
+- `save_report` gets a JSON-ready dict, so `json.dumps` it for JSONB. `get_report` may return a dict or a JSON string.
+- **DB pool hook:** if `backend/data/db.py` defines `async def startup()` / `async def shutdown()`, `main.py` calls them in the app lifespan.
+- **Routes:** `backend/data/routes.py` must expose `router = APIRouter()`. `main.py` mounts it automatically when the file exists. The same goes for `backend/sensing/routes.py`.
+- **Calibration timing:** Brain keeps calibration going until at least 35s after `/start` (it asks a second small-talk prompt if the first answer was short), then calls `compute_baseline`. Calibration rows are `kind="calibration"`, `idx=0`, and there can be two of them.
+- **`mock_vitals.py --auto`** can poll `GET /api/sessions/{id}/status` for `phase` and `question.{index,kind}` to know when an answer is in progress.
+
+### For Sensing
+
+- `from backend.ws import broadcast` and `from backend.data import queries as data`. `broadcast()` never raises (dead sockets are dropped) and accepts a `str` or `UUID` session id.
+
+### Tunables
+
+| Constant | Default | Where |
+|---|---|---|
+| `CALIBRATION_MIN_S` | 35 | `interviewer.py` |
+| `ANSWER_TIMEOUT_S` | 120 | `interviewer.py` |
+| `CLOSING_PAUSE_S` | 4 | `interviewer.py` (lets the closing line finish before navigation) |
+| `DECIDE_TIMEOUT_S` / `PLAN_TIMEOUT_S` / `REPORT_TIMEOUT_S` | 6 / 20 / 45 | `gemini.py` |
+| `INTERVAL_S` / `WINDOW_S` / `COOLDOWN_S` / `MIN_SAMPLES` | 3 / 10 / 12 / 3 | `watcher.py` |
+| Questions, `max_turns`, `max_seconds` per type | SWE/Behavioral/Presentation: 5 (2,3,3,4,5), 7, 480s. Demo: 3 (2,4,5), 5, 240s | `specs.py` |
+| `GEMINI_MODEL`, `GEMINI_THINKING_LEVEL`, `ELEVENLABS_MODEL` | `gemini-3.8-flash`, `low`, `eleven_flash_v2_5` | `.env` |
+
+### Where the build differs from the plan above
+
+- **Absolute `audio_url`**, for the reason given under Frontend.
+- **Filler line:** "Take your time, let's keep going." became "Alright, let's keep going.", since it plays after the answer ends.
+- **Fake-mode decisions are rule-based**, not a fixed `next`. They follow the same thresholds as the Gemini prompt, so pressing `s` in `mock_vitals.py` makes the fake interviewer ease off.
+- **Fake clips are placeholder macOS voices.** Once the ElevenLabs voice is picked, run `python scripts/make_fake_audio.py --force` and commit the result.
+- **Brain enforces Gemini's rules in code** (`resolve_action`): at most one follow-up per planned question, no `wrap_up` while questions remain, and an empty `spoken_text` becomes `next`. Budget checks skip the Gemini call entirely.
+- **Crash safety:** if the loop throws, the session still ends with a numbers-only report and `session_ended`.
+- **Prefetching** the next question's audio is done. **ElevenLabs speech-to-text is not** (it needs Frontend's agreement first).
+
+---
+
 ## Your checklist
 
 **Sat 1 to 2 PM**
