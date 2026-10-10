@@ -126,9 +126,9 @@ Full build plan and integration contracts: **[docs/PLAN.md](docs/PLAN.md)**
 | Area | Owner | Plan |
 |---|---|---|
 | Brain (Gemini, ElevenLabs, interview loop) | Srinithin | [docs/roles/brain.md](docs/roles/brain.md) |
-| Data (Tiger Data, stress score, replay) | TBD | [docs/roles/data.md](docs/roles/data.md) |
-| Sensing (Presage, vitals ingest) | TBD | [docs/roles/sensing.md](docs/roles/sensing.md) |
-| Frontend (React UI, domain, demo) | TBD | [docs/roles/frontend.md](docs/roles/frontend.md) |
+| Data (Tiger Data, stress score, replay) | Likhil | [docs/roles/data.md](docs/roles/data.md) |
+| Sensing (Presage, vitals ingest) | Sharvil | [docs/roles/sensing.md](docs/roles/sensing.md) |
+| Frontend (React UI, domain, demo) | Shreyas | [docs/roles/frontend.md](docs/roles/frontend.md) |
 
 ---
 
