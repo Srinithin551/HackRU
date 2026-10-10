@@ -3,9 +3,28 @@
 Vite + React 19 + TypeScript + Tailwind CSS v4 + Recharts 3 + React Router 8.
 Owner: Shreyas. Spec: [`docs/roles/frontend.md`](../docs/roles/frontend.md). Contracts: [`docs/PLAN.md`](../docs/PLAN.md) §3 plus Brain's "As built" notes in [`docs/roles/brain.md`](../docs/roles/brain.md).
 
-> **Status:** the wiring is done and tested. Real backend and mock backend both work behind one API.
-> The designed pages (Setup, Live, Report) aren't built yet. For now `npm run dev` opens a **Dev Console**
-> that runs a whole session end to end, so the integration can be tested today.
+> **Status:** all three screens are built and verified at 1440×900 (laptop) and 1280×720 (projector) with no
+> page scrolling. They work against the real backend or fully offline with `VITE_MOCK=1`. The raw wiring
+> test page lives at `/dev`.
+
+## Screens
+
+| Route | Screen |
+|---|---|
+| `/` | **Setup:** name, interview type, role/topic → creates the session. |
+| `/session/:id` | **Live:** your webcam in the middle (mirrored preview, nothing recorded) with live captions, warm-up ring and coach-flag toasts. **Left:** interviewer (speaking waveform / thinking dots), "Question 2 of 5", the question, **I'm done**, questions asked so far. **Right:** heart rate (pulses at your bpm), stress gauge (calm / rising / high), 60 s sparklines, breathing, focus, sensor status. |
+| `/session/:id/report` | **Report** (opens automatically when the interview ends): composure score, where you felt it most, top tips, replay timeline (heart rate over stress, question bands, coach-flag dots), question breakdown with the toughest one highlighted, per-question stats + Gemini feedback. |
+| `/dev` | **Dev Console:** every WebSocket event logged; for debugging integration. |
+
+Design tokens live in `src/styles/tokens.css` (Tailwind `@theme`) and `src/styles/tokens.ts` (same values for
+charts; a test keeps them in sync). Stress colors always come with an icon + word, so they read without color.
+
+| Code | Job |
+|---|---|
+| `src/hooks/useLiveSession.ts` | The live protocol: socket, audio → `answer_started`, vitals buffer, toasts, auto-navigate on `session_ended`. |
+| `src/hooks/useSpeechToText.ts` | Browser speech-to-text; auto-stops after 3.5 s of silence; typing fallback when unsupported. |
+| `src/hooks/useCamera.ts` | Webcam preview (video only). Hide it if Sensing's local Presage process needs the camera. |
+| `src/components/` | Gauge, sparklines, timeline chart, overlays, shared UI. |
 
 ## How the pieces connect
 
