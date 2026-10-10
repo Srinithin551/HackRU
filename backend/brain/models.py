@@ -4,7 +4,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel
 
-Action = Literal["redirect", "follow_up", "ease_off", "push", "next", "wrap_up"]
+Action = Literal["coach", "redirect", "follow_up", "ease_off", "push", "next", "wrap_up"]
 
 
 # ---------------------------------------------------------------- Gemini call 1: plan_interview

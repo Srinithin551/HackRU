@@ -45,12 +45,25 @@ def recv_until(ws, type_, log):
             return ev
 
 
-def answer(ws, q, transcript=None):
+ANSWERED = {"type": "_client_answered"}   # marker we put in event logs
+
+
+def answer(ws, q, transcript=None, log=None):
     if transcript is None:
         transcript = on_topic(q)
     qid = q["data"]["question_id"]
     ws.send_json({"type": "answer_started", "data": {"question_id": qid}})
     ws.send_json({"type": "answer_done", "data": {"question_id": qid, "transcript": transcript}})
+    if log is not None:
+        log.append(ANSWERED)
+
+
+def assert_one_voice(log):
+    """The server never sends a second clip until the candidate has answered the first one, so the
+    interviewer can't talk over itself (each question's audio ends before the answer can start)."""
+    audio = [i for i, e in enumerate(log) if e["type"] in ("question", "filler") and e["data"].get("audio_url")]
+    for prev, cur in zip(audio, audio[1:]):
+        assert ANSWERED in log[prev + 1:cur], f"two clips without an answer between them: {log[prev]} / {log[cur]}"
 
 
 def stressed_readings(sid, n=5):
@@ -73,7 +86,7 @@ def run_to_end(ws, log, first_question=None):
                 continue
             q = ev
         questions.append(q)
-        answer(ws, q)
+        answer(ws, q, log=log)
         q = None
 
 
@@ -94,14 +107,17 @@ def test_full_fake_session(client):
         assert client.get(audio).headers["content-type"] == "audio/mpeg"
 
         assert cal["data"]["text"] == "Thanks for joining me today. To start, tell me a little about yourself."
-        answer(ws, cal, "I'm a backend engineer, I like building fast APIs and I'm at a hackathon this weekend.")
+        answer(ws, cal, "I'm a backend engineer, I like building fast APIs and I'm at a hackathon this weekend.", log)
         questions = run_to_end(ws, log)
+    assert_one_voice(log)
+    fillers = [e for e in log if e["type"] == "filler"]
+    assert len(fillers) == 1                                   # only the closing line; no "Okay."/"Got it."
 
     assert [q["data"]["kind"] for q in questions] == ["main"] * 3
     assert [q["data"]["index"] for q in questions] == [1, 2, 3]
     assert [q["data"]["text"] for q in questions] == [q.text for q in fake.FAKE_QUESTIONS[:3]]
     types = [e["type"] for e in log]
-    assert "filler" in types and types[-1] == "session_ended"
+    assert types[-1] == "session_ended"
     assert {"state": "done"} in [e["data"] for e in log if e["type"] == "state"]
     assert log[-1]["data"] == {"report_url": f"/api/sessions/{sid}/report",
                                "replay_url": f"/api/sessions/{sid}/replay"}
@@ -218,26 +234,41 @@ def test_health_and_audio_route(client):
     assert client.get("/audio/doesnotexist.mp3").status_code == 404
 
 
-def test_off_topic_answer_is_redirected_once(client):
+def test_off_topic_answer_gets_coaching_then_the_next_question(client):
     sid = create(client)
     log = []
     with client.websocket_connect(f"/ws/{sid}") as ws:
         client.post(f"/api/sessions/{sid}/start")
-        answer(ws, recv_until(ws, "question", log))                    # calibration
+        answer(ws, recv_until(ws, "question", log), log=log)          # calibration
         q1 = recv_until(ws, "question", log)
-        answer(ws, q1, OFF_TOPIC)
+        answer(ws, q1, OFF_TOPIC, log)
 
-        redirect = recv_until(ws, "question", log)
-        assert redirect["data"]["kind"] == "follow_up" and redirect["data"]["index"] == 1
-        assert redirect["data"]["text"] == fake.FAKE_LINES["redirect"] and redirect["data"]["audio_url"]
-        answer(ws, redirect, OFF_TOPIC)                                # off-topic again: moves on
-        questions = run_to_end(ws, log)
+        coached = recv_until(ws, "question", log)
+        d = coached["data"]
+        assert d["kind"] == "main" and d["index"] == 2                  # coaching moves on
+        assert d["text"] == fake.coach_turn(fake.FAKE_QUESTIONS[1].text)
+        assert d["text"].startswith("Let me step out of the interview") and d["audio_url"]   # one clip
+        questions = [coached] + run_to_end(ws, log, first_question=coached)[1:]
+    assert_one_voice(log)
 
-    assert questions[0]["data"]["kind"] == "main" and questions[0]["data"]["index"] == 2
     report = client.get(f"/api/sessions/{sid}/report").json()
-    assert report["adaptations"][0]["action"] == "redirect"
+    assert report["adaptations"][0]["action"] == "coach"
     q1_feedback = next(p for p in report["per_question"] if p["question_id"] == q1["data"]["question_id"])
-    assert "didn't address the question" in q1_feedback["what_happened"]
+    assert "missed what the question was asking" in q1_feedback["what_happened"]
+
+
+def test_empty_answer_is_asked_again(client):
+    sid = create(client)
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        answer(ws, recv_until(ws, "question", log), log=log)
+        answer(ws, recv_until(ws, "question", log), "", log)          # nothing came through
+        again = recv_until(ws, "question", log)
+        assert again["data"]["text"] == fake.FAKE_LINES["redirect"]
+        assert again["data"]["kind"] == "follow_up" and again["data"]["index"] == 1
+        run_to_end(ws, log, first_question=again)
+    assert_one_voice(log)
 
 
 def test_turns_after_small_talk_are_written_by_gemini(client, monkeypatch):
@@ -274,8 +305,9 @@ def test_turns_after_small_talk_are_written_by_gemini(client, monkeypatch):
     log = []
     with client.websocket_connect(f"/ws/{sid}") as ws:
         client.post(f"/api/sessions/{sid}/start")
-        answer(ws, recv_until(ws, "question", log), "I build backend APIs and I love hiking.")
+        answer(ws, recv_until(ws, "question", log), "I build backend APIs and I love hiking.", log)
         questions = run_to_end(ws, log)
+    assert_one_voice(log)
 
     texts = [q["data"]["text"] for q in questions]
     assert texts == [
@@ -287,3 +319,63 @@ def test_turns_after_small_talk_are_written_by_gemini(client, monkeypatch):
     assert [q["data"]["index"] for q in questions] == [1, 1, 2, 3]
     assert spoken[-1] == f"Thanks, that was a thoughtful answer. {lines.CLOSING_LINE}"   # one closing clip
     assert [a["action"] for a in states[sid].adaptations] == ["redirect", "next", "next", "wrap_up"]
+
+
+def test_coaching_mid_interview_and_on_the_last_question(client, monkeypatch):
+    """Real mode with Gemini stubbed: a coaching turn carries the next question in the same clip, and
+    coaching on the last answer is said right before the closing line, also as one clip."""
+    monkeypatch.setattr(config, "BRAIN_FAKE", False)
+    spoken = []
+
+    async def fake_tts(text):
+        spoken.append(text)
+        return f"/audio/{len(spoken)}.mp3"
+
+    coach_mid = ("Let me step out of the interview for a second. In a real interview that answer would sink you. "
+                 "Name a project and what you shipped. Okay, back in. How would you design a chat app for a million users?")
+    coach_last = ("Stepping out for a second: in a real interview, refusing to answer ends things. "
+                  "A strong answer owns one real failure and what you changed.")
+    coach_last_raw = coach_last + " Okay, back in the interview. So, what's your biggest failure?"   # ignored the prompt
+
+    async def decide(s, kind, question, transcript, stats, window):
+        return {1: Decision(action="coach", spoken_text=coach_mid, answer_quality=1, rationale="wrong"),
+                2: Decision(action="next", spoken_text="", answer_quality=4, rationale="ok"),
+                3: Decision(action="coach", spoken_text=coach_last_raw, answer_quality=1, rationale="refused")}[s.planned_number]
+
+    async def opening(s, first):
+        return None
+
+    monkeypatch.setattr(voice, "tts", fake_tts)
+    monkeypatch.setattr(gemini, "open_interview", opening)
+    monkeypatch.setattr(gemini, "decide_next", decide)
+
+    sid = create(client)
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        answer(ws, recv_until(ws, "question", log), log=log)
+        questions = run_to_end(ws, log)
+    assert_one_voice(log)
+
+    assert [q["data"]["text"] for q in questions] == [
+        FALLBACK_BANK["demo"][0][0], coach_mid, FALLBACK_BANK["demo"][2][0]]
+    assert [q["data"]["kind"] for q in questions] == ["main", "main", "main"]
+    assert spoken[-1] == f"{coach_last} {lines.CLOSING_LINE}"
+    assert [a["action"] for a in states[sid].adaptations] == ["coach", "next", "coach"]
+
+
+def test_session_does_not_end_until_the_closing_clip_has_played(client, monkeypatch):
+    from backend.brain import interviewer
+    monkeypatch.setattr(interviewer, "CLOSING_SLACK_S", 0.0)
+    monkeypatch.setattr(voice, "clip_seconds", lambda url: 0.8 if url else 0.0)
+    sid = create(client)
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        answer(ws, recv_until(ws, "question", log), log=log)
+        for _ in range(3):
+            answer(ws, recv_until(ws, "question", log), log=log)
+        recv_until(ws, "filler", log)                              # closing clip starts
+        started = time.monotonic()
+        recv_until(ws, "session_ended", log)
+        assert time.monotonic() - started >= 0.75

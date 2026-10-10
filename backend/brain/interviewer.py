@@ -1,8 +1,12 @@
 """The interview loop: calibration → planned questions with adaptive follow-ups → closing → report.
 
 The interviewer holds a conversation rather than reading a list: Gemini writes every turn after the
-small talk (a short reaction to what the candidate said, then the next question), and steers back
-with a redirect when an answer doesn't address the question.
+small talk (a short reaction to what the candidate said, then the next question). A wrong, off-topic,
+or inappropriate answer gets immediate coaching, said outside the interview frame (what would happen
+in a real interview, what to say instead), before the next question.
+
+Exactly one clip plays per turn and the next one is only sent after the candidate answers, so the
+interviewer's voice can never overlap itself.
 
 One `run_session` task per session, started by POST /api/sessions/{id}/start. It talks to the
 browser only through ws.broadcast() / ws.inbox and to the database only through data.queries.
@@ -11,6 +15,7 @@ If anything inside crashes, the session still ends cleanly with a numbers-only r
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -28,11 +33,14 @@ log = logging.getLogger("brain.interviewer")
 
 ANSWER_TIMEOUT_S = 120.0     # a dropped tab can't hang the loop
 CALIBRATION_MIN_S = 35.0     # ~10s Presage warm-up + ~25s of usable baseline readings
-CLOSING_PAUSE_S = 4.0        # let the closing line finish before the frontend navigates away
+CLOSING_PAUSE_S = 4.0        # minimum wait after the closing clip starts, before session_ended
+CLOSING_SLACK_S = 1.0        # extra margin on top of the clip's own length
 MAX_FOLLOWUPS = 1            # ease_off / push / follow_up, per planned question
-MAX_REDIRECTS = 1            # redirects for off-topic answers, per planned question
+MAX_REDIRECTS = 1            # "didn't catch that" re-asks for garbled answers, per planned question
 MAX_TURN_WORDS = 70          # prompts ask for < 45; anything far longer is treated as a bad turn
+MAX_COACH_WORDS = 140        # coaching turns are longer (prompt asks for < 95)
 FOLLOW_UP_ACTIONS = ("follow_up", "ease_off", "push")
+ADVANCING_ACTIONS = ("next", "coach")   # these move on to the next planned question
 
 
 class EndRequested(Exception):
@@ -71,11 +79,14 @@ async def ask(s: SessionState, qid: str, text: str, kind: str) -> None:
         await set_state(s, "listening")
 
 
-async def say_filler(s: SessionState, text: Optional[str] = None) -> None:
-    """Audio that doesn't change the question on screen: fillers and the closing line."""
-    url = await voice.tts(text or voice.next_filler())
+async def say(s: SessionState, text: str) -> float:
+    """Speech that isn't a question (the closing line), sent as a `filler` event so the question on
+    screen doesn't change. Only sent after the last answer, so it can't overlap a question clip.
+    Returns how long the clip plays, in seconds (0 if there's no audio)."""
+    url = await voice.tts(text)
     if url:
         await broadcast(s.session_id, "filler", {"audio_url": url})
+    return voice.clip_seconds(url)
 
 
 # ---------------------------------------------------------------- listening
@@ -126,26 +137,43 @@ async def wait_answer(s: SessionState, qid: str) -> str:
 
 # ---------------------------------------------------------------- deciding
 
-def spoken(text: str) -> str:
+def spoken(text: str, limit: int = MAX_TURN_WORDS) -> str:
     """Gemini's turn if it's usable as speech, else "" (callers then fall back)."""
     text = " ".join((text or "").split())
-    return text if 0 < len(text.split()) <= MAX_TURN_WORDS else ""
+    return text if 0 < len(text.split()) <= limit else ""
+
+
+_SENTENCE = re.compile(r"[^.!?]+[.!?]+[\"')\]]*\s*|[^.!?]+$")
+_STEP_BACK_IN = re.compile(r"\bback (?:in|into|to)\b", re.IGNORECASE)
+
+
+def final_coaching(text: str) -> str:
+    """Coaching that ends the interview must stop at the model answer: cut any trailing question and
+    the "okay, back in the interview" sentence (the closing line comes right after)."""
+    sentences = [m.group(0).strip() for m in _SENTENCE.finditer(text) if m.group(0).strip()]
+    while len(sentences) > 1 and (sentences[-1].endswith("?") or _STEP_BACK_IN.search(sentences[-1])):
+        sentences.pop()
+    return " ".join(sentences)
+
+
+def word_limit(action: str) -> int:
+    return MAX_COACH_WORDS if action == "coach" else MAX_TURN_WORDS
 
 
 def resolve_action(action: str, spoken_text: str, followups_on_current: int, redirects_on_current: int,
                    queue_len: int) -> str:
     """Enforce the rules Gemini is asked to follow, so a bad decision can't derail the session."""
-    if action in FOLLOW_UP_ACTIONS:
-        if not spoken(spoken_text) or followups_on_current >= MAX_FOLLOWUPS:
-            action = "next"
-    elif action == "redirect":
-        if not spoken(spoken_text) or redirects_on_current >= MAX_REDIRECTS:
-            action = "next"   # a second off-topic answer moves on; the report notes it
+    if not spoken(spoken_text, word_limit(action)) and action not in ("next", "wrap_up"):
+        return "next" if queue_len else "wrap_up"   # nothing usable to say: move on with the planned text
+    if action in FOLLOW_UP_ACTIONS and followups_on_current >= MAX_FOLLOWUPS:
+        action = "next"
+    elif action == "redirect" and redirects_on_current >= MAX_REDIRECTS:
+        action = "next"
     if action == "wrap_up" and queue_len > 0:
         action = "next"
     if action == "next" and queue_len == 0:
         action = "wrap_up"
-    return action
+    return action   # "coach" with nothing left to ask stays "coach": its feedback becomes the last turn
 
 
 def out_of_budget(s: SessionState) -> bool:
@@ -198,8 +226,7 @@ async def interview(s: SessionState) -> None:
 
         transcript = await wait_answer(s, qid)
         s.exchanges.append({"kind": kind, "text": next_text, "transcript": transcript})
-        await say_filler(s)                   # instant, masks Gemini latency
-        await set_state(s, "thinking")
+        await set_state(s, "thinking")       # no filler clip: one voice at a time, nothing scripted
         if s.end_requested or out_of_budget(s):
             return
 
@@ -214,12 +241,12 @@ async def interview(s: SessionState) -> None:
                                 s.redirects_on_current, len(s.queue))
         record_adaptation(s, qid, decision, action)
         # Gemini's wording only fits if its action survived the rules; otherwise use the planned text.
-        turn = spoken(decision.spoken_text) if action == decision.action else ""
+        turn = spoken(decision.spoken_text, word_limit(action)) if action == decision.action else ""
 
-        if s.end_requested or action == "wrap_up":
-            s.parting_words = turn
+        if s.end_requested or action == "wrap_up" or (action == "coach" and not s.queue):
+            s.parting_words = final_coaching(turn) if action == "coach" else turn   # said before the closing line
             return
-        if action == "next":
+        if action in ADVANCING_ACTIONS:
             q = _next_planned(s)
             next_text, kind = turn or q.text, "main"
         else:
@@ -261,8 +288,7 @@ async def _run(s: SessionState) -> None:
             log.exception("compute_baseline failed for %s", s.session_id)
 
         if not s.end_requested:
-            await say_filler(s)                     # acknowledge the small talk while the bridge is written
-            await set_state(s, "thinking")
+            await set_state(s, "thinking")         # while the bridge into the first question is written
             plan = await plan_task
             s.queue = list(plan)
             s.total_planned = len(plan)
@@ -282,8 +308,9 @@ async def _run(s: SessionState) -> None:
     if not s.end_requested:
         # One clip, so the reaction to the last answer and the closing line can't overlap in the browser.
         closing = f"{s.parting_words} {lines.CLOSING_LINE}" if s.parting_words else lines.CLOSING_LINE
-        await say_filler(s, closing)
-        await asyncio.sleep(CLOSING_PAUSE_S)
+        # The frontend leaves the page on session_ended, so wait until the clip has finished playing.
+        seconds = await say(s, closing)
+        await asyncio.sleep(max(CLOSING_PAUSE_S, seconds + CLOSING_SLACK_S) if seconds else CLOSING_PAUSE_S)
     await report_task
     await finish(s)
 

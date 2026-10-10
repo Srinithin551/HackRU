@@ -11,7 +11,8 @@ from backend.contracts import Baseline, QuestionStats, WindowStats
 TRANSCRIPT_LIMIT = 600
 EXCHANGE_LIMIT = 220      # per side, for the recent-conversation block
 RECENT_EXCHANGES = 2
-MAX_TURN_WORDS = 45       # what the prompts ask for; interviewer.py rejects anything far longer
+MAX_TURN_WORDS = 45       # normal turns; interviewer.py rejects anything far longer
+MAX_COACH_WORDS = 95      # coaching turns: step out, what would happen, what to say instead, step back in, next question
 
 SPOKEN_RULES = (
     "Everything you write in question text or spoken_text is read aloud by a text-to-speech voice, so: "
@@ -19,6 +20,17 @@ SPOKEN_RULES = (
     "one question at a time, no lists, no code, no markdown, no emoji, no stage directions, "
     "no quotation marks around the whole thing."
 )
+
+# How the interviewer should sound. Shared by every call that writes speech.
+VOICE_STYLE = """How you sound: a friendly, direct senior colleague running a practice interview. Relatable and warm,
+but never gushing. Short sentences. Vary how you start each turn so nothing sounds scripted.
+Banned stock phrases (they make you sound like a bot): "got it", "I see", "I understand", "makes sense" (and
+"makes total sense", "that tracks"),
+"interesting", "great answer", "great question", "excellent", "awesome", "absolutely", "fair enough",
+"thanks for sharing", "thank you for that", "I appreciate that", "that's a good point", "okay so".
+React with substance instead: name a specific detail from what they said ("Cutting mismatches to half a
+percent is a real result."), or skip the reaction and go straight to your question when there's nothing
+specific to say. Never mention heart rate, stress, sensors, or the camera."""
 
 
 # ---------------------------------------------------------------- call 1: plan_interview
@@ -51,35 +63,48 @@ They just finished an answer. Decide what you say next. You also see their body 
 Use them to adapt like a perceptive human interviewer would.
 
 Choose exactly one action, checking in this order:
-- redirect: the answer doesn't address the question. It's off-topic, random, nonsensical, garbled (answers come
-  from speech-to-text, so a garbled answer may just be a recognition error), or inappropriate, rude, or clearly not
-  a serious attempt. Briefly acknowledge what they said, then steer back to the same question, reworded. If it was
-  inappropriate or not a serious attempt, first give a short, calm, professional callout (for example, that an
-  answer like that would end a real interview), then redirect. Allowed once per planned question: if REDIRECTS USED
-  is 1/1, choose next instead.
-- ease_off: stress peak > 70 AND answer_quality <= 2. Rephrase the same question more simply or offer a small hint, warm tone.
+- redirect: the answer is empty or garbled, so you can't tell what they meant (answers come from speech-to-text,
+  so this is usually a recognition error, not their fault). Say you didn't catch it and ask them to say it again,
+  briefly. Allowed once per planned question: if REDIRECTS USED is 1/1, choose coach instead.
+- coach: the answer is wrong, off-topic, rude or inappropriate, dismissive, not a serious attempt, or very weak
+  (answer_quality 1 or 2). An answer about something other than what was asked is off-topic even if it's
+  technically sound or reuses a good earlier answer. Give immediate feedback, stepping outside the interview:
+  1. Mark the step out clearly, in your own words (e.g. "Let me step out of the interview for a second.").
+  2. Say what would realistically happen if they gave that answer in a real interview, honestly and specifically.
+     Describe only what they actually said; never invent things they didn't say.
+  3. Say what they should have said instead, with real substance for THIS question: a short model answer naming the
+     specific points a strong candidate would make (for a zero-downtime migration question, for example: "add the
+     new column first, backfill in batches, switch reads over, then drop the old one"). Not "you should have
+     explained it calmly".
+  4. Mark the step back in (e.g. "Okay, back in the interview.").
+  5. Ask the NEXT PLANNED QUESTION (reworded to flow if you like).
+  If there is no next planned question, end right after step 3: don't step back in and don't say the
+  interview is over or that you're out of time (the closing line follows automatically).
+  If stress peak > 70, be warm about it: blanking under pressure is normal. Under {MAX_COACH_WORDS} words in total.
+- ease_off: stress peak > 70 and the answer was partly there (answer_quality 3). Rephrase the same question more
+  simply or offer a small hint, warm tone.
 - push: stress mean < 40 AND answer_quality >= 4. Ask a harder follow-up on the same topic.
-- follow_up: the answer was on topic but vague, and the person seems okay. Ask for one specific example.
-- next: otherwise. Move on to the NEXT PLANNED QUESTION.
+- follow_up: the answer was on topic and partly there but vague (answer_quality 3), and the person seems okay.
+  Ask for one specific example.
+- next: otherwise (a solid answer). Move on to the NEXT PLANNED QUESTION.
 - wrap_up: only when there is no next planned question and no follow-up is warranted.
-ease_off, push, and follow_up share one allowance per planned question: if FOLLOW-UPS USED is 1/1, choose next or
-wrap_up instead (redirect is still allowed if unused).
+ease_off, push, and follow_up share one allowance per planned question: if FOLLOW-UPS USED is 1/1, choose next,
+coach, or wrap_up instead.
 
 spoken_text is your whole next turn, said out loud as one natural reply:
-- Always open by reacting briefly to what they actually said: a few words that show you listened, specific to their
-  answer. No praise inflation ("great answer!", "excellent!"), no generic "thanks for sharing".
-- If the answer was inappropriate, rude, dismissive, or clearly not a serious attempt, that opening reaction must be
-  a short, calm, professional callout, whatever action you choose (even when you move on). For example: "That's not
-  the kind of answer that works in an interview; it would cost you the job." Don't soften it into sympathy.
-- next: then transition naturally and ask the NEXT PLANNED QUESTION. Keep its meaning, topic, and difficulty. You may
-  reword it so it flows from the conversation. Only tie it to something they said when there's a genuine link;
-  otherwise use a simple transition ("Let's switch gears.") rather than a forced segue.
+- Except for coach, open with a brief reaction to what they actually said (see How you sound), then:
+- next: transition and ask the NEXT PLANNED QUESTION. Keep its meaning, topic, and difficulty. You may reword it
+  so it flows from the conversation. Only tie it to something they said when there's a genuine link; otherwise
+  use a simple transition ("Let's switch gears.") rather than a forced segue.
 - redirect, ease_off, push, follow_up: then ask your one question.
 - wrap_up: only the brief reaction (under 15 words) and no question. The closing line is added automatically.
-- Under {MAX_TURN_WORDS} words in total. At most one question. Never mention heart rate, stress, sensors, or the camera.
+- Under {MAX_TURN_WORDS} words in total, except coach. At most one question.
+
+{VOICE_STYLE}
 {SPOKEN_RULES}
-answer_quality: 1 to 5, your honest read of the transcript (1 = no real answer, 5 = specific, structured, convincing).
-An empty, near-empty, or off-topic answer is quality 1.
+answer_quality: 1 to 5, how well the transcript answers THIS question (not how good the content is in general):
+1 = no real answer, wrong, or off-topic; 2 = weak; 3 = partly there; 4 = solid; 5 = specific, structured,
+convincing. Empty or near-empty is 1.
 rationale: one short sentence for the logs, never spoken."""
 
 
@@ -91,7 +116,8 @@ now moving into the interview itself. Write what you say next as one natural tur
   otherwise use a simple transition ("Let's dig in.") rather than a forced segue.
 - If the small talk was rude or not serious, keep the reaction brief and neutral, then move on.
 - Don't greet them or say welcome (you already did). Under {MAX_TURN_WORDS} words. Exactly one question.
-- Never mention heart rate, stress, sensors, or the camera.
+
+{VOICE_STYLE}
 {SPOKEN_RULES}"""
 
 
@@ -171,8 +197,8 @@ candidate's own calm baseline: < 40 calm, 40 to 70 rising, > 70 high).
 Rules:
 - Only use numbers that appear in the data below. Never invent or round wildly. Refer to questions as Q1, Q2...
 - per_question: one entry for every question listed below (skip calibration), using its exact question_id.
-  - what_happened: 1-2 sentences on the content of the answer. If it didn't address the question (off-topic, random,
-    or inappropriate), say so plainly, and make the advice about answering the question that was asked.
+  - what_happened: 1-2 sentences on the content of the answer. If it was wrong, off-topic, or inappropriate (the
+    interviewer reaction will be "coach"), say so plainly, and make the advice about what a strong answer includes.
   - body_signal: MUST cite at least one number from the data, e.g. "HR jumped 22% above baseline, stress peaked at 78 twelve seconds in".
     If there were no usable vitals, say so.
   - advice: one concrete thing to do next time on this kind of question.
@@ -200,7 +226,8 @@ def report_context(s: SessionState, items: list[HistoryItem]) -> str:
         lines.append(f"  BODY: {stats_line(it.stats)}")
         a = adaptations.get(it.question_id)
         if a:
-            lines.append(f"  INTERVIEWER REACTION: {a['action']} (answer quality {a['answer_quality']}/5)")
+            lines.append(f"  INTERVIEWER REACTION: {a['action']} (answer quality {a['answer_quality']}/5)"
+                         + (" - gave live coaching on this answer" if a["action"] == "coach" else ""))
     if s.flags:
         labels = {it.question_id: it.label for it in items}
         lines.append("")

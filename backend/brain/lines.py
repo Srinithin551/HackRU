@@ -1,4 +1,9 @@
-"""Fixed interviewer lines. Pre-generated and cached at startup so they play instantly."""
+"""Fixed interviewer lines. Pre-generated and cached at startup so they play instantly.
+
+There are deliberately no filler clips ("Okay.", "Got it."): they sounded scripted, and a filler still
+playing when the next question arrived made two clips overlap. The brief pause while Gemini thinks
+reads as an interviewer considering the answer.
+"""
 
 # Calibration: an easy, standard opener. While the user talks, Presage warms up and Data collects the
 # calm baseline. The answer also gives Gemini something to build the first real question on.
@@ -15,21 +20,11 @@ CALIBRATION_EXTRA_LINES = {
 
 CLOSING_LINE = "That's everything I wanted to cover. Thanks for your time. Give me a moment to put your feedback together."
 
-# Played the instant an answer ends, to mask Gemini latency. Rotated so none repeats back to back.
-FILLERS = [
-    "Okay.",
-    "Got it.",
-    "Mm, alright.",
-    "Okay, thanks.",
-    "Alright, let's keep going.",
-]
-
-
 def calibration_lines(spec_key: str) -> tuple[str, str]:
     return CALIBRATION_LINE, CALIBRATION_EXTRA_LINES.get(spec_key, CALIBRATION_EXTRA_LINES["swe"])
 
 
 def fixed_lines() -> list[str]:
     """Every pre-recorded line, deduplicated, in a stable order."""
-    texts = [CALIBRATION_LINE, *CALIBRATION_EXTRA_LINES.values(), CLOSING_LINE, *FILLERS]
+    texts = [CALIBRATION_LINE, *CALIBRATION_EXTRA_LINES.values(), CLOSING_LINE]
     return list(dict.fromkeys(texts))

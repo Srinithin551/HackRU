@@ -6,6 +6,7 @@ Every prompt and response is appended to backend/logs/gemini-YYYYMMDD.jsonl for 
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Optional, TypeVar
@@ -149,6 +150,31 @@ def _clean_spoken(text: str) -> str:
     return text.strip().strip('"').strip()
 
 
+# Backstop for the prompt's banned-phrase list: stock acknowledgments at the start of a turn.
+_STOCK_OPENER = re.compile(
+    r"^(?:okay|ok|alright|all right|so|well)?[,\s]*"
+    r"(?:got it|i see|i understand|makes sense|that makes sense|interesting|great answer|great question|"
+    r"excellent|awesome|absolutely|fair enough|thanks for sharing|thank you for sharing|thank you for that|"
+    r"i appreciate that|that's a good point)\s*[.,!:;\u2014-]+\s*",   # only when it stands alone as a clause
+    re.IGNORECASE,
+)
+
+
+def strip_stock_openers(text: str) -> str:
+    """Remove scripted openers like "Got it. I see." so a turn starts with substance."""
+    out = text
+    while True:
+        trimmed = _STOCK_OPENER.sub("", out, count=1).lstrip()
+        if trimmed == out or not trimmed:
+            break
+        out = trimmed
+    return out[:1].upper() + out[1:] if out else text
+
+
+def _clean_turn(text: str) -> str:
+    return strip_stock_openers(_clean_spoken(text))
+
+
 # ---------------------------------------------------------------- call 1
 
 async def plan_interview(spec: InterviewSpec, role: str) -> list[PlannedQuestion]:
@@ -183,13 +209,14 @@ async def decide_next(s: SessionState, kind: str, question: str, transcript: str
                       stats: Optional[QuestionStats], window: Optional[WindowStats]) -> Decision:
     """Never raises. Falls back to `next` (with the queued question) on timeout or error."""
     if config.BRAIN_FAKE:
-        return fake.decide(transcript, stats, question=question, kind=kind)
+        return fake.decide(transcript, stats, question=question, kind=kind,
+                           next_question=s.queue[0].text if s.queue else None)
     context = prompts.decide_context(s, kind, question, transcript, stats, window)
     try:
         d = await generate("decide_next", prompts.DECIDE_SYSTEM, context, Decision,
                            temperature=0.4, timeout=DECIDE_TIMEOUT_S, models=fast_models())
         return d.model_copy(update={
-            "spoken_text": _clean_spoken(d.spoken_text),
+            "spoken_text": _clean_turn(d.spoken_text),
             "answer_quality": max(1, min(5, d.answer_quality)),
         })
     except Exception as e:
@@ -205,7 +232,7 @@ async def open_interview(s: SessionState, first: PlannedQuestion) -> Optional[st
     try:
         line = await generate("open_interview", prompts.OPEN_SYSTEM, prompts.open_context(s, first), OpeningLine,
                               temperature=0.6, timeout=OPEN_TIMEOUT_S, models=fast_models())
-        return _clean_spoken(line.spoken_text) or None
+        return _clean_turn(line.spoken_text) or None
     except Exception as e:
         log.warning("open_interview fell back to the planned question: %s", _short(e))
         return None

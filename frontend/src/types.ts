@@ -200,7 +200,7 @@ export interface Report {
   // reports still type-check.
   /** For the red/amber dots on the replay chart. */
   coach_flags?: ReportCoachFlag[]
-  /** The decision made after each answer (redirect, ease_off, push, follow_up, next, wrap_up). */
+  /** The decision made after each answer (coach, redirect, ease_off, push, follow_up, next, wrap_up). */
   adaptations?: Adaptation[]
   generated_by?: 'gemini' | 'fallback' | 'fake'
 }
@@ -215,8 +215,12 @@ export interface ReportCoachFlag {
 
 export interface Adaptation {
   question_id: string
-  /** redirect = the answer didn't address the question and the interviewer steered back to it. */
-  action: 'redirect' | 'follow_up' | 'ease_off' | 'push' | 'next' | 'wrap_up'
+  /**
+   * coach = the answer was wrong, off-topic or inappropriate: the interviewer stepped out of the interview,
+   * said what would happen in a real one and what to say instead, then moved on.
+   * redirect = the answer didn't come through (garbled speech-to-text), so the interviewer asked again.
+   */
+  action: 'coach' | 'redirect' | 'follow_up' | 'ease_off' | 'push' | 'next' | 'wrap_up'
   answer_quality: number
   rationale: string
 }

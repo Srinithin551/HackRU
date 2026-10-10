@@ -126,3 +126,23 @@ def test_final_report_from_gemini(fake_gemini):
                  "top_tips": ["a", "b", "c"]})
     r = asyncio.run(gemini.final_report(state(), items))
     assert r.generated_by == "gemini" and r.composure_score == 61 and r.top_tips == ["a", "b", "c"]
+
+
+@pytest.mark.parametrize("raw,want", [
+    ("Got it. I see. Cutting mismatches that much is a real result. Next?", "Cutting mismatches that much is a real result. Next?"),
+    ("Okay, got it! Let's switch gears.", "Let's switch gears."),
+    ("Makes sense, thanks for sharing. So how would you shard it?", "So how would you shard it?"),
+    ("Alright, I understand \u2014 so what's the tradeoff?", "So what's the tradeoff?"),
+    ("I see what you mean, but that's not the question.", "I see what you mean, but that's not the question."),
+    ("Interestingly, caching helps here.", "Interestingly, caching helps here."),
+    ("Got it.", "Got it."),   # never strip a turn down to nothing
+])
+def test_stock_openers_are_stripped(raw, want):
+    assert gemini.strip_stock_openers(raw) == want
+
+
+def test_decide_turn_has_stock_openers_removed(fake_gemini):
+    fake_gemini({"action": "next", "spoken_text": "Got it, makes sense. Let's switch gears. Why Go?",
+                 "answer_quality": 4, "rationale": "solid"})
+    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
+    assert d.spoken_text == "Let's switch gears. Why Go?"

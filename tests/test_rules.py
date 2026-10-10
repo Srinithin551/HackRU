@@ -4,7 +4,7 @@ import pytest
 
 from backend.brain import fake, lines, prompts
 from backend.brain.history import normalize_history, stats_line
-from backend.brain.interviewer import resolve_action, spoken
+from backend.brain.interviewer import final_coaching, resolve_action, spoken
 from backend.brain.models import QuestionFeedback, ReportDraft
 from backend.brain.report import fallback_report, finalize_draft
 from backend.brain.specs import fallback_questions, get_spec, normalize_type
@@ -51,6 +51,13 @@ def state(type_="Software Engineering") -> SessionState:
     ("redirect", "Back to the question?", 0, 1, 0, "wrap_up"),
     ("redirect", "", 0, 0, 2, "next"),
     ("follow_up", " ".join(["word"] * 80), 0, 0, 2, "next"),     # far too long to be a real turn
+    ("coach", "Stepping out: that would cost you. Say X. Back in: next?", 0, 0, 2, "coach"),
+    ("coach", "Stepping out: that would cost you.", 1, 1, 2, "coach"),   # no allowance: coaching always moves on
+    ("coach", "Stepping out: that would cost you.", 0, 0, 0, "coach"),   # last question: feedback, then closing
+    ("coach", "", 0, 0, 2, "next"),
+    ("coach", "", 0, 0, 0, "wrap_up"),
+    ("coach", " ".join(["word"] * 120), 0, 0, 2, "coach"),      # coaching gets a longer allowance
+    ("coach", " ".join(["word"] * 150), 0, 0, 2, "next"),
 ])
 def test_resolve_action(action, text, followups, redirects, queue, expected):
     assert resolve_action(action, text, followups, redirects, queue) == expected
@@ -74,19 +81,23 @@ def test_fake_decide_pushes_when_calm_and_thorough():
 
 
 def test_fake_decide_follow_up_on_short_answer_and_next_otherwise():
-    assert fake.decide("not sure", qstats(stress_mean=50, stress_peak=60)).action == "follow_up"
+    assert fake.decide("I would use a cache", qstats(stress_mean=50, stress_peak=60)).action == "follow_up"
     assert fake.decide(" ".join(["w"] * 20), qstats(stress_mean=50, stress_peak=60)).action == "next"
     assert fake.decide(" ".join(["w"] * 20), None).action == "next"
 
 
-def test_fake_decide_redirects_off_topic_main_answers():
+def test_fake_decide_coaches_wrong_answers_and_reasks_empty_ones():
     q = "Walk me through how you'd debug an API that suddenly got ten times slower."
-    d = fake.decide("I really like pizza and playing basketball with my friends on weekends.", None, q, "main")
-    assert d.action == "redirect" and d.spoken_text == fake.FAKE_LINES["redirect"]
+    d = fake.decide("I really like pizza and playing basketball with my friends on weekends.", None, q, "main",
+                    next_question="Next one?")
+    assert d.action == "coach" and d.spoken_text == fake.coach_turn("Next one?")
+    assert d.spoken_text.startswith("Let me step out of the interview") and d.spoken_text.endswith("Next one?")
+    assert fake.decide("not sure", None, q, "main").action == "coach"                # very weak
+    assert fake.decide("", None, q, "main").spoken_text == fake.FAKE_LINES["redirect"]
     assert fake.decide("I would debug the slower endpoints first by checking the traces.", None, q, "main").action == "next"
-    assert not fake.off_topic(q, "pizza")                                  # too short to judge
+    assert not fake.off_topic(q, "pizza")                                              # too short to judge
     assert fake.decide("I really like pizza and basketball with friends on weekends.", None, q,
-                       "follow_up").action == "next"                       # follow-ups aren't checked
+                       "follow_up").action == "next"                                   # follow-ups aren't checked
 
 
 def test_fake_texts_cover_everything_spoken():
@@ -94,6 +105,8 @@ def test_fake_texts_cover_everything_spoken():
     assert all(q.text in texts for q in fake.FAKE_QUESTIONS)
     assert all(t in texts for t in fake.FAKE_LINES.values())
     assert all(t in texts for t in lines.fixed_lines())
+    assert all(fake.coach_turn(q.text) in texts for q in fake.FAKE_QUESTIONS[1:])
+    assert fake.coach_turn(None) in texts
     assert len(texts) == len(set(texts))
 
 
@@ -249,10 +262,36 @@ def test_finalize_draft_without_vitals_does_not_claim_calm():
     assert finalize_draft(state(), items, draft).composure_score == 50
 
 
-def test_fallback_report_flags_off_topic_answers():
+def test_fallback_report_describes_coached_and_unclear_answers():
     s = state()
-    s.adaptations = [{"question_id": "q1", "action": "redirect", "answer_quality": 1, "rationale": "off-topic"}]
+    s.adaptations = [{"question_id": "q1", "action": "coach", "answer_quality": 1, "rationale": "wrong"},
+                     {"question_id": "q2", "action": "redirect", "answer_quality": 1, "rationale": "garbled"}]
     r = fallback_report(s, normalize_history(history()))
-    q1 = next(f for f in r.per_question if f.question_id == "q1")
-    assert "didn't address the question" in q1.what_happened and "restate it" in q1.advice
-    assert r.top_tips[0].startswith("Answer the question that was asked")
+    q1, q2 = (next(f for f in r.per_question if f.question_id == q) for q in ("q1", "q2"))
+    assert "missed what the question was asking" in q1.what_happened and q1.advice.startswith("Use the live coaching")
+    assert "didn't come through clearly" in q2.what_happened
+    assert r.top_tips[0].startswith("Use the live coaching")
+
+
+def test_prompts_carry_the_voice_style():
+    for system in (prompts.DECIDE_SYSTEM, prompts.OPEN_SYSTEM):
+        assert '"got it", "I see", "I understand"' in system
+        assert "never \"let us\"" in system
+    assert "step out" in prompts.DECIDE_SYSTEM.lower() and "real interview" in prompts.DECIDE_SYSTEM
+
+
+@pytest.mark.parametrize("raw,want", [
+    # what Gemini actually produced live on the last question: re-asked after the step back in
+    ("Let me step out of the interview for a second. In a real interview, restarting the server is a red flag. "
+     "Instead, you should propose a circuit breaker or tuning the eviction policy. Okay, back in the interview. "
+     "How would you handle that cache thrashing without horizontal scaling?",
+     "Let me step out of the interview for a second. In a real interview, restarting the server is a red flag. "
+     "Instead, you should propose a circuit breaker or tuning the eviction policy."),
+    ("Stepping out: that answer would cost you. Lead with the tradeoff. Back to it.",
+     "Stepping out: that answer would cost you. Lead with the tradeoff."),
+    ("Stepping out: that answer would cost you. Lead with the tradeoff.",
+     "Stepping out: that answer would cost you. Lead with the tradeoff."),
+    ("Why would you say that?", "Why would you say that?"),   # never cut a turn down to nothing
+])
+def test_final_coaching_ends_at_the_model_answer(raw, want):
+    assert final_coaching(raw) == want
