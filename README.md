@@ -42,13 +42,15 @@ Interview anxiety is universal, but practice tools only judge *what* you said. T
 ## Architecture
 
 ```
-Webcam ──> Presage SDK (browser) ──> Backend API ──> Tiger Data (hypertable: vitals)
-                                          │
-                                          ├──> Gemini (next question / feedback)
-                                          │
-                                          └──> ElevenLabs (TTS) ──> Browser audio
-                                                                         │
-React Dashboard <── continuous aggregates <── Tiger Data <───────────────┘
+Webcam ─> C++ SmartSpectra SDK ─> Python bridge ─> Backend API (FastAPI)
+                                                       │
+Mic ─> Speech-to-text ─────────────────────────────────┤
+                                                       ├─> Tiger Data
+                                                       │     (vitals, questions, transcripts)
+                                                       ├─> Gemini (next question / feedback)
+                                                       └─> ElevenLabs (TTS) ─> Browser audio
+
+React Dashboard <── continuous aggregates + replay queries <── Tiger Data
 ```
 
 ### Data model (draft)
