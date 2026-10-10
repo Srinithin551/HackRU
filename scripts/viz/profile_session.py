@@ -71,26 +71,26 @@ def profile(df: pd.DataFrame, title: str, source: str) -> str:
 
     conf = df["confidence"].round(2).value_counts().sort_index()
     lines += ["", "## Confidence distribution", "",
-              "| Confidence | Rows | % | Used in stress math (>= 0.5) |", "|---|---|---|---|"]
-    lines += [f"| {v:.2f} | {n} | {100 * n / len(df):.1f}% | {'yes' if v >= 0.5 else 'no'} |"
+              "| Confidence | Rows | % | Used in stress math (>= 0.7) |", "|---|---|---|---|"]
+    lines += [f"| {v:.2f} | {n} | {100 * n / len(df):.1f}% | {'yes' if v >= 0.7 else 'no'} |"
               for v, n in conf.items()]
-    lines += ["", f"Rows dropped from all averages (confidence < 0.5): **{(df['confidence'] < 0.5).sum()}**", ""]
+    lines += ["", f"Rows below the 0.7 confidence cutoff (never stored by the backend): **{(df['confidence'] < 0.7).sum()}**", ""]
 
     expr = df["expression"].fillna("(null)").value_counts()
     lines += ["## Expression distribution", "", "| Expression | Rows |", "|---|---|"]
     lines += [f"| {k} | {v} |" for k, v in expr.items()]
 
-    lost = runs(df["confidence"] < 0.5, t)
+    lost = runs(df["confidence"] < 0.7, t)
     frown = runs(df["expression"].eq("frown"), t)
-    distracted = runs(df["focus"].lt(0.4) & df["confidence"].ge(0.5), t)
+    distracted = runs(df["focus"].lt(0.4) & df["confidence"].ge(0.7), t)
     lines += ["", "## Events visible in the stream", "",
               "| Pattern | Runs (seconds from start) |", "|---|---|",
-              f"| Face lost (confidence < 0.5) | {lost} |",
+              f"| Face lost (confidence < 0.7) | {lost} |",
               f"| Frown (stress spike) | {frown} |",
               f"| Focus < 0.4 with a face (distraction) | {distracted} |"]
     if "stress" in df and df["stress"].notna().any():
         lines += [f"| Stress > 70 | {runs(df['stress'].gt(70), t)} |",
-                  f"| Stress null while confidence >= 0.5 | {int((df['stress'].isna() & df['confidence'].ge(0.5)).sum())} rows |"]
+                  f"| Stress null while confidence >= 0.7 | {int((df['stress'].isna() & df['confidence'].ge(0.7)).sum())} rows |"]
     return "\n".join(lines) + "\n"
 
 

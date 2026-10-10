@@ -15,7 +15,7 @@ HR_MAX_PCT = 25.0        # HR this % above baseline = full HR contribution
 BR_MAX_PCT = 40.0        # breathing this % above baseline = full BR contribution
 FOCUS_MAX_DROP = 0.5     # focus this far below baseline = full focus contribution
 W_HR, W_BR, W_FOCUS = 0.5, 0.3, 0.2
-MIN_CONFIDENCE = 0.5     # readings below this are ignored everywhere
+MIN_CONFIDENCE = 0.7     # readings below this are never stored and never scored
 
 CALM_BELOW, HIGH_ABOVE = 40.0, 70.0
 
@@ -32,7 +32,7 @@ def delta_pct(value: float | None, base: float | None) -> float | None:
 
 
 def stress_score(r: VitalsReading, b: Baseline | None) -> float | None:
-    """0-100, or None if there's no baseline yet, confidence < 0.5, or no usable inputs."""
+    """0-100, or None if there's no baseline yet, confidence < MIN_CONFIDENCE (0.7), or no usable inputs."""
     if b is None or r.confidence is None or r.confidence < MIN_CONFIDENCE:
         return None
     parts: list[tuple[float, float]] = []

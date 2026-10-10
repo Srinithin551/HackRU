@@ -165,6 +165,8 @@ async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
     """Store readings (stress computed per row) and return them as dicts for broadcasting.
 
     Readings without a session_id go to the active session; with no active session they're dropped.
+    Readings with confidence < MIN_CONFIDENCE (0.7, e.g. face lost) are never stored, but are still
+    returned (stress None) so the live chart can show "no face" instead of freezing.
     """
     active, rows, records = None, [], []
     for r in readings:
@@ -179,8 +181,9 @@ async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
                "breathing_rate": r.breathing_rate, "focus": r.focus, "expression": r.expression,
                "confidence": r.confidence, "stress": stress}
         rows.append(row)
-        records.append((row["time"], sid, r.heart_rate, r.breathing_rate, r.focus, r.expression,
-                        r.confidence, stress))
+        if r.confidence >= MIN_CONFIDENCE:
+            records.append((row["time"], sid, r.heart_rate, r.breathing_rate, r.focus, r.expression,
+                            r.confidence, stress))
     if len(rows) < len(readings):
         log.debug("insert_vitals: dropped %d reading(s) with no active session", len(readings) - len(rows))
     if records:
@@ -189,11 +192,11 @@ async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
     return rows
 
 
-BASELINE_SQL = """
+BASELINE_SQL = f"""
 SELECT count(*) AS n, avg(heart_rate) AS hr, avg(breathing_rate) AS br, avg(focus) AS focus
 FROM vitals
 WHERE session_id = $1
-  AND confidence >= 0.5
+  AND confidence >= {MIN_CONFIDENCE}::real
   AND time <= now()
   AND time >= (SELECT greatest(s.started_at, (SELECT min(time) FROM vitals WHERE session_id = $1))
                FROM sessions s WHERE s.id = $1) + make_interval(secs => $2)
@@ -208,7 +211,7 @@ WHERE v.session_id = $1 AND v.time = u.time AND v.stress IS NULL
 
 @_contract
 async def compute_baseline(session_id: str) -> Baseline:
-    """Calm baseline from calibration: readings with confidence >= 0.5 from session start (after
+    """Calm baseline from calibration: readings with confidence >= 0.7 from session start (after
     the first WARMUP_S seconds of readings) until now. Fewer than 10 samples -> population defaults.
     Stored on sessions, cached, and stress is backfilled for the rows that came in before it."""
     sid = _uuid(session_id)
@@ -231,7 +234,7 @@ async def compute_baseline(session_id: str) -> Baseline:
         pool.execute("UPDATE sessions SET baseline_hr = $2, baseline_br = $3, baseline_focus = $4, "
                      "baseline_n = $5 WHERE id = $1", sid, b.heart_rate, b.breathing_rate, b.focus, b.n_samples),
         pool.fetch("SELECT time, heart_rate, breathing_rate, focus, confidence FROM vitals "
-                   "WHERE session_id = $1 AND stress IS NULL AND confidence >= 0.5", sid))
+                   f"WHERE session_id = $1 AND stress IS NULL AND confidence >= {MIN_CONFIDENCE}::real", sid))
     times, scores = [], []
     for p in pending:
         s = stress_score(VitalsReading(ts=p["time"], heart_rate=p["heart_rate"],
@@ -257,11 +260,11 @@ async def get_baseline(session_id: str) -> Baseline | None:
     return b
 
 
-WINDOW_SQL = """
+WINDOW_SQL = f"""
 SELECT count(*) AS n, avg(heart_rate) AS hr, avg(breathing_rate) AS br, avg(focus) AS focus,
        avg(stress) AS stress, mode() WITHIN GROUP (ORDER BY expression) AS expression
 FROM vitals
-WHERE session_id = $1 AND time > now() - make_interval(secs => $2) AND confidence >= 0.5
+WHERE session_id = $1 AND time > now() - make_interval(secs => $2) AND confidence >= {MIN_CONFIDENCE}::real
 """
 
 
@@ -311,7 +314,7 @@ async def mark_answered(question_id: str, ts: datetime, transcript: str) -> None
 # The time-range join between question events and the vitals hypertable (data.md), written as a
 # LATERAL subquery so a question with no usable vitals still returns one row (n = 0) instead of none.
 # Answer window: answer_started_at (or created_at if the answer never started) to answered_at (or now).
-QUESTION_STATS_SQL = """
+QUESTION_STATS_SQL = f"""
 SELECT q.id, q.session_id, q.idx, q.kind, q.text, q.transcript,
        q.created_at, q.answer_started_at, q.answered_at,
        COALESCE(q.answer_started_at, q.created_at) AS t_start,
@@ -330,7 +333,7 @@ LEFT JOIN LATERAL (
     FROM vitals v
     WHERE v.session_id = q.session_id
       AND v.time BETWEEN COALESCE(q.answer_started_at, q.created_at) AND COALESCE(q.answered_at, now())
-      AND v.confidence >= 0.5
+      AND v.confidence >= {MIN_CONFIDENCE}::real
 ) st ON true
 """
 
@@ -457,7 +460,7 @@ async def get_replay(session_id: str) -> dict | None:
 
 # "Across all sessions, which question type spikes stress most": the questions <-> vitals time-range
 # join over every answered question, grouped by question kind and by interview type.
-STRESS_BY_QUESTION_TYPE_SQL = """
+STRESS_BY_QUESTION_TYPE_SQL = f"""
 SELECT s.interview_type, q.kind,
        count(*)                                     AS questions,
        count(*) FILTER (WHERE st.stress_peak > 70) AS high_peaks,
@@ -471,7 +474,7 @@ CROSS JOIN LATERAL (
     FROM vitals v
     WHERE v.session_id = q.session_id
       AND v.time BETWEEN COALESCE(q.answer_started_at, q.created_at) AND q.answered_at
-      AND v.confidence >= 0.5
+      AND v.confidence >= {MIN_CONFIDENCE}::real
 ) st
 WHERE q.answered_at IS NOT NULL AND st.stress_peak IS NOT NULL
 GROUP BY GROUPING SETS ((q.kind), (s.interview_type), (s.interview_type, q.kind))

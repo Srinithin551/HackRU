@@ -62,7 +62,7 @@ def main() -> None:
     b = Baseline(heart_rate=s["baseline_hr"], breathing_rate=s["baseline_br"], focus=s["baseline_focus"],
                  n_samples=int(s["baseline_n"]))
     v["label"] = label_rows(v, ev)
-    good = v[v["confidence"] >= 0.5]
+    good = v[v["confidence"] >= 0.7]
     calm = good.loc[good["label"] == "calm", "stress"].to_numpy()
     spike = good.loc[good["label"] == "spike", "stress"].to_numpy()
 

@@ -43,7 +43,7 @@ def label_rows(v: pd.DataFrame, ev: pd.DataFrame | None) -> pd.Series:
             lab[(dt >= 0) & (dt < DISTRACT_S)] = "distraction"
         elif e["key"] == "f":
             lab[(dt >= 0) & (dt < FACE_S)] = "face_lost"
-    lab[v["confidence"] < 0.5] = "face_lost"
+    lab[v["confidence"] < 0.7] = "face_lost"
     return lab
 
 
@@ -91,7 +91,7 @@ def main() -> int:
         ev["time"] = pd.to_datetime(ev["time"], utc=True, format="ISO8601")
         ev = ev[ev["time"].between(v["time"].min(), v["time"].max())]   # events after the session ended had no effect
     v["label"] = label_rows(v, ev)
-    good = v["confidence"] >= 0.5
+    good = v["confidence"] >= 0.7
 
     checks: list[tuple[str, bool, str]] = []
     calm = v.loc[(v["label"] == "calm") & good, "stress"]
@@ -109,10 +109,8 @@ def main() -> int:
                            peak > 70 and 3 <= at <= 10,
                            f"10 s before: mean {before.mean():.1f} -> peak {peak:.1f} at +{at:.0f} s"))
     lost = v[~good]
-    checks.append(("face-lost rows (confidence < 0.5): stress is NULL",
-                   lost["stress"].isna().all(), f"{len(lost)} rows, {lost['stress'].notna().sum()} non-null"))
-    checks.append(("face-lost rows: vitals are NULL",
-                   lost[["heart_rate", "breathing_rate", "focus"]].isna().all().all(), f"{len(lost)} rows"))
+    checks.append(("no rows below the 0.7 confidence cutoff are stored", len(lost) == 0,
+                   f"{len(lost)} stored rows with confidence < 0.7"))
     checks.append(("rows with a face all have stress (backfill worked)",
                    v.loc[good, "stress"].notna().all(), f"{v.loc[good, 'stress'].isna().sum()} NULL of {good.sum()}"))
     checks.append(("stress within 0..100", v["stress"].dropna().between(0, 100).all(),
@@ -125,10 +123,14 @@ def main() -> int:
                                   f"focus {session['baseline_focus']:.3f}, n={int(session['baseline_n'])}"))
     dups = v["time"].duplicated().sum()
     checks.append(("no duplicate timestamps", dups == 0, f"{dups} duplicates in {len(v)} rows"))
-    gaps = v["time"].diff().dt.total_seconds().dropna()
-    checks.append(("1 Hz stream: no gaps > 1.5 s, no two readings < 0.5 s apart",
-                   (gaps > 1.5).sum() == 0 and (gaps < 0.5).sum() == 0,
-                   f"interval min {gaps.min():.2f} / median {gaps.median():.2f} / max {gaps.max():.2f} s"))
+    gaps = v["time"].diff().dt.total_seconds()
+    # face-lost readings (confidence < 0.7) aren't stored, so an `f` event leaves a gap; any other gap is a bug
+    lost_times = [] if ev is None else list(ev.loc[ev["key"] == "f", "time"])
+    big = [(v["time"][i - 1], v["time"][i]) for i in gaps.index[gaps > 1.5]]
+    unexplained = [g for g in big if not any(g[0] - pd.Timedelta(seconds=2) <= t <= g[1] for t in lost_times)]
+    checks.append(("1 Hz stream: no unexplained gaps > 1.5 s (face-lost gaps expected), none < 0.5 s apart",
+                   not unexplained and (gaps < 0.5).sum() == 0,
+                   f"interval median {gaps.median():.2f} s; {len(big)} gap(s) > 1.5 s, {len(unexplained)} unexplained"))
 
     # vitals_5s must equal a 5 s rollup of the raw rows (continuous aggregate correctness)
     raw5 = (v.assign(bucket=v["time"].dt.floor("5s")).groupby("bucket")

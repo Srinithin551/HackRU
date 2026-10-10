@@ -9,13 +9,12 @@ Session `21531403-398d-4098-a5e6-93271b8d40c5`: 294 readings, 60 rows in `vitals
 | s at 18:19:37: stress jumps past 70 ('high'), peak ~6 s in | PASS | 10 s before: mean 2.4 -> peak 86.8 at +7 s |
 | s at 18:20:41: stress jumps past 70 ('high'), peak ~6 s in | PASS | 10 s before: mean 2.7 -> peak 81.0 at +7 s |
 | s at 18:21:46: stress jumps past 70 ('high'), peak ~6 s in | PASS | 10 s before: mean 3.3 -> peak 83.7 at +6 s |
-| face-lost rows (confidence < 0.5): stress is NULL | PASS | 0 rows, 0 non-null |
-| face-lost rows: vitals are NULL | PASS | 0 rows |
+| no rows below the 0.7 confidence cutoff are stored | PASS | 0 stored rows with confidence < 0.7 |
 | rows with a face all have stress (backfill worked) | PASS | 0 NULL of 294 |
 | stress within 0..100 | PASS | min 0.0, max 86.8 |
 | baseline close to the mock's true calm values (72 bpm, 14/min, 0.80) from >= 10 samples | PASS | HR 72.2, BR 14.1, focus 0.805, n=52 |
 | no duplicate timestamps | PASS | 0 duplicates in 294 rows |
-| 1 Hz stream: no gaps > 1.5 s, no two readings < 0.5 s apart | PASS | interval min 0.96 / median 1.00 / max 1.04 s |
+| 1 Hz stream: no unexplained gaps > 1.5 s (face-lost gaps expected), none < 0.5 s apart | PASS | interval median 1.00 s; 0 gap(s) > 1.5 s, 0 unexplained |
 | vitals_5s matches a 5 s rollup of raw vitals (same buckets, same values) | PASS | 60 buckets, 0 unmatched, max abs diff 0.000 |
 | replay: top-level keys session, series, questions | PASS | questions, series, session |
 | replay: session keys | PASS | baseline, ended_at, id, started_at, user_name |
