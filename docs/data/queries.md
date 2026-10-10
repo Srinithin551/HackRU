@@ -17,10 +17,10 @@ filters on `session_id =` plus a time range, so it's an index range scan inside 
 SELECT count(*) AS n, avg(heart_rate) AS hr, avg(breathing_rate) AS br, avg(focus) AS focus,
        avg(stress) AS stress, mode() WITHIN GROUP (ORDER BY expression) AS expression
 FROM vitals
-WHERE session_id = $1 AND time > now() - make_interval(secs => $2) AND confidence >= 0.5
+WHERE session_id = $1 AND time > now() - make_interval(secs => $2) AND confidence >= 0.7
 ```
 
-- **Plan:** `ChunkAppend` on the newest chunk, `vitals_session_time` index scan with `session_id` and `time` in the index condition. `confidence >= 0.5` is a cheap filter on ~10 to 15 rows. (On a near-empty table the planner picks a seq scan of the 2-page chunk instead, which is also correct.)
+- **Plan:** `ChunkAppend` on the newest chunk, `vitals_session_time` index scan with `session_id` and `time` in the index condition. `confidence >= 0.7` is a cheap filter (rows below 0.7 aren't stored anyway; it keeps the rule explicit). (On a near-empty table the planner picks a seq scan of the 2-page chunk instead, which is also correct.)
 - `hr_delta_pct` / `br_delta_pct` are computed in Python against the **in-memory baseline cache**, so this stays one round trip.
 - `mode()` ignores NULL expressions; a window with no face returns `n = 0` and all-null stats.
 
@@ -38,7 +38,7 @@ LEFT JOIN LATERAL (
     FROM vitals v
     WHERE v.session_id = q.session_id
       AND v.time BETWEEN COALESCE(q.answer_started_at, q.created_at) AND COALESCE(q.answered_at, now())
-      AND v.confidence >= 0.5
+      AND v.confidence >= 0.7
 ) st ON true
 WHERE q.id = $1
 ```
@@ -60,6 +60,7 @@ INSERT INTO vitals (time, session_id, heart_rate, breathing_rate, focus, express
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)          -- executemany: one prepared statement, one round trip
 ```
 
+- Readings with `confidence < 0.7` are skipped (never stored) but still returned so the ingest route can broadcast "no face".
 - Stress is computed in Python with the cached baseline before the insert. No DB read per reading (the baseline cache misses at most once per 10 s until calibration ends).
 - `executemany` sends the whole batch (1 row normally, up to 30 after a sensing-client outage) in one round trip.
 - Readings without a `session_id` go to the active session (cached 2 s). With no active session they're dropped.
@@ -69,7 +70,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)          -- executemany: one prepared st
 ```sql
 SELECT count(*) AS n, avg(heart_rate), avg(breathing_rate), avg(focus)
 FROM vitals
-WHERE session_id = $1 AND confidence >= 0.5 AND time <= now()
+WHERE session_id = $1 AND confidence >= 0.7 AND time <= now()
   AND time >= (SELECT greatest(s.started_at, (SELECT min(time) FROM vitals WHERE session_id = $1))
                FROM sessions s WHERE s.id = $1) + make_interval(secs => $2)   -- skip 10 s warm-up
 ```

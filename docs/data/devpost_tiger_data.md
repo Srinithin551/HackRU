@@ -19,7 +19,7 @@ Each reading is scored on the way in: a 0 to 100 stress number relative to *your
 SELECT count(*), avg(heart_rate), avg(breathing_rate), avg(focus), avg(stress),
        mode() WITHIN GROUP (ORDER BY expression)
 FROM vitals
-WHERE session_id = $1 AND time > now() - make_interval(secs => $2) AND confidence >= 0.5;
+WHERE session_id = $1 AND time > now() - make_interval(secs => $2) AND confidence >= 0.7;
 ```
 
 TimescaleDB skips every chunk outside the window, and the index finds the session's last few seconds: **0.07 ms** of execution on Tiger. When stress crosses 70, the interviewer eases off. When you're calm, it pushes harder.
@@ -34,7 +34,7 @@ SELECT avg(v.stress), max(v.stress), avg(v.heart_rate), max(v.heart_rate),
 FROM questions q
 JOIN vitals v ON v.session_id = q.session_id
  AND v.time BETWEEN COALESCE(q.answer_started_at, q.created_at) AND COALESCE(q.answered_at, now())
-WHERE q.id = $1 AND v.confidence >= 0.5;
+WHERE q.id = $1 AND v.confidence >= 0.7;
 ```
 
 This runs after every answer (**0.17 ms**) and feeds Gemini's next move ("heart rate up 22% eight seconds into the answer"). Across all sessions, the same join powers our "which question type spikes stress most" insight in **0.5 ms**.
@@ -66,7 +66,7 @@ ALTER TABLE vitals SET (timescaledb.enable_columnstore,
 CALL add_columnstore_policy('vitals', after => INTERVAL '1 day');
 ```
 
-At 35 ten-minute sessions (19,110 readings) the columnstore is **8.1x smaller** than the rowstore (3,952 KiB → 488 KiB), and our per-session rollups return identical results. On just our first 5 sessions (1,110 readings) it's 2.8x, because fixed per-chunk overhead dominates at that size. Replaying one session decompresses only that session's segment.
+At 35 ten-minute sessions (18,955 readings) the columnstore is **9.2x smaller** than the rowstore (4,208 KiB → 456 KiB), and our per-session rollups return identical results. On just our first 5 sessions (1,105 readings) it's 2.8x, because fixed per-chunk overhead dominates at that size. Replaying one session decompresses only that session's segment.
 
 ### What it bought us
 

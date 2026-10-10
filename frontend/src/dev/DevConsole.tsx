@@ -15,6 +15,7 @@
  * Speech-to-text isn't wired yet (that's the useSpeechToText hook), so the answer is typed.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import './dev.css'
 import { createSession, getHealth, getReplay, startSession, waitForReport } from '../api.ts'
 import { API_BASE, IS_MOCK, wsUrl } from '../lib/config.ts'
 import { playClip } from '../lib/playClip.ts'
@@ -185,7 +186,7 @@ export function DevConsole() {
       <h1>StressTest · Dev Console</h1>
       <p className="muted">
         Temporary page for testing the wiring. Mode: <b>{IS_MOCK ? 'MOCK (no backend)' : 'REAL backend'}</b> · API
-        base: <code>{API_BASE || '(same origin → Vite proxy)'}</code> · WebSocket: <code>{wsUrl('<id>')}</code>
+        base: <code>{API_BASE || '(same origin → Vite proxy)'}</code> · WebSocket: <code>{wsUrl('SESSION_ID').replace('SESSION_ID', '{session_id}')}</code>
       </p>
       <section>
         <h2>Backend /health</h2>

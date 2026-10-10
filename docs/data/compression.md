@@ -4,8 +4,8 @@
 
 | Data | Sessions | Rows | Rowstore (table + indexes) | Columnstore | Ratio | Same query results after? |
 |---|---|---|---|---|---|---|
-| real mock sessions (from vitals) | 5 | 1,110 | 296 KiB | 104 KiB | **2.8x** | yes |
-| + 30 synthetic 10-min sessions | 35 | 19,110 | 3,952 KiB | 488 KiB | **8.1x** | yes |
+| real mock sessions (from vitals) | 5 | 1,105 | 296 KiB | 104 KiB | **2.8x** | yes |
+| + 30 synthetic 10-min sessions | 35 | 18,955 | 4,208 KiB | 456 KiB | **9.2x** | yes |
 
 - **Rowstore** is `hypertable_detailed_size()` (heap + indexes + TOAST) before conversion; **columnstore** is `after_compression_total_bytes` from `hypertable_columnstore_stats()`.
 - *Same query results* = a per-session `time_bucket('5 seconds')` rollup (what `vitals_5s` computes) returns identical rows before and after conversion.

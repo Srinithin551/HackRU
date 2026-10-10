@@ -27,12 +27,12 @@ Source: `docs/data/samples/mock_stream_180s.csv`
 
 ## Confidence distribution
 
-| Confidence | Rows | % | Used in stress math (>= 0.5) |
+| Confidence | Rows | % | Used in stress math (>= 0.7) |
 |---|---|---|---|
 | 0.00 | 5 | 2.8% | no |
 | 0.95 | 175 | 97.2% | yes |
 
-Rows dropped from all averages (confidence < 0.5): **5**
+Rows below the 0.7 confidence cutoff (never stored by the backend): **5**
 
 ## Expression distribution
 
@@ -46,6 +46,6 @@ Rows dropped from all averages (confidence < 0.5): **5**
 
 | Pattern | Runs (seconds from start) |
 |---|---|
-| Face lost (confidence < 0.5) | t=100 s for 5 rows |
+| Face lost (confidence < 0.7) | t=100 s for 5 rows |
 | Frown (stress spike) | t=22 s for 19 rows, t=142 s for 19 rows |
 | Focus < 0.4 with a face (distraction) | t=60 s for 8 rows |

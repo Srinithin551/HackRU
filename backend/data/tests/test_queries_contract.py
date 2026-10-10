@@ -54,8 +54,11 @@ def test_fake_end_to_end_shapes():
 
         calm = [VitalsReading(ts=t0 + timedelta(seconds=i), heart_rate=72, breathing_rate=14, focus=0.8,
                               expression="neutral", confidence=0.95) for i in range(40)]
-        rows = await queries.insert_vitals(calm + [VitalsReading(ts=t0 + timedelta(seconds=40), confidence=0.0)])
-        assert len(rows) == 41
+        lost = [VitalsReading(ts=t0 + timedelta(seconds=40), confidence=0.0),
+                VitalsReading(ts=t0 + timedelta(seconds=41), heart_rate=72, confidence=0.69)]
+        rows = await queries.insert_vitals(calm + lost)
+        assert len(rows) == 42                                  # returned for the live chart...
+        assert len(fake_queries._vitals[sid]) == 40             # ...but confidence < 0.7 is never stored
         for r in rows:
             assert set(r) == {"time", "session_id", "heart_rate", "breathing_rate", "focus",
                               "expression", "confidence", "stress"}

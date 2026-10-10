@@ -28,6 +28,8 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'node',
       include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'],
+      // Vitest blanks out CSS imports by default; tokens.test.ts needs the real tokens.css text.
+      css: { include: [/tokens\.css/] },
     },
   }
 })

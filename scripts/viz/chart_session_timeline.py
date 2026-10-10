@@ -27,6 +27,9 @@ def load(name: str):
     session = read("session").iloc[0]
     t0 = vitals["time"].iloc[0]
     vitals["t"] = (vitals["time"] - t0).dt.total_seconds()
+    # readings below 0.7 confidence aren't stored: put a NaN row in each gap so lines break there
+    gap_rows = vitals.loc[vitals["t"].diff() > 1.5, ["t"]].assign(t=lambda d: d["t"] - 1.0)
+    vitals = pd.concat([vitals, gap_rows]).sort_values("t").reset_index(drop=True)
     try:
         q = read("questions")
         for c in ("created_at", "answer_started_at", "answered_at"):
@@ -102,10 +105,11 @@ def main() -> None:
     stress_ax.set_xlabel("seconds since first reading")
     stress_ax.set_xlim(0, t_max)
 
-    lost = vitals["confidence"] < 0.5
+    n = int(vitals["time"].notna().sum())
     sid = str(session["id"])[:8]
     style.title(fig, "One mock session: vitals and stress over time",
-                f"Session {sid} on Tiger Data, {len(vitals)} readings at 1 Hz ({int(lost.sum())} with no face). "
+                f"Session {sid} on Tiger Data, {n} stored readings at 1 Hz. Readings under 0.7 confidence aren't stored "
+                "(gaps).\n"
                 "Shaded: mock_vitals events. Stress is relative to the calibration baseline.")
     style.save(fig, args.out)
 
