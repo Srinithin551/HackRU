@@ -224,12 +224,17 @@ async def interview(s: SessionState) -> None:
         if s.end_requested or out_of_budget(s):
             return
 
-        stats = as_question_stats(await data.get_question_stats(qid))
-        try:
-            window = as_window_stats(await data.get_window_stats(s.session_id, 15))
-        except Exception:
-            log.exception("get_window_stats failed, using the watcher's last window")
+        # Both reads at once: on Tiger Cloud each is a ~60 ms network round trip.
+        raw_stats, raw_window = await asyncio.gather(
+            data.get_question_stats(qid), data.get_window_stats(s.session_id, 15), return_exceptions=True)
+        if isinstance(raw_stats, BaseException):
+            raise raw_stats
+        stats = as_question_stats(raw_stats)
+        if isinstance(raw_window, BaseException):
+            log.error("get_window_stats failed (%s), using the watcher's last window", raw_window)
             window = s.live_window
+        else:
+            window = as_window_stats(raw_window)
         decision = await gemini.decide_next(s, kind, next_text, transcript, stats, window)
         needed = decision.coaching if decision.action == "coach" else decision.spoken_text
         action = resolve_action(decision.action, needed, s.followups_on_current, s.redirects_on_current,
