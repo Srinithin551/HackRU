@@ -240,7 +240,7 @@ pip install -r backend/requirements.txt
 cp .env.example .env                                  # fill in keys; BRAIN_FAKE=1 needs none
 BRAIN_FAKE=1 uvicorn backend.main:app                # from the repo root (never --reload for a demo)
 python scripts/fake_frontend.py                       # terminal stand-in for the browser
-pytest tests                                          # 221 tests, about 3 seconds
+pytest tests                                          # 228 tests, about 3 seconds
 ```
 
 `GET /health` reports fake mode, whether Gemini/ElevenLabs keys are set, and which routers are mounted.

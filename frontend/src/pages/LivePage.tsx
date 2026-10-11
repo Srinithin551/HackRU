@@ -13,7 +13,8 @@
  *   └────────────────────┴──────────────────────────────────────┘
  *
  * The protocol lives in useLiveSession (WebSocket), speech in useSpeechToText, the camera in
- * useCamera, and the interrupt rules (reset / never repeat / comply first) in InterruptBox.
+ * useCamera, look-aways in useLookAway, and the interrupt rules (reset / never repeat / goes away on its
+ * own) in InterruptBox.
  * On session_ended this page fades out and navigates to the verdict.
  */
 import { useEffect, useRef, useState } from 'react'
@@ -26,6 +27,7 @@ import { VitalsRow } from '../components/VitalsRow.tsx'
 import { useCamera, type CameraStatus } from '../hooks/useCamera.ts'
 import { useInterrupt } from '../hooks/useInterrupt.ts'
 import { useLiveSession, type LiveState } from '../hooks/useLiveSession.ts'
+import { useLookAway } from '../hooks/useLookAway.ts'
 import { useNow } from '../hooks/useNow.ts'
 import { useSpeechToText } from '../hooks/useSpeechToText.ts'
 import { INTERVIEWER_NAME, SENSOR_STALE_MS, SENSOR_STATUS_STALE_MS } from '../lib/constants.ts'
@@ -45,17 +47,9 @@ function LiveSession({ sessionId }: { sessionId: string }) {
   const { videoRef, status: cameraStatus, enabled: cameraOn, toggle: toggleCamera, retry: retryCamera } = useCamera()
   const now = useNow(500)
 
-  // STT's silence auto-stop needs finishAnswer and the interrupt gate, both defined below.
+  // STT's silence auto-stop needs finishAnswer, defined below.
   const finishRef = useRef<(transcript: string) => void>(() => {})
-  const interruptPendingRef = useRef(false)
-  const stt = useSpeechToText({
-    onAutoStop: (text) => {
-      // Comply first: a pending command holds the answer back. The transcript is kept, so pressing
-      // "I'm done" after acknowledging still submits everything they said.
-      if (interruptPendingRef.current) return
-      finishRef.current(text)
-    },
-  })
+  const stt = useSpeechToText({ onAutoStop: (text) => finishRef.current(text) })
 
   const live = useLiveSession(sessionId, {
     onQuestion: () => {
@@ -74,10 +68,9 @@ function LiveSession({ sessionId }: { sessionId: string }) {
     finishRef.current = live.finishAnswer
   }, [live.finishAnswer])
 
-  const { interrupt, pending, acknowledge } = useInterrupt(live.question, live.flags, INTERVIEWER_NAME)
-  useEffect(() => {
-    interruptPendingRef.current = pending
-  }, [pending])
+  const interrupt = useInterrupt(live.question, live.flags, live.integrityFlags, live.speaking, INTERVIEWER_NAME)
+  // Only while answering: a look away while Judge speaks or thinks is ordinary.
+  useLookAway(live.answering, live.reportLookAway)
 
   // Typing is the fallback when the browser has no recognizer or the mic is blocked.
   const typedMode = !stt.supported || stt.error !== null
@@ -129,16 +122,14 @@ function LiveSession({ sessionId }: { sessionId: string }) {
               className="w-full resize-none rounded-control border border-border-strong bg-surface-2 px-3 py-2 text-body text-ink placeholder:text-ink-muted focus:outline-2 focus:outline-accent disabled:opacity-50"
             />
           )}
-          <Button onClick={onDone} disabled={!live.answering || pending} className="w-full py-3 text-lead">
-            {pending ? 'Obey first…' : "I've answered ▶"}
+          <Button onClick={onDone} disabled={!live.answering} className="w-full py-3 text-lead">
+            {"I've answered ▶"}
           </Button>
-          <p className={`text-caption ${pending ? 'text-high' : 'text-ink-muted'}`}>
-            {pending
-              ? `${INTERVIEWER_NAME} has interrupted. Do as asked, then press “Yes, Your Honor”.`
-              : (stt.error ??
-                (stt.supported
-                  ? 'Or simply stop speaking: your answer ends after 3.5 s of silence.'
-                  : `${INTERVIEWER_NAME} hears you best in Chrome. You can type your answer instead.`))}
+          <p className="text-caption text-ink-muted">
+            {stt.error ??
+              (stt.supported
+                ? 'Or simply stop speaking: your answer ends after 3.5 s of silence.'
+                : `${INTERVIEWER_NAME} hears you best in Chrome. You can type your answer instead.`)}
           </p>
         </InterviewerPanel>
 
@@ -169,7 +160,7 @@ function LiveSession({ sessionId }: { sessionId: string }) {
 
             {/* The interrupt box: top-right of the camera, over the candidate's own face. */}
             <div className="pointer-events-none absolute right-gutter top-gutter z-20 flex justify-end">
-              {interrupt && <InterruptBox interrupt={interrupt} onAcknowledge={acknowledge} />}
+              {interrupt && <InterruptBox key={interrupt.key} interrupt={interrupt} />}
             </div>
 
             <div className="absolute inset-x-0 top-16 flex flex-col items-center gap-3 px-gutter">

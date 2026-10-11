@@ -112,6 +112,12 @@ def reactions(s: SessionState) -> dict[str, str]:
     return {a["question_id"]: a["action"] for a in s.adaptations}
 
 
+def integrity(s: SessionState) -> dict:
+    """The report's cheating fields: suspected once any integrity flag was raised (integrity.py)."""
+    return {"suspected_cheating": bool(s.integrity_flags), "look_aways": s.look_away_total,
+            "integrity_flags": s.integrity_flags}
+
+
 def fallback_tips(items: list[HistoryItem], reacted: Optional[dict[str, str]] = None) -> list[str]:
     tips = []
     if any((reacted or {}).get(it.question_id) == "coach" for it in items):
@@ -163,6 +169,7 @@ def fallback_report(s: SessionState, items: list[HistoryItem], generated_by: str
         top_tips=fallback_tips(items, reacted),
         coach_flags=s.flags,
         adaptations=s.adaptations,
+        **integrity(s),
         generated_by=generated_by,
     )
 
@@ -210,5 +217,6 @@ def finalize_draft(s: SessionState, items: list[HistoryItem], draft: ReportDraft
         top_tips=tips,
         coach_flags=s.flags,
         adaptations=s.adaptations,
+        **integrity(s),
         generated_by="gemini",
     )

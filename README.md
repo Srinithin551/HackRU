@@ -68,9 +68,19 @@ so you never find out which question made you panic or how long it took you to r
    report + replay ◄──────── /report, /replay ────────     data/   stress score, baseline, replay
 ```
 
-**Sensing writes, Data computes, Brain decides, Frontend shows.** `scripts/run_demo.py` starts all of it with
-one command and opens the app in its own Chrome window. Presage has no window, so Chrome is the only thing you
-see.
+**Sensing writes, Data computes, Brain decides, Frontend shows.** `scripts/run_demo.py` starts all of it with one command and opens the app in its own Chrome window. Presage has no window, so Chrome is the only thing you see.
+
+### One interview, end to end:
+
+1. **Setup page** → `POST /api/sessions`. The live page opens the WebSocket, then calls `/start`.
+2. **Small talk (calibration, ~35 s).** While you chat, the Presage sensor (it starts when an interview starts) locks on, and Data computes your calm **baseline**. Every stress number afterwards is relative to it. Gemini plans the questions in the background.
+3. **Questions.** After each answer the backend reads your vitals for that answer, and Gemini decides the next turn: move on, follow up, ease off, push harder, ask you to repeat, or step out of the interview to coach you. Code enforces the rules (one follow-up per question, every planned question gets asked within the turn budget). Coach flags pop up on screen when stress rises, and remove themselves once read (coaching, which is spoken, leaves when its narration ends).
+   **Suspected cheating:** while you answer, the page tracks your head and eyes on the camera (MediaPipe face landmarker, in the browser, loaded from a CDN). Looking off screen for 1.5 s is one look-away; 3 within a minute raise "I suspect you of cheating" on screen and in the report (`backend/brain/integrity.py`).
+4. **Report.** The closing line plays while Gemini writes the report; the page then shows the replay chart (5-second buckets from a TimescaleDB continuous aggregate) and per-question feedback that cites real numbers.
+
+Every external call has a timeout and a fallback (canned questions, rule-based decisions, a numbers-only report, text without audio), so a slow or missing API never stalls a live session.
+
+**Stress score** (0-100, `backend/data/metrics.py`), always relative to **your** baseline: heart rate (+25% = max) weighted 0.5, breathing (+40% = max) 0.3, focus drop 0.2, with missing inputs dropped and the rest renormalized. Below 40 is calm, 40 to 70 rising, above 70 high.
 
 **One interview, end to end**
 1. `POST /api/sessions` (and `/material` if you imported a file). The live page opens the WebSocket and calls `/start`.
@@ -165,10 +175,10 @@ Each run's full output is saved to `backend/logs/run-<date>-<time>.log`, and eve
 
 ### Tests
 ```bash
-.venv/bin/python -m pytest tests                     # Brain: 221 tests
+.venv/bin/python -m pytest tests                     # Brain: 228 tests
 .venv/bin/python -m pytest backend/data/tests        # Data: 28 (real-database tests run when TIGER_DATABASE_URL is set)
 (cd sensing_client/presage_node && npm test)         # Presage sensor: 15
-(cd frontend && npx tsc -b && npm run lint && npm test && npm run build)   # Frontend: 51 + typecheck, lint, build
+(cd frontend && npx tsc -b && npm run lint && npm test && npm run build)   # Frontend: 63 + typecheck, lint, build
 ```
 
 ---

@@ -48,6 +48,8 @@ function describe(event: ServerEvent): string {
       return `filler ${event.data.audio_url}`
     case 'coach_flag':
       return `coach_flag (${event.data.level}) ${event.data.message}`
+    case 'integrity_flag':
+      return `integrity_flag (${event.data.look_aways} look-aways) ${event.data.message}`
     case 'sensor':
       return `sensor ${event.data.state}${event.data.message ? `: ${event.data.message}` : ''}`
     case 'session_ended':

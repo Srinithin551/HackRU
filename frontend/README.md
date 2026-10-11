@@ -80,7 +80,7 @@ after editing env files.
 
 ```bash
 npm run dev            # dev server on :5173
-npm test               # unit + contract tests (Vitest): 51
+npm test               # unit + contract tests (Vitest): 63
 npx tsc -b             # typecheck only
 npm run lint           # oxlint
 npm run build          # typecheck + production build into dist/

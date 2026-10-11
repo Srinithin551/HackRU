@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
 from backend import config, ws
-from backend.brain import fake, insights, lines, material, voice
+from backend.brain import fake, insights, integrity, lines, material, voice
 from backend.brain.interviewer import opening_lines, run_session, spoken_name
 from backend.brain.state import SessionMeta, SessionState, metas, prune_finished, states, tasks
 from backend.data import queries as data
@@ -190,7 +190,13 @@ async def get_status(session_id: str):
 
 
 async def _on_client_event(session_id: str, msg: dict) -> None:
-    """React to end_session immediately, even while the loop is busy thinking or speaking."""
+    """React to end_session immediately, even while the loop is busy thinking or speaking, and count
+    look_away events for the integrity watcher as they arrive (the loop only reads answer events)."""
+    if msg.get("type") == "look_away":
+        s = states.get(session_id)
+        if s is not None:
+            await integrity.on_look_away(s, (msg.get("data") or {}).get("question_id"))
+        return
     if msg.get("type") != "end_session":
         return
     s = states.get(session_id)

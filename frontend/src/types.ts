@@ -216,6 +216,15 @@ export interface Report {
   /** The decision made after each answer (coach, redirect, ease_off, push, follow_up, next, wrap_up). */
   adaptations?: Adaptation[]
   generated_by?: 'gemini' | 'fallback' | 'fake'
+  /** True when the candidate repeatedly looked away while answering (backend/brain/integrity.py). */
+  suspected_cheating?: boolean
+  /** Look-aways while answering, this session. */
+  look_aways?: number
+  integrity_flags?: ReportIntegrityFlag[]
+}
+
+export interface ReportIntegrityFlag extends IntegrityFlagEvent {
+  question_id: string | null
 }
 
 export interface ReportCoachFlag {
@@ -322,10 +331,24 @@ export interface CoachFlagEvent {
   /** What Judge observed, citing the number that triggered it. On screen only, never spoken. */
   message: string
   /**
-   * The single thing to do, shown as "Please <command>." The candidate must acknowledge it before the
-   * trial moves on. Optional so older sessions and fixtures still type-check.
+   * The single thing to do, shown as "Please <command>." The box removes itself once it has had time to
+   * be read. Optional so older sessions and fixtures still type-check.
    */
   command?: string
+}
+
+/**
+ * "Suspected of cheating" (backend/brain/integrity.py): raised only after the candidate has looked away
+ * from the screen several times within a minute while answering. On screen only, never spoken.
+ */
+export interface IntegrityFlagEvent {
+  ts: IsoDateTime
+  /** The claim, e.g. "You have looked away from me 3 times in under a minute. I suspect you of cheating." */
+  message: string
+  /** Shown as "Please <command>." */
+  command: string
+  /** Look-aways while answering, this session, when it was raised. */
+  look_aways: number
 }
 
 /**
@@ -355,6 +378,7 @@ export type ServerEvent =
   | { type: 'filler'; data: FillerEvent }
   | { type: 'vitals'; data: VitalsEvent }
   | { type: 'coach_flag'; data: CoachFlagEvent }
+  | { type: 'integrity_flag'; data: IntegrityFlagEvent }
   | { type: 'sensor'; data: SensorStatusEvent }
   | { type: 'session_ended'; data: SessionEndedEvent }
 
@@ -364,4 +388,6 @@ export type ServerEventType = ServerEvent['type']
 export type ClientEvent =
   | { type: 'answer_started'; data: { question_id: string } }
   | { type: 'answer_done'; data: { question_id: string; transcript: string } }
+  /** The candidate looked away from the screen for a while (hooks/useLookAway.ts). */
+  | { type: 'look_away'; data: { question_id: string } }
   | { type: 'end_session'; data: Record<string, never> }
