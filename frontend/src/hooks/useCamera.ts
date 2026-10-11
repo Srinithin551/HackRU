@@ -15,7 +15,8 @@ const hasCamera = () => typeof navigator !== 'undefined' && !!navigator.mediaDev
 
 export function useCamera() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const [enabled, setEnabled] = useState(true)
+  // VITE_CAMERA_PREVIEW=0 starts with the preview off, for when the SmartSpectra app (Presage) owns the webcam.
+  const [enabled, setEnabled] = useState(import.meta.env.VITE_CAMERA_PREVIEW !== '0')
   const [attempt, setAttempt] = useState(0)
   const [status, setStatus] = useState<Exclude<CameraStatus, 'off'>>(hasCamera() ? 'starting' : 'unavailable')
 

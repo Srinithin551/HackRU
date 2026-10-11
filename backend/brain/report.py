@@ -36,11 +36,17 @@ def hardest(items: list[HistoryItem]) -> Optional[HistoryItem]:
     return max(candidates, key=lambda it: it.stats.stress_peak) if candidates else None
 
 
+CALM_PEAK = 40   # PLAN.md: < 40 is calm
+
+
 def hardest_moment_text(items: list[HistoryItem]) -> str:
     it = hardest(items)
     if it is None:
         return "No stress spike could be measured: the camera didn't get a usable signal during your answers."
     st = it.stats
+    if (st.stress_peak or 0) <= CALM_PEAK:
+        return (f"No real stress spike: you stayed in the calm zone the whole time. "
+                f"Your highest stress was {num(st.stress_peak)} out of 100, on {it.label}.")
     when = f" {st.peak_offset_s:.0f} seconds into your answer" if st.peak_offset_s is not None else ""
     hr = (f", with heart rate peaking at {num(st.hr_peak)} bpm ({pct(st.hr_delta_pct)} vs your baseline on average)"
           if st.hr_peak is not None else "")
@@ -180,7 +186,9 @@ def finalize_draft(s: SessionState, items: list[HistoryItem], draft: ReportDraft
         score = max(base - COMPOSURE_LEEWAY, min(base + COMPOSURE_LEEWAY, int(draft.composure_score)))
         score = max(0, min(100, score))
     hardest_text = draft.hardest_moment.strip()
-    if not _DIGIT.search(hardest_text):
+    h = hardest(items)
+    calm = h is not None and (h.stats.stress_peak or 0) <= CALM_PEAK
+    if calm or not _DIGIT.search(hardest_text):   # never call a calm blip a "spike"
         hardest_text = hardest_moment_text(items)
 
     return Report(

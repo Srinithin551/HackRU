@@ -36,6 +36,23 @@ T = TypeVar("T", bound=BaseModel)
 
 _client = None
 _no_thinking_level: set[str] = set()   # models that rejected thinking_level
+_resting_until: dict[str, float] = {}  # model -> monotonic time it may be tried again (quota/overload)
+
+DAILY_QUOTA_REST_S = 3600.0   # a per-day quota is gone for hours; re-check hourly instead of every call
+OVERLOAD_REST_S = 20.0        # 503 "high demand" is usually brief
+
+
+def _rest_for(e: Exception) -> Optional[float]:
+    """How long to skip a model after this error, or None if it's not a quota/overload error."""
+    msg = str(e)
+    if "RESOURCE_EXHAUSTED" in msg or " 429" in f" {msg}":
+        if "PerDay" in msg:
+            return DAILY_QUOTA_REST_S
+        m = re.search(r"retry in ([\d.]+)s", msg)
+        return float(m.group(1)) + 1 if m else 60.0
+    if "UNAVAILABLE" in msg or " 503" in f" {msg}":
+        return OVERLOAD_REST_S
+    return None
 
 
 class GeminiUnavailable(RuntimeError):
@@ -122,7 +139,11 @@ async def generate(call: str, system: str, prompt: str, schema: type[T], tempera
         raise GeminiUnavailable("GEMINI_API_KEY not set")
     deadline = time.monotonic() + timeout
     last: Optional[Exception] = None
-    for model in models or quality_models():
+    candidates = models or quality_models()
+    available = [m for m in candidates if _resting_until.get(m, 0) <= time.monotonic()]
+    if not available:
+        raise GeminiUnavailable(f"every model is resting after quota/overload errors: {', '.join(candidates)}")
+    for model in available:
         while True:   # at most twice per model: once more if it rejected thinking_level
             remaining = deadline - time.monotonic()
             if last is not None and remaining < MIN_ATTEMPT_S:   # the first attempt always runs
@@ -135,6 +156,10 @@ async def generate(call: str, system: str, prompt: str, schema: type[T], tempera
                     log.warning("%s rejected thinking_level, retrying without it", model)
                     _no_thinking_level.add(model)
                     continue
+                rest = _rest_for(e)
+                if rest:
+                    _resting_until[model] = time.monotonic() + rest
+                    log.warning("%s: %s is rate-limited or overloaded, skipping it for %.0fs", call, model, rest)
                 log.warning("%s on %s failed (%s), trying the next model", call, model, _short(e))
                 break
     raise last or GeminiUnavailable("no Gemini model configured")
@@ -173,8 +198,13 @@ def strip_stock_openers(text: str) -> str:
     return out[:1].upper() + out[1:] if out else text
 
 
+# "Let us move on" → "Let's move on" (the prompt asks for contractions; this catches the slips).
+_LET_US = re.compile(r"\b([Ll])et us (?=(?:move|switch|shift|turn|talk|dig|dive|look|go|get|start|begin|focus|"
+                     r"explore|discuss|circle|pivot|step|try|come|zoom|jump|head|continue|wrap|change|consider)\b)")
+
+
 def _clean_turn(text: str) -> str:
-    return strip_stock_openers(_clean_spoken(text))
+    return _LET_US.sub(r"\1et's ", strip_stock_openers(_clean_spoken(text)))
 
 
 # ---------------------------------------------------------------- call 1
@@ -217,7 +247,7 @@ async def decide_next(s: SessionState, kind: str, question: str, transcript: str
     try:
         d = await generate("decide_next", prompts.DECIDE_SYSTEM, context, DecisionReply,
                            temperature=0.4, timeout=DECIDE_TIMEOUT_S, models=fast_models())
-        text, coaching = _clean_turn(d.spoken_text), _clean_spoken(d.coaching)
+        text, coaching = _clean_turn(d.spoken_text), _LET_US.sub(r"\1et's ", _clean_spoken(d.coaching))
         if d.action == "coach" and not coaching:
             coaching, text = split_coaching(text)   # it put everything in spoken_text anyway
         return Decision(action=d.action, spoken_text=text, coaching=coaching if d.action == "coach" else "",

@@ -65,7 +65,8 @@ Use them to adapt like a perceptive human interviewer would.
 Choose exactly one action, checking in this order:
 - redirect: the answer is empty or garbled, so you can't tell what they meant (answers come from speech-to-text,
   so this is usually a recognition error, not their fault). Say you didn't catch it and ask them to say it again,
-  briefly. Allowed once per planned question: if REDIRECTS USED is 1/1, choose coach instead.
+  briefly. Allowed once per planned question. If REDIRECTS USED is 1/1: choose next if the answer is empty again
+  (likely a microphone problem; don't coach silence), or coach if it's garbled nonsense.
 - coach: the answer is wrong, off-topic, rude or inappropriate, dismissive, not a serious attempt, or very weak
   (answer_quality 1 or 2). An answer about something other than what was asked is off-topic even if it's
   technically sound or reuses a good earlier answer. Give immediate feedback, stepping outside the interview.
@@ -76,7 +77,7 @@ Choose exactly one action, checking in this order:
   3. Say what they should have said instead, with real substance for THIS question: a short model answer naming the
      specific points a strong candidate would make (for a zero-downtime migration question, for example: "add the
      new column first, backfill in batches, switch reads over, then drop the old one"). Not "you should have
-     explained it calmly".
+     explained it calmly". Required for every coaching turn, including rude or refused answers.
   4. Mark the step back in (e.g. "Okay, back in the interview.").
   5. In spoken_text: the NEXT PLANNED QUESTION (reworded to flow if you like), with no coaching in it.
   If there is no next planned question, end `coaching` right after step 3 (don't step back in, don't say the
@@ -190,6 +191,8 @@ def decide_context(s: SessionState, kind: str, question: str, transcript: str,
         f"NEXT PLANNED QUESTION: {_planned_line(s.queue[0] if s.queue else None)}",
         f"REMAINING PLANNED QUESTIONS (including the next one): {len(s.queue)}",
         f"FOLLOW-UPS USED ON THIS QUESTION: {s.followups_on_current}/1",
+        f"TURNS LEFT: {max(0, s.spec.max_turns - s.turns)} (a follow-up or redirect is only possible when this is more "
+        f"than the remaining planned questions; otherwise choose next, coach, or wrap_up)",
         f"REDIRECTS USED ON THIS QUESTION: {s.redirects_on_current}/1",
         f"PREVIOUS DECISIONS: {', '.join(s.actions[-3:]) or 'none'}",
     ])
@@ -221,7 +224,8 @@ answer plus webcam-measured body signals (heart rate, breathing, focus, and a 0-
 candidate's own calm baseline: < 40 calm, 40 to 70 rising, > 70 high).
 
 Rules:
-- Only use numbers that appear in the data below. Never invent or round wildly. Refer to questions as Q1, Q2...
+- Only use numbers that appear in the data below. Never invent or round wildly. Refer to questions by their labels
+  exactly as given below ("Q2", "Q2 follow-up"); a follow-up belongs to the question before it.
 - per_question: one entry for every question listed below (skip calibration), using its exact question_id.
   - what_happened: 1-2 sentences on the content of the answer. If it was wrong, off-topic, or inappropriate (the
     interviewer reaction will be "coach"), say so plainly, and make the advice about what a strong answer includes.
@@ -231,7 +235,10 @@ Rules:
 - composure_score: 0-100, higher is calmer. Start from 100 minus the average stress, then adjust a little for recovery.
   If no question had usable vitals, set it to 50 and say in the summary that composure couldn't be measured.
 - summary: 2-3 sentences, direct and specific, no fluff.
-- hardest_moment: the single biggest stress spike, with the question, the numbers, and when it happened.
+- hardest_moment: the single biggest stress spike, with the question, the numbers, and when it happened. If no stress
+  peak went above 40, say there was no real stress spike and that they stayed in the calm zone (give the highest peak).
+- An empty answer means nothing was captured (often a microphone or speech-recognition problem): say no answer was
+  captured; don't call it a refusal.
 - top_tips: exactly 3 short, concrete, actionable tips tied to what actually happened.
 - Talk to the candidate as "you". Honest but encouraging. No markdown."""
 

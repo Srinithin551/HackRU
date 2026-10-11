@@ -41,6 +41,7 @@ def fake_gemini(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "GEMINI_FAST_MODEL", "fast-model")
     monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "minimal")
     monkeypatch.setattr(gemini, "_no_thinking_level", set())
+    monkeypatch.setattr(gemini, "_resting_until", {})
 
     def install(*replies):
         models = FakeModels(replies)
@@ -180,3 +181,34 @@ def test_coach_blob_in_spoken_text_is_split(fake_gemini):
 def test_coaching_is_dropped_for_other_actions(fake_gemini):
     fake_gemini({"action": "next", "coaching": "stray", "spoken_text": "Why Go?", "answer_quality": 4, "rationale": "ok"})
     assert asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None)).coaching == ""
+
+
+def test_daily_quota_model_is_skipped_until_it_rests(fake_gemini):
+    daily = RuntimeError("429 RESOURCE_EXHAUSTED quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+    models = fake_gemini(daily, {"questions": []}, {"questions": []})
+    asyncio.run(gemini.plan_interview(get_spec("demo"), "Engineer"))
+    asyncio.run(gemini.plan_interview(get_spec("demo"), "Engineer"))
+    assert models.models == ["main-model", "fast-model", "fast-model"]   # no second wasted call on main-model
+
+
+def test_rest_durations():
+    assert gemini._rest_for(RuntimeError("429 RESOURCE_EXHAUSTED ...PerDay...")) == gemini.DAILY_QUOTA_REST_S
+    assert gemini._rest_for(RuntimeError("429 RESOURCE_EXHAUSTED. Please retry in 11.5s.")) == 12.5
+    assert gemini._rest_for(RuntimeError("503 UNAVAILABLE high demand")) == gemini.OVERLOAD_REST_S
+    assert gemini._rest_for(ValueError("bad json")) is None
+
+
+def test_all_models_resting_falls_back_immediately(fake_gemini, monkeypatch):
+    import time as _time
+    models = fake_gemini()
+    monkeypatch.setattr(gemini, "_resting_until", {"main-model": _time.monotonic() + 99, "fast-model": _time.monotonic() + 99})
+    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
+    assert d.action == "next" and models.models == []                 # no network call at all
+
+
+def test_let_us_becomes_lets(fake_gemini):
+    fake_gemini({"action": "next", "spoken_text": "Let us move to the next topic. Why Go?", "answer_quality": 4,
+                 "rationale": "ok", "coaching": ""})
+    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
+    assert d.spoken_text == "Let's move to the next topic. Why Go?"
+    assert gemini._LET_US.sub(r"\1et's ", "Please let us know.") == "Please let us know."   # left alone

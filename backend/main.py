@@ -9,6 +9,7 @@ import importlib
 import logging
 import re
 import sys
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -77,14 +78,23 @@ for _name in OPTIONAL_ROUTERS:
         mounted.append(_name.split(".")[1])
 
 
+SENSOR_STALE_S = 5.0
+
+
 @app.get("/health")
 async def health():
+    db = sys.modules.get("backend.data.db")
+    since = None if ws.last_vitals_at is None else round(time.monotonic() - ws.last_vitals_at, 1)
     return {
         "ok": True,
         "fake": config.BRAIN_FAKE,
         "gemini": bool(config.GEMINI_API_KEY),
         "elevenlabs": voice.configured(),
         "routers": mounted,
+        # "tiger_data" when TIGER_DATABASE_URL is set and in use, "in_memory" otherwise
+        "data_store": "unknown" if db is None else ("in_memory" if db.use_fake() else "tiger_data"),
+        # Is Presage → sensing client → /api/vitals feeding readings right now?
+        "sensor": {"live": since is not None and since < SENSOR_STALE_S, "seconds_since_reading": since},
     }
 
 

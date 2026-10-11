@@ -115,7 +115,7 @@ export function Timeline({ view, selectedId, onSelect }: { view: ReportView; sel
           ifOverflow="hidden"
           label={
             withLabels
-              ? { value: q.label === 'Warm-up' ? 'W' : q.label, position: 'insideTop', fill: selected ? color.ink : color.inkMuted, fontSize: 11, fontFamily: MONO }
+              ? { value: q.label === 'Warm-up' ? 'W' : q.label.replace(' follow-up', '+'), position: 'insideTop', fill: selected ? color.ink : color.inkMuted, fontSize: 11, fontFamily: MONO }
               : undefined
           }
         />

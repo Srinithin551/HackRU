@@ -37,6 +37,7 @@ CLOSING_PAUSE_S = 4.0        # minimum wait after the closing clip starts, befor
 CLOSING_SLACK_S = 1.0        # extra margin on top of the clip's own length
 MAX_FOLLOWUPS = 1            # ease_off / push / follow_up, per planned question
 MAX_REDIRECTS = 1            # "didn't catch that" re-asks for garbled answers, per planned question
+MAX_TRANSCRIPT_CHARS = 4000  # a runaway speech-to-text stream can't flood the prompt or the database
 FOLLOW_UP_ACTIONS = ("follow_up", "ease_off", "push")
 ADVANCING_ACTIONS = ("next", "coach")   # these move on to the next planned question
 
@@ -130,7 +131,7 @@ async def wait_answer(s: SessionState, qid: str) -> str:
             await data.mark_answer_started(qid, _utcnow())
             deadline = loop.time() + ANSWER_TIMEOUT_S   # full answer time from when they start talking
         elif type_ == "answer_done":
-            transcript = " ".join(str(d.get("transcript") or "").split())
+            transcript = " ".join(str(d.get("transcript") or "").split())[:MAX_TRANSCRIPT_CHARS]
             await data.mark_answered(qid, _utcnow(), transcript)
             return transcript
 
@@ -142,15 +143,21 @@ def word_limit(action: str) -> int:
 
 
 def resolve_action(action: str, text: str, followups_on_current: int, redirects_on_current: int,
-                   queue_len: int) -> str:
+                   queue_len: int, turns_left: int = 99, answered: bool = True) -> str:
     """Enforce the rules Gemini is asked to follow, so a bad decision can't derail the session.
-    `text` is what the action needs to say: the coaching for "coach", the spoken turn otherwise."""
+    `text` is what the action needs to say: the coaching for "coach", the spoken turn otherwise.
+    `turns_left`: turns remaining in the budget; a follow-up must leave room for every planned question.
+    `answered`: False when nothing was captured (silence is never coached: it's usually the mic)."""
+    if not answered and action == "coach":
+        action = "next"
     if not spoken(text, word_limit(action)) and action not in ("next", "wrap_up"):
         return "next" if queue_len else "wrap_up"   # nothing usable to say: move on with the planned text
     if action in FOLLOW_UP_ACTIONS and followups_on_current >= MAX_FOLLOWUPS:
         action = "next"
     elif action == "redirect" and redirects_on_current >= MAX_REDIRECTS:
         action = "next"
+    if action in (*FOLLOW_UP_ACTIONS, "redirect") and turns_left <= queue_len:
+        action = "next"   # no room: a follow-up now would cost a planned question later
     if action == "wrap_up" and queue_len > 0:
         action = "next"
     if action == "next" and queue_len == 0:
@@ -225,10 +232,12 @@ async def interview(s: SessionState) -> None:
             window = s.live_window
         decision = await gemini.decide_next(s, kind, next_text, transcript, stats, window)
         needed = decision.coaching if decision.action == "coach" else decision.spoken_text
-        action = resolve_action(decision.action, needed, s.followups_on_current, s.redirects_on_current, len(s.queue))
+        action = resolve_action(decision.action, needed, s.followups_on_current, s.redirects_on_current,
+                                len(s.queue), turns_left=s.spec.max_turns - s.turns, answered=bool(transcript))
         record_adaptation(s, qid, decision, action)
         # Gemini's wording only fits if its action survived the rules; otherwise use the planned text.
-        kept = action == decision.action
+        # (Silence turned from coach into next keeps its spoken_text: that's already the next question.)
+        kept = action == decision.action or (decision.action == "coach" and action == "next" and not transcript)
         turn = spoken(decision.spoken_text) if kept else ""
         coaching = spoken(decision.coaching, MAX_COACH_WORDS) if kept and action == "coach" else ""
 
@@ -249,13 +258,20 @@ async def interview(s: SessionState) -> None:
 async def build_and_save_report(s: SessionState) -> dict:
     items = normalize_history(await data.get_session_history(s.session_id))
     report = await gemini.final_report(s, items)
-    payload = report.model_dump()
-    await data.save_report(s.session_id, payload)
-    return payload
+    s.report = report.model_dump()   # kept in memory too: GET /report still works if the save fails
+    try:
+        await data.save_report(s.session_id, s.report)
+    except Exception:
+        log.exception("save_report failed for %s; serving the report from memory", s.session_id)
+    return s.report
 
 
 async def finish(s: SessionState) -> None:
-    await data.end_session(s.session_id)
+    """End the session. The browser always gets session_ended, even if the database is unreachable."""
+    try:
+        await data.end_session(s.session_id)
+    except Exception:
+        log.exception("end_session failed for %s", s.session_id)
     await set_state(s, "done")
     await broadcast(s.session_id, "session_ended", {
         "report_url": f"/api/sessions/{s.session_id}/report",
@@ -322,8 +338,10 @@ async def _emergency_finish(s: SessionState) -> None:
     except Exception:
         log.exception("get_session_history failed during emergency finish")
         items = []
+    if s.report is None:
+        s.report = fallback_report(s, items).model_dump()
     try:
-        await data.save_report(s.session_id, fallback_report(s, items).model_dump())
+        await data.save_report(s.session_id, s.report)
     except Exception:
         log.exception("save_report failed during emergency finish")
     try:

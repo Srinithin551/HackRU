@@ -234,7 +234,7 @@ pip install -r backend/requirements.txt
 cp .env.example .env                                  # fill in keys; BRAIN_FAKE=1 needs none
 BRAIN_FAKE=1 uvicorn backend.main:app --reload        # from the repo root
 python scripts/fake_frontend.py                       # terminal stand-in for the browser
-pytest                                                # 99 tests, < 2 seconds
+pytest                                                # 119 tests, < 2 seconds
 ```
 
 `GET /health` reports fake mode, whether Gemini/ElevenLabs keys are set, and which routers are mounted.
@@ -309,8 +309,30 @@ pytest                                                # 99 tests, < 2 seconds
 | `DECIDE_TIMEOUT_S` / `PLAN_TIMEOUT_S` / `REPORT_TIMEOUT_S` | 6 / 20 / 45 | `gemini.py` |
 | `INTERVAL_S` / `WINDOW_S` / `COOLDOWN_S` / `MIN_SAMPLES` | 3 / 10 / 12 / 3 | `watcher.py` |
 | Questions, `max_turns`, `max_seconds` per type | SWE/Behavioral/Presentation: 5 (2,3,3,4,5), 7, 480s. Demo: 3 (2,4,5), 5, 240s | `specs.py` |
-| `GEMINI_MODEL` (plan + report), `GEMINI_FAST_MODEL` (decide_next), `GEMINI_THINKING_LEVEL` | `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `minimal` | `.env` |
+| `GEMINI_MODEL` (plan + report), `GEMINI_FAST_MODEL` (decide_next), `GEMINI_THINKING_LEVEL` | `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `minimal` | `.env`. Free tier: `gemini-3.6-flash` allows only **20 requests/day** (seen 2026-10-10); the Brain then rests it and uses flash-lite. Enable billing for the demo |
 | `ELEVENLABS_MODEL`, `ELEVENLABS_VOICE_ID` | `eleven_flash_v2_5`, Eric (`cjVigY5qzO86Huf0OWal`) | `.env` |
+
+### End-to-end flow and what happens when a link fails
+
+| # | Link | Code | If it fails |
+|---|---|---|---|
+| 1 | Webcam → Presage (SmartSpectra C++ app) | Sensing, outside the repo | No log lines: client reports "NO FACE", confidence 0; UI shows "Waiting for sensor"; `/health` `sensor.live=false` |
+| 2 | Presage log → sensing client → `POST /api/vitals` | `sensing_client/client.py`, `backend/sensing/routes.py` | Client buffers 30 readings and retries; never crashes; only posts while a session is active (newest active session wins) |
+| 3 | Vitals → Tiger Data (stress score, baseline) | `backend/data/queries.py`, `metrics.py` | Readings below 0.7 confidence are dropped; no baseline yet → stress `null`; < 10 calm samples → population baseline |
+| 4 | Brain reads stats → Gemini | `brain/interviewer.py`, `gemini.py` | Every call has a timeout and a fallback; quota/overload errors rest that model (1 h for a daily quota, 20 s for 503) and fail over to the other |
+| 5 | ElevenLabs voice | `brain/voice.py` | `audio_url: null` → the page shows the text and opens the mic right away |
+| 6 | Browser audio | `frontend/src/lib/playClip.ts` | One voice channel: a new clip always stops the previous one; autoplay/decode errors count as "ended" |
+| 7 | Continuous analysis | `brain/watcher.py` (3 s), vitals broadcast | Watcher errors are logged per tick and never stop the loop |
+| 8 | Dashboard (live + report/replay) | `frontend/src/pages`, Data `/replay`, Brain `/report` | `session_ended` is always sent (even with the DB down); `/report` falls back to the in-memory copy |
+
+Other guards:
+- Silence is never coached: one "didn't catch that", then the interview moves on.
+- Follow-ups only happen when the turn budget still fits every planned question.
+- Setup fields are trimmed and capped (60/40/120 chars), and transcripts are capped at 4,000 chars.
+- No answer within 120s with the tab gone ends the session.
+
+### Coaching pop-up (Live page)
+While the interviewer speaks a coaching turn, `CoachingPopup` overlays the interviewer panel with the full text ("Stepping out of the interview", "Got it", Escape). When it's the user's turn it docks into a `CoachingChip` under the question, and clicking the chip reopens it. Question labels everywhere use the live numbering ("Q2", "Q2 follow-up"; "Q2+" on the chart).
 
 ### Where the build differs from the plan above
 

@@ -210,7 +210,7 @@ def history():
 def test_normalize_history_accepts_dicts_and_models():
     items = normalize_history(history())
     assert [it.question_id for it in items] == ["c", "q1", "q2"]   # q1 id recovered from stats
-    assert [it.label for it in items] == ["Calibration", "Q1", "Q2"]
+    assert [it.label for it in items] == ["Warm-up", "Q1", "Q1 follow-up"]   # matches the live screen
 
 
 def test_fallback_report_cites_numbers_and_skips_calibration():
@@ -220,7 +220,7 @@ def test_fallback_report_cites_numbers_and_skips_calibration():
     assert r.composure_score == 55                      # 100 - mean(30, 60)
     assert [f.question_id for f in r.per_question] == ["q1", "q2"]
     assert all(any(ch.isdigit() for ch in f.body_signal) for f in r.per_question)
-    assert "Q2" in r.hardest_moment and "88" in r.hardest_moment
+    assert "Q1 follow-up" in r.hardest_moment and "88" in r.hardest_moment
     assert len(r.top_tips) == 3
     assert r.coach_flags[0].question_id == "q2"
     assert r.generated_by == "fallback"
@@ -331,3 +331,36 @@ def test_reports_say_whether_composure_was_measured():
 def test_pct_never_prints_negative_zero():
     from backend.brain.history import pct
     assert [pct(-0.3), pct(0.4), pct(22.4), pct(-7.6), pct(None)] == ["+0%", "+0%", "+22%", "-8%", "n/a"]
+
+
+def test_labels_follow_the_live_numbering():
+    items = normalize_history([
+        {"question_id": "c", "idx": 0, "kind": "calibration", "text": "", "transcript": "", "stats": None},
+        {"question_id": "a", "idx": 1, "kind": "main", "text": "", "transcript": "", "stats": None},
+        {"question_id": "b", "idx": 2, "kind": "follow_up", "text": "", "transcript": "", "stats": None},
+        {"question_id": "d", "idx": 3, "kind": "main", "text": "", "transcript": "", "stats": None},
+        {"question_id": "e", "idx": 4, "kind": "follow_up", "text": "", "transcript": "", "stats": None},
+    ])
+    assert [it.label for it in items] == ["Warm-up", "Q1", "Q1 follow-up", "Q2", "Q2 follow-up"]
+
+
+def test_calm_session_has_no_spike_in_hardest_moment():
+    calm = normalize_history([{"question_id": "q1", "idx": 1, "kind": "main", "text": "Q", "transcript": "A",
+                               "stats": qstats("q1", stress_mean=2, stress_peak=3)}])
+    assert fallback_report(state(), calm).hardest_moment.startswith("No real stress spike")
+    draft = ReportDraft(composure_score=97, summary="s", top_tips=["a", "b", "c"], per_question=[],
+                        hardest_moment="Your single biggest stress spike happened during Q1, stress 3.")
+    assert finalize_draft(state(), calm, draft).hardest_moment.startswith("No real stress spike")
+
+
+@pytest.mark.parametrize("action,turns_left,queue,answered,expected", [
+    ("push", 3, 2, True, "push"),          # room for the follow-up and both planned questions
+    ("push", 2, 2, True, "next"),          # a follow-up now would cost a planned question
+    ("follow_up", 1, 0, True, "follow_up"),
+    ("redirect", 2, 2, True, "next"),
+    ("coach", 1, 2, True, "coach"),        # coaching moves on, so it never costs a question
+    ("coach", 5, 2, False, "next"),        # silence is never coached
+])
+def test_resolve_respects_turn_budget_and_silence(action, turns_left, queue, answered, expected):
+    assert resolve_action(action, "Some words to say here?", 0, 0, queue, turns_left=turns_left,
+                          answered=answered) == expected

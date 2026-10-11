@@ -53,6 +53,7 @@ class SessionState:
     actions: list[str] = field(default_factory=list)       # every resolved action, in order
     exchanges: list[dict] = field(default_factory=list)    # {kind, text, transcript} for every answered turn
     parting_words: str = ""                                # Gemini's reaction to the last answer, said before the closing line
+    report: Optional[dict] = None                          # the final report, also served from here if the DB save fails
 
     end_requested: bool = False
     started: float = field(default_factory=time.monotonic)

@@ -13,8 +13,9 @@
  * the camera in useCamera. On session_ended this page fades to "Analyzing…" and
  * navigates to the report, which is already saved by then.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router'
+import { CoachingChip, CoachingPopup } from '../components/CoachingPopup.tsx'
 import { CalibrationBanner, CoachToast, ThinkingDots, Waveform } from '../components/LiveOverlays.tsx'
 import { HrSparkline, StressSparkline } from '../components/Sparklines.tsx'
 import { StressGauge } from '../components/StressGauge.tsx'
@@ -205,8 +206,24 @@ function InterviewerPanel({
 }) {
   const q = live.question
   const earlier = live.asked.filter((a) => a.question_id !== q?.question_id)
+  // Coaching pops up while the interviewer is speaking it, then docks under the question for the user's
+  // turn. Keyed by question id so a new coaching turn always pops up again.
+  const [closedFor, setClosedFor] = useState<string | null>(null)
+  const [reopenedFor, setReopenedFor] = useState<string | null>(null)
+  const qid = q?.question_id ?? null
+  const coachingOpen =
+    Boolean(q?.coaching) && ((live.speaking && closedFor !== qid) || (reopenedFor === qid && closedFor !== qid))
+  const closeCoaching = useCallback(() => {
+    setClosedFor(qid)
+    setReopenedFor(null)
+  }, [qid])
+  const openCoaching = () => {
+    setClosedFor(null)
+    setReopenedFor(qid)
+  }
   return (
-    <aside className="panel flex min-h-0 flex-col gap-5 p-panel">
+    <aside className="panel relative flex min-h-0 flex-col gap-5 p-panel">
+      {q?.coaching && coachingOpen && <CoachingPopup text={q.coaching} speaking={live.speaking} onClose={closeCoaching} />}
       {/* Who is talking */}
       <div className="flex items-center gap-3">
         <div className="grid size-11 shrink-0 place-items-center rounded-full bg-accent-subtle text-lead font-semibold text-accent">
@@ -241,13 +258,8 @@ function InterviewerPanel({
         <p className="mt-3 text-question font-medium tracking-tight text-balance">
           {q ? q.text : 'Connecting to your interviewer…'}
         </p>
-        {/* Spoken before the question, shown after it: the question is what they have to answer. */}
-        {q?.coaching && (
-          <div className="mt-3 max-h-[20vh] overflow-y-auto rounded-control border-l-2 border-rising bg-rising-subtle px-3 py-2.5">
-            <p className="label-caps text-rising">Coaching on your last answer · outside the interview</p>
-            <p className="mt-1 text-caption text-ink-secondary">{q.coaching}</p>
-          </div>
-        )}
+        {/* Docked coaching note (the pop-up shows it in full while it's being spoken) */}
+        {q?.coaching && !coachingOpen && <CoachingChip text={q.coaching} onOpen={openCoaching} />}
       </div>
 
       {/* Answer controls */}

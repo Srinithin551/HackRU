@@ -4,6 +4,8 @@ interface ImportMetaEnv {
   readonly VITE_API_URL?: string
   /** "1" runs the app entirely against src/mocks/. */
   readonly VITE_MOCK?: string
+  /** "0" starts with the camera preview off (the SmartSpectra app keeps the webcam). Toggle with "Show camera". */
+  readonly VITE_CAMERA_PREVIEW?: string
 }
 
 interface ImportMeta {

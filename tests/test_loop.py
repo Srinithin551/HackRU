@@ -421,3 +421,98 @@ def test_second_small_talk_turn_reacts_to_the_first_answer(client, monkeypatch, 
     assert second["data"]["kind"] == "calibration" and second["data"]["index"] == 0
     want = gemini_line if expected is None else lines.CALIBRATION_EXTRA_LINES["demo"]
     assert second["data"]["text"] == want
+
+
+def test_database_down_at_the_end_still_ends_the_session(client, monkeypatch):
+    """If Tiger Data is unreachable when the session wraps up, the browser still gets session_ended
+    and GET /report serves the report from memory."""
+    async def down(*_a, **_k):
+        raise ConnectionError("Tiger Data unreachable")
+
+    sid = create(client)
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        answer(ws, recv_until(ws, "question", log), log=log)
+        q = recv_until(ws, "question", log)
+        monkeypatch.setattr(data, "save_report", down)
+        monkeypatch.setattr(data, "end_session", down)
+        monkeypatch.setattr(data, "get_report", down)
+        run_to_end(ws, log, first_question=q)
+    assert log[-1]["type"] == "session_ended"
+    r = client.get(f"/api/sessions/{sid}/report")
+    assert r.status_code == 200 and r.json()["generated_by"] == "fake"
+
+
+def test_database_down_mid_interview_still_ends_the_session(client, monkeypatch):
+    async def down(*_a, **_k):
+        raise ConnectionError("Tiger Data unreachable")
+
+    sid = create(client)
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        answer(ws, recv_until(ws, "question", log), log=log)
+        q = recv_until(ws, "question", log)
+        for name in ("insert_question", "get_question_stats", "get_session_history", "save_report",
+                     "end_session", "get_report", "get_window_stats"):
+            monkeypatch.setattr(data, name, down)
+        answer(ws, q, log=log)
+        recv_until(ws, "session_ended", log)
+    assert client.get(f"/api/sessions/{sid}/report").json()["generated_by"] == "fallback"
+
+
+def test_setup_fields_are_tidied_and_capped(client):
+    r = client.post("/api/sessions", json={"user_name": "  Ada   Lovelace  ", "interview_type": "demo",
+                                            "role_title": "x" * 500})
+    sid = r.json()["session_id"]
+    from backend.brain.state import metas
+    assert metas[sid].user_name == "Ada Lovelace" and len(metas[sid].role_title) == 120
+
+
+def test_health_reports_data_store_and_sensor(client):
+    from backend import ws as hub
+    h = client.get("/health").json()
+    assert h["data_store"] in ("in_memory", "tiger_data") and h["sensor"]["live"] is False
+    import asyncio as _a
+    client.portal.call(hub.broadcast, "nobody", "vitals", {"ts": "t"})
+    h = client.get("/health").json()
+    assert h["sensor"]["live"] is True and h["sensor"]["seconds_since_reading"] < 1
+
+
+def test_two_interviews_at_once_never_see_each_others_events(client):
+    a, b = create(client), create(client, "Behavioral")
+    with client.websocket_connect(f"/ws/{a}") as wa, client.websocket_connect(f"/ws/{b}") as wb:
+        client.post(f"/api/sessions/{a}/start")
+        client.post(f"/api/sessions/{b}/start")
+        qa, qb = recv_until(wa, "question", []), recv_until(wb, "question", [])
+        answer(wa, qa)
+        answer(wb, qb)
+        qa2, qb2 = recv_until(wa, "question", []), recv_until(wb, "question", [])
+        assert qa2["data"]["total"] == 3 and qb2["data"]["total"] == 4       # demo vs behavioral (fake: 4)
+        ids_a = {q["data"]["question_id"] for q in (qa, qa2)}
+        ids_b = {q["data"]["question_id"] for q in (qb, qb2)}
+        assert not ids_a & ids_b
+        wa.send_json({"type": "end_session", "data": {}})
+        recv_until(wa, "session_ended", [])
+        # b is unaffected by a ending
+        assert client.get(f"/api/sessions/{b}/status").json()["end_requested"] is False
+        wb.send_json({"type": "end_session", "data": {}})
+        recv_until(wb, "session_ended", [])
+
+
+def test_vitals_endpoint_edges(client):
+    assert client.post("/api/vitals", json={"readings": [{"heart_rate": 70}]}).status_code == 422   # no ts
+    assert client.post("/api/vitals", json={"nope": 1}).status_code == 422
+    assert client.post("/api/vitals", json={"readings": []}).json() == {"stored": 0}
+    sid = create(client)
+    r = client.post("/api/vitals", json={"readings": [{"session_id": sid, "ts": "2026-10-10T20:00:00Z",
+                                                       "heart_rate": 72, "confidence": 0.95}]})
+    assert r.status_code == 200 and r.json()["stored"] == 1
+
+
+def test_unknown_sessions_fail_cleanly(client):
+    assert client.get("/api/sessions/not-a-session/report").status_code == 404
+    assert client.get("/api/sessions/not-a-session/status").status_code == 404
+    with client.websocket_connect("/ws/not-a-session") as ws:   # connecting is harmless; nothing is replayed
+        ws.send_json({"type": "answer_done", "data": {"question_id": "x", "transcript": "hi"}})
