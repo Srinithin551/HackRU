@@ -7,7 +7,7 @@
 > |---|---|
 > | P1 breathing used at 0% confidence | ✅ Fixed: the Node sensor uses breathing only at Presage's "stable" confidence (≥ 45) |
 > | P2 slow pulse cadence dropped most readings | ✅ Fixed: the pulse is held at its own confidence for 8 s, and a strong recent pulse beats a weak new one |
-> | P3 a "push" follow-up can repeat the next planned question | Open |
+> | P3 a "push" follow-up can repeat the next planned question | ✅ Fixed (2026-10-11): a follow-up that is really a planned question is asked once, as that question (`turns.planned_repeat`) |
 > | P4 an empty follow-up answer moves on without a redirect | Open |
 > | P5 Gemini free-tier daily limit | Open: the fallback to `gemini-3.5-flash-lite` handles it |
 > | P6 ~60 ms Tiger Cloud round trip | Unchanged (fine for a 3 s watcher) |

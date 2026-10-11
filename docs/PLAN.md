@@ -50,7 +50,7 @@ Key idea: **Sensing writes, Data computes, Brain decides, Frontend shows.** Brai
 2. Brain sends the text to ElevenLabs (one voice, Judge's), caches the mp3 under `/audio/<hash>.mp3`, and emits a `question` WebSocket event. Coaching on the previous answer, if any, rides in the same clip and in `question.coaching`.
 3. Frontend plays the audio. When it ends, Frontend sends `answer_started` and turns on the mic.
 4. The whole time, Sensing posts a reading every second. Data stores it, computes `stress`, and the ingest route broadcasts a `vitals` event so the live numbers move.
-5. Brain's watcher reads `data.get_window_stats()` every 3 seconds and emits `coach_flag` events when stress rises: a message citing the number plus one command, shown as an interrupt the user acknowledges.
+5. Brain's watcher reads `data.get_window_stats()` every 3 seconds and emits `coach_flag` events when stress rises: a message citing the number plus one command, shown as an interrupt that goes away on its own once read.
 6. User finishes (silence auto-stop or "I've answered"). Frontend sends `answer_done` with the transcript.
 7. Brain calls `data.get_question_stats()` and asks Gemini what to do next: `next`, `follow_up`, `ease_off`, `push`, `redirect` ("didn't catch that") or `coach` (step out and give a model answer). Code enforces the limits. There is no filler clip between turns.
 8. Loop. After the last question the closing line plays (the only `filler` event) while Brain writes the report; Data saves it, and Brain emits `session_ended`.
@@ -151,6 +151,7 @@ Server → client:
 | `vitals` | `{ts, heart_rate, breathing_rate, stress}` (about 1 per second) | Sensing route |
 | `coach_flag` | `{ts, level: "rising" \| "high", message, command}` | Brain |
 | `sensor` | `{state: "idle" \| "starting" \| "warming_up" \| "measuring" \| "adjust" \| "error", message, simulated}` (every 3 s and on change) | Sensing route |
+| `integrity_flag` | `{ts, question_id, message, command, look_aways}`: "I suspect you of cheating" after repeated look-aways | Brain (`integrity.py`) |
 | `session_ended` | `{report_url, replay_url}` | Brain |
 
 Client → server:
@@ -159,6 +160,7 @@ Client → server:
 |---|---|
 | `answer_started` | `{question_id}` |
 | `answer_done` | `{question_id, transcript}` |
+| `look_away` | `{question_id}`: the candidate looked off screen for 1.5 s while answering |
 | `end_session` | `{}` |
 
 `kind` is one of `calibration`, `main`, `follow_up`.
