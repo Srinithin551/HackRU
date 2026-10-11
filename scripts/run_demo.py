@@ -75,6 +75,76 @@ def ensure_local_db(url: str) -> None:
     say("Tiger Data: local TimescaleDB container is up")
 
 
+# Commands this launcher starts. A process on one of our ports matching these, running from this repo,
+# is a leftover from an earlier run (e.g. its terminal was closed) and is safe to stop.
+OUR_COMMANDS = ("uvicorn backend.main:app", "sensing_client/client.py", "vite")
+
+
+def _cmd_and_cwd(pid: int) -> tuple[str, str]:
+    cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    cwd = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"], capture_output=True, text=True).stdout
+    cwd = next((line[1:] for line in cwd.splitlines() if line.startswith("n")), "")
+    return cmd, cwd
+
+
+def _ours(cmd: str, cwd: str) -> bool:
+    return any(c in cmd for c in OUR_COMMANDS) and cwd.startswith(str(ROOT))
+
+
+def _is_sensing_client(pid: int, cmd: str) -> bool:
+    """Python actually running sensing_client/client.py, not just a command line mentioning it (a shell,
+    an editor, a grep). The executable must be Python and the script must be its first argument."""
+    exe = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    if "python" not in exe.rsplit("/", 1)[-1].lower():
+        return False
+    args = cmd.split()
+    script = next((a for a in args[1:] if not a.startswith("-")), "")
+    return script.endswith("sensing_client/client.py")
+
+
+def free_ports(ports: list[int]) -> None:
+    """Stop leftover StressTest processes (on our ports, plus orphaned sensing clients); refuse to touch
+    anything else."""
+    pids = set()
+    for port in ports:
+        out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"], capture_output=True, text=True).stdout
+        for pid in map(int, out.split()):
+            cmd, cwd = _cmd_and_cwd(pid)
+            if not _ours(cmd, cwd):
+                sys.exit(f"[demo] port {port} is in use by another program (pid {pid}: {cmd[:100]}).\n"
+                         f"[demo] stop it (kill {pid}) or pick another port with --port / --frontend-port")
+            pids.add(pid)
+    out = subprocess.run(["pgrep", "-f", "sensing_client/client.py"], capture_output=True, text=True).stdout
+    for pid in map(int, out.split()):
+        if pid in (os.getpid(), os.getppid()):
+            continue
+        cmd, cwd = _cmd_and_cwd(pid)
+        if _is_sensing_client(pid, cmd) and cwd.startswith(str(ROOT)):
+            pids.add(pid)
+    for pid in pids:
+        args = _cmd_and_cwd(pid)[0].split()
+        what = " ".join(a for a in args[1:] if not a.startswith("/"))[:70] or args[0]   # drop interpreter paths
+        say(f"stopping a leftover StressTest process from an earlier run (pid {pid}: {what})")
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    deadline = time.time() + 8
+    while pids and time.time() < deadline:
+        pids = {pid for pid in pids if _alive(pid)}
+        time.sleep(0.3)
+    for pid in pids:
+        os.kill(pid, signal.SIGKILL)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
 def pipe(proc: subprocess.Popen, name: str) -> None:
     for line in iter(proc.stdout.readline, ""):
         print(f"[{name}] {line.rstrip()}", flush=True)
@@ -113,6 +183,7 @@ def main() -> None:
     if not args.no_sensing and not session_file.exists():
         say(f"NOTE: {session_file} doesn't exist yet: start the SmartSpectra app and press Start")
 
+    free_ports([args.port] + ([] if args.no_frontend else [args.frontend_port]))
     backend_url = f"http://127.0.0.1:{args.port}"
     procs: list[tuple[str, subprocess.Popen]] = []
 
@@ -136,11 +207,16 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, stop_all)
     signal.signal(signal.SIGTERM, stop_all)
+    signal.signal(signal.SIGHUP, stop_all)   # terminal window closed: don't leave orphaned servers behind
 
     # No --reload: a code reload mid-interview would drop the session.
     start("backend", [str(VENV_PY), "-m", "uvicorn", "backend.main:app", "--port", str(args.port)],
           extra_env={"BRAIN_FAKE": "1"} if args.fake else {"BRAIN_FAKE": env.get("BRAIN_FAKE", "0")})
+    backend = procs[0][1]
     for _ in range(60):
+        if backend.poll() is not None:   # it died (e.g. couldn't bind the port): don't trust any /health
+            say(f"backend failed to start (exit code {backend.returncode}); see the [backend] lines above")
+            stop_all()
         try:
             health = get_json(f"{backend_url}/health")
             break
