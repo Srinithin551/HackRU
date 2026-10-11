@@ -63,6 +63,14 @@ class CoachFlag(BaseModel):
     command: str = ""             # the single thing to do, shown as "Please <command>." 
 
 
+class IntegrityFlag(BaseModel):
+    ts: str                       # ISO UTC, same value as the live integrity_flag event
+    question_id: Optional[str]
+    message: str                  # the claim, e.g. "... I suspect you of cheating."
+    command: str = ""
+    look_aways: int               # look-aways this session when it was raised
+
+
 class Adaptation(BaseModel):
     question_id: str              # the question whose answer triggered the decision
     action: Action                # what the interviewer actually did next (after rule enforcement)
@@ -76,4 +84,7 @@ class Report(ReportDraft):
     composure_measured: bool = True      # False = no usable vitals, so composure_score is a neutral 50, not a verdict
     coach_flags: list[CoachFlag] = []    # for red dots on the replay chart
     adaptations: list[Adaptation] = []   # where the interviewer eased off / pushed / followed up
+    suspected_cheating: bool = False     # the candidate repeatedly looked away while answering (integrity.py)
+    look_aways: int = 0                  # look-aways while answering, this session
+    integrity_flags: list[IntegrityFlag] = []
     generated_by: Literal["gemini", "fallback", "fake"] = "gemini"

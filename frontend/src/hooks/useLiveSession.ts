@@ -10,6 +10,7 @@
  *     shows as speaking. Question text unchanged. `state`: drives the status pill.
  *  5. `vitals`: ring buffer of the last 60 readings for the sparklines.
  *  6. `coach_flag`: 4 s toast, also saved for the report chart.
+ *  6a. `integrity_flag`: "suspected of cheating", after repeated look-aways (reportLookAway sends them).
  *  6b. `sensor`: what Presage is doing ("Hold still"), re-sent every few seconds by the sensor.
  *  7. `session_ended`: the report is already saved; onEnded navigates to it.
  *
@@ -22,7 +23,15 @@ import { TOAST_MS, VITALS_WINDOW } from '../lib/constants.ts'
 import { saveFlag } from '../lib/flagStore.ts'
 import { playClip } from '../lib/playClip.ts'
 import { createSessionSocket, type SessionSocket, type SocketStatus } from '../lib/socket.ts'
-import type { CoachFlagEvent, QuestionEvent, SensorStatusEvent, ServerEvent, SessionState, VitalsEvent } from '../types.ts'
+import type {
+  CoachFlagEvent,
+  IntegrityFlagEvent,
+  QuestionEvent,
+  SensorStatusEvent,
+  ServerEvent,
+  SessionState,
+  VitalsEvent,
+} from '../types.ts'
 
 export interface VitalsSample {
   /** epoch ms */
@@ -52,6 +61,8 @@ export interface LiveState {
   sensor: SensorStatusEvent | null
   sensorAt: number | null
   flags: CoachFlagEvent[]
+  /** "Suspected of cheating" claims raised this session (repeated look-aways). */
+  integrityFlags: IntegrityFlagEvent[]
   toast: CoachFlagEvent | null
   ended: boolean
   /** The closing line is playing (or has played). */
@@ -74,6 +85,7 @@ const initialState: LiveState = {
   sensor: null,
   sensorAt: null,
   flags: [],
+  integrityFlags: [],
   toast: null,
   ended: false,
   closing: false,
@@ -137,6 +149,8 @@ function applyEvent(state: LiveState, event: ServerEvent, at: number): LiveState
     }
     case 'coach_flag':
       return { ...state, flags: [...state.flags, event.data], toast: event.data }
+    case 'integrity_flag':
+      return { ...state, integrityFlags: [...state.integrityFlags, event.data] }
     case 'sensor':
       return { ...state, sensor: event.data, sensorAt: at }
     case 'session_ended':
@@ -241,5 +255,11 @@ export function useLiveSession(sessionId: string, callbacks: Callbacks = {}) {
     socketRef.current?.send({ type: 'end_session', data: {} })
   }, [])
 
-  return { ...state, finishAnswer, endSession }
+  /** look_away for the current question. The backend decides whether repeats add up to a suspicion. */
+  const reportLookAway = useCallback(() => {
+    const questionId = questionIdRef.current
+    if (questionId) socketRef.current?.send({ type: 'look_away', data: { question_id: questionId } })
+  }, [])
+
+  return { ...state, finishAnswer, endSession, reportLookAway }
 }

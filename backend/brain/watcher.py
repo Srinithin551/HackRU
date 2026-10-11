@@ -6,9 +6,10 @@ Each flag carries two parts:
   message  what the interviewer (Judge) observed, citing the number that triggered it
   command  the single thing the candidate must do, rendered by the frontend as "Please <command>."
 
-The frontend makes the candidate acknowledge the command before the interview moves on, so a flag that
-repeated itself word for word would read as a bug. Every (driver, level) therefore has several
-phrasings and `pick_variant` never reuses one while an unused one remains.
+The frontend shows each flag until it has had time to be read, then removes it on its own, and it drops
+any text it has already shown, so a flag that repeated itself word for word would never appear. Every
+(driver, level) therefore has several phrasings and `pick_variant` never reuses one while an unused one
+remains.
 """
 
 import asyncio

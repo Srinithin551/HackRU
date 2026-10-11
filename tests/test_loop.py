@@ -144,7 +144,7 @@ def test_stress_spike_triggers_coach_flag_and_ease_off(client):
         assert rows and rows[0]["stress"] > 90
         flag = recv_until(ws, "coach_flag", log)
         # The message cites the heart-rate number that triggered it, and carries the one command
-        # the frontend makes the user acknowledge before the trial moves on.
+        # the frontend shows as "Please <command>." until it has had time to be read.
         assert flag["data"]["level"] == "high"
         assert "%" in flag["data"]["message"]
         assert flag["data"]["command"]
@@ -164,6 +164,30 @@ def test_stress_spike_triggers_coach_flag_and_ease_off(client):
     assert report["coach_flags"] and report["coach_flags"][0]["question_id"] == q1["data"]["question_id"]
     q1_feedback = next(p for p in report["per_question"] if p["question_id"] == q1["data"]["question_id"])
     assert "peaked at 100" in q1_feedback["body_signal"]
+
+
+def test_repeated_look_aways_raise_suspected_cheating(client):
+    sid = create(client)
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        answer(ws, recv_until(ws, "question", log))          # calibration
+
+        q1 = recv_until(ws, "question", log)
+        recv_until(ws, "state", log)                          # listening
+        qid = q1["data"]["question_id"]
+        ws.send_json({"type": "answer_started", "data": {"question_id": qid}})
+        for _ in range(3):
+            ws.send_json({"type": "look_away", "data": {"question_id": qid}})
+        flag = recv_until(ws, "integrity_flag", log)
+        assert "cheating" in flag["data"]["message"]
+        assert flag["data"]["command"] and flag["data"]["look_aways"] == 3
+        ws.send_json({"type": "answer_done", "data": {"question_id": qid, "transcript": on_topic(q1)}})
+        run_to_end(ws, log)
+
+    report = client.get(f"/api/sessions/{sid}/report").json()
+    assert report["suspected_cheating"] is True and report["look_aways"] == 3
+    assert report["integrity_flags"][0]["question_id"] == qid
 
 
 def test_end_session_mid_interview(client):
