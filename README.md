@@ -224,7 +224,7 @@ and [`backend/config.py`](backend/config.py), next to `INTERVIEWER_NAME` ("Judge
 | Brain: Gemini, ElevenLabs, the interview loop | Srinithin | [docs/roles/brain.md](docs/roles/brain.md) |
 | Data: Tiger Data, stress score, replay | Likhil | [docs/roles/data.md](docs/roles/data.md) |
 | Sensing: Presage, vitals ingest | Sharvil | [docs/roles/sensing.md](docs/roles/sensing.md) |
-| Frontend: React UI, demo | Shreyas | [docs/roles/frontend.md](docs/roles/frontend.md) |
+| Frontend & Trouble Shooting: React UI, demo ; debugging | Shreyas | [docs/roles/frontend.md](docs/roles/frontend.md) |
 
 The role guides are the plans written at the start of the hackathon; this README describes what was built.
 
