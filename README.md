@@ -23,21 +23,24 @@ so you never find out which question made you panic or how long it took you to r
    Demo) and, optionally, **import a file**: your slides or notes, a résumé, or a job description (PDF,
    PowerPoint, Word or text). Judge plans its questions from that file.
 2. **Take the stand.** Judge talks with you out loud (ElevenLabs voice). You answer by speaking (or typing).
-   - It starts with small talk while Presage locks on to your pulse and Osiris measures your calm
-     **baseline**.
+   - It greets you by the name you typed, then starts with small talk while Presage locks on to your
+     pulse and Osiris measures your calm **baseline**.
    - For a **Class Presentation with no file**, Judge first asks what your presentation covers, then plans
      its questions from your answer.
    - After each answer, Gemini decides the next turn: move on, follow up, ease off, push harder, ask you to
      repeat, or step out of the interview to **coach** a wrong or off-topic answer.
    - If your stress rises, Judge **interrupts** on screen with the number that triggered it and one thing to
-     do ("Please take one slow breath"). You acknowledge it ("Yes, Your Honor") before going on.
+     do ("Please take one slow breath"). Interrupts go away on their own once read.
+   - If you keep **looking away** from the screen while answering (3 look-aways within a minute), Judge says
+     it suspects you of cheating, on screen and in the report.
 3. **The record.** The report shows:
    - a **composure score** and where Judge saw you break;
    - three tips;
    - a **replay chart**: heart rate over stress, a shaded band for each answer, coach-flag dots, and hover
      notes written by Gemini;
-   - per-question numbers and feedback that cite your real measurements.
-4. **The ruling.** Judge delivers a verdict. You can take the stand again or adjourn.
+   - per-question numbers and feedback that cite your real measurements;
+   - a suspected-cheating notice, if you were flagged for looking away.
+4. **The ruling.** Judge delivers its verdict on you, by name. You can take the stand again or adjourn.
 
 ---
 
@@ -50,7 +53,8 @@ so you never find out which question made you panic or how long it took you to r
 | **Gemini** | Plans the questions (from your imported file when there is one) and writes every spoken turn after the small talk. It also decides how to adapt after each answer, writes the coaching, the report and the chart notes. Two models with automatic failover. |
 | **ElevenLabs** | Judge's voice (one voice for the whole interview), cached on disk by text. |
 
-**Stack:** FastAPI (Python 3.12) · React 19 + Vite + Tailwind 4 + Recharts · Node.js sensor · TimescaleDB.
+**Stack:** FastAPI (Python 3.12) · React 19 + Vite + Tailwind 4 + Recharts · MediaPipe face landmarker (look-aways,
+in the browser) · Node.js sensor · TimescaleDB.
 
 ---
 
@@ -70,18 +74,6 @@ so you never find out which question made you panic or how long it took you to r
 
 **Sensing writes, Data computes, Brain decides, Frontend shows.** `scripts/run_demo.py` starts all of it with one command and opens the app in its own Chrome window. Presage has no window, so Chrome is the only thing you see.
 
-### One interview, end to end:
-
-1. **Setup page** → `POST /api/sessions`. The live page opens the WebSocket, then calls `/start`.
-2. **Small talk (calibration, ~35 s).** While you chat, the Presage sensor (it starts when an interview starts) locks on, and Data computes your calm **baseline**. Every stress number afterwards is relative to it. Gemini plans the questions in the background.
-3. **Questions.** After each answer the backend reads your vitals for that answer, and Gemini decides the next turn: move on, follow up, ease off, push harder, ask you to repeat, or step out of the interview to coach you. Code enforces the rules (one follow-up per question, every planned question gets asked within the turn budget). Coach flags pop up on screen when stress rises, and remove themselves once read (coaching, which is spoken, leaves when its narration ends).
-   **Suspected cheating:** while you answer, the page tracks your head and eyes on the camera (MediaPipe face landmarker, in the browser, loaded from a CDN). Looking off screen for 1.5 s is one look-away; 3 within a minute raise "I suspect you of cheating" on screen and in the report (`backend/brain/integrity.py`).
-4. **Report.** The closing line plays while Gemini writes the report; the page then shows the replay chart (5-second buckets from a TimescaleDB continuous aggregate) and per-question feedback that cites real numbers.
-
-Every external call has a timeout and a fallback (canned questions, rule-based decisions, a numbers-only report, text without audio), so a slow or missing API never stalls a live session.
-
-**Stress score** (0-100, `backend/data/metrics.py`), always relative to **your** baseline: heart rate (+25% = max) weighted 0.5, breathing (+40% = max) 0.3, focus drop 0.2, with missing inputs dropped and the rest renormalized. Below 40 is calm, 40 to 70 rising, above 70 high.
-
 **One interview, end to end**
 1. `POST /api/sessions` (and `/material` if you imported a file). The live page opens the WebSocket and calls `/start`.
 2. **Warm-up (at least 35 s).** Small talk while Data collects the calm baseline. Gemini plans the questions in
@@ -90,6 +82,9 @@ Every external call has a timeout and a fallback (canned questions, rule-based d
    next turn. Code enforces the rules: at most one follow-up and one "didn't catch that" per question, every
    planned question asked within the turn budget, silence never coached. A watcher checks your stress every
    3 s and raises interrupts.
+   **Suspected cheating:** while you answer, the page tracks your head and eyes on the camera (MediaPipe face
+   landmarker, in the browser, loaded from a CDN). Looking off screen for 1.5 s is one look-away; 3 within a
+   minute raise "I suspect you of cheating" on screen and in the report (`backend/brain/integrity.py`).
 4. **Report.** The closing line plays while Gemini writes the report. The page then shows the record and the ruling.
 
 **Stress score** (0-100, [`backend/data/metrics.py`](backend/data/metrics.py)), always relative to *your*
@@ -111,6 +106,8 @@ Readings below Presage's own accuracy standard (confidence 0.4) are never stored
 - **API keys fail over.** When a Presage key runs out of credits, the next key in `PRESAGE_BACKUP_API_KEYS`
   takes over.
 - **Gemini models fail over.** On a quota error or overload, the other model takes over.
+- **Gemini's turns are checked in code.** A question is never asked twice, moving on always asks the planned
+  question, coaching is never spoken twice, and the "step out / back in" lines rotate so they don't repeat.
 - **A weak pulse never replaces a recent strong one.** Hints wait 2.5 s before showing, so they don't flicker.
 - **No camera fight.** The page opens the camera first and Presage second, so the two never fight over the
   camera's mode.
@@ -175,10 +172,10 @@ Each run's full output is saved to `backend/logs/run-<date>-<time>.log`, and eve
 
 ### Tests
 ```bash
-.venv/bin/python -m pytest tests                     # Brain: 171 tests
+.venv/bin/python -m pytest tests                     # Brain: 228 tests
 .venv/bin/python -m pytest backend/data/tests        # Data: 28 (real-database tests run when TIGER_DATABASE_URL is set)
 (cd sensing_client/presage_node && npm test)         # Presage sensor: 15
-(cd frontend && npx tsc -b && npm run lint && npm test && npm run build)   # Frontend: 51 + typecheck, lint, build
+(cd frontend && npx tsc -b && npm run lint && npm test && npm run build)   # Frontend: 63 + typecheck, lint, build
 ```
 
 ---
@@ -188,7 +185,7 @@ Each run's full output is saved to `backend/logs/run-<date>-<time>.log`, and eve
 | Path | What's there |
 |---|---|
 | [`backend/main.py`](backend/main.py), `ws.py`, `config.py`, `guards.py`, `contracts.py` | FastAPI app, WebSocket hub, settings (`APP_NAME` lives here), the local-only guard, shared types |
-| [`backend/brain/`](backend/brain/) | Interview loop, Gemini calls and prompts, imported material, Judge's voice, stress watcher, report |
+| [`backend/brain/`](backend/brain/) | Interview loop, Gemini calls and prompts, turn checks, imported material, Judge's voice, stress watcher, look-away (cheating) watcher, report |
 | [`backend/data/`](backend/data/) | Tiger Data schema and queries (and their in-memory twin), stress score ([docs](docs/data/README.md)) |
 | [`backend/sensing/routes.py`](backend/sensing/routes.py) | Where readings enter: cleans and stores vitals, Presage status, the page-camera signal |
 | [`sensing_client/presage_node/`](sensing_client/presage_node/README.md) | The hidden Presage sensor (Node.js) |
@@ -213,6 +210,9 @@ and [`backend/config.py`](backend/config.py), next to `INTERVIEWER_NAME` ("Judge
   stable pulse takes 10-20 s, which the warm-up covers.
 - **The Gemini free tier is small.** `gemini-3.6-flash` allows about 20 requests a day; after that Osiris
   falls back to `gemini-3.5-flash-lite`.
+- **Look-away detection needs internet.** The MediaPipe face landmarker loads from a CDN; without it the
+  interview still runs, just with no cheating check. Glancing away to think is fine: it takes 3 look-aways
+  within a minute to be flagged.
 - **Large frontend bundle.** The production build warns about a chunk over 500 kB (the chart library).
 
 ---

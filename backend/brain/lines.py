@@ -26,9 +26,37 @@ CALIBRATION_EXTRA_LINES = {
 
 CLOSING_LINE = "That's everything I wanted to cover. Thanks for your time. Give me a moment to put your feedback together."
 
-def calibration_lines(spec_key: str, ask_for_material: bool = False) -> tuple[str, str]:
-    """(opener, fallback second turn). A presentation with no imported file opens by asking about its content."""
+# Coaching steps outside the interview and back in. Gemini writes only the feedback; the code wraps it in
+# these (turns.with_step_markers), taking the next pair each time, so no session hears the same line twice
+# before all of them have been used. When Gemini wrote these itself, it used the prompt's example word for
+# word on every coaching turn. They are spoken inside the coaching clip, not pre-recorded on their own.
+STEP_OUT_LINES = (
+    "Let me step out of the interview for a second.",
+    "Let me step off the bench for a moment.",
+    "Off the record for a second.",
+    "Let me pause the interview here.",
+    "Quick aside before we go on.",
+    "Let me stop the clock for a moment.",
+)
+STEP_IN_LINES = (
+    "Okay, back in the interview.",
+    "Back on the record.",
+    "Alright, let's pick it back up.",
+    "Now, back to the questions.",
+    "Let's continue.",
+    "Okay, on to the next one.",
+)
+
+GREETING = "Thanks for joining me today."   # how both openers begin
+
+
+def calibration_lines(spec_key: str, ask_for_material: bool = False, name: str = "") -> tuple[str, str]:
+    """(opener, fallback second turn). A presentation with no imported file opens by asking about its content.
+    With a `name`, the opener greets them by it ("Thanks for joining me today, Ada."); that clip is made
+    for the session instead of pre-recorded."""
     opener = PRESENTATION_MATERIAL_LINE if ask_for_material else CALIBRATION_LINE
+    if name:
+        opener = opener.replace(GREETING, f"{GREETING[:-1]}, {name}.", 1)
     return opener, CALIBRATION_EXTRA_LINES.get(spec_key, CALIBRATION_EXTRA_LINES["swe"])
 
 

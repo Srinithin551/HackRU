@@ -135,6 +135,16 @@ def fallback_tips(items: list[HistoryItem], reacted: Optional[dict[str, str]] = 
     return tips[:3]
 
 
+def addressed(summary: str, first_name: str) -> str:
+    """The summary spoken to them by name ("Ada, you held…"), unless it already is or doesn't start with
+    "You"/"Your" (lowercasing anything else could mangle it, e.g. "Q2 was…")."""
+    if not first_name or summary.lower().startswith(first_name.lower()):
+        return summary
+    if summary.startswith(("You ", "You'", "Your ")):
+        return f"{first_name}, {summary[0].lower()}{summary[1:]}"
+    return summary
+
+
 def fallback_report(s: SessionState, items: list[HistoryItem], generated_by: str = "fallback") -> Report:
     answered = _answered(items)
     reacted = reactions(s)
@@ -152,7 +162,8 @@ def fallback_report(s: SessionState, items: list[HistoryItem], generated_by: str
     return Report(
         composure_score=score,
         composure_measured=composure_from_stats(items) is not None,
-        summary=summary,
+        candidate_name=s.meta.user_name,
+        summary=addressed(summary, s.meta.first_name),
         hardest_moment=hardest_moment_text(items),
         per_question=[fallback_feedback(it, reacted.get(it.question_id)) for it in answered],
         top_tips=fallback_tips(items, reacted),
@@ -199,7 +210,8 @@ def finalize_draft(s: SessionState, items: list[HistoryItem], draft: ReportDraft
     return Report(
         composure_score=score,
         composure_measured=base is not None,
-        summary=draft.summary.strip() or fallback_report(s, items).summary,
+        candidate_name=s.meta.user_name,
+        summary=addressed(draft.summary.strip(), s.meta.first_name) or fallback_report(s, items).summary,
         hardest_moment=hardest_text,
         per_question=per_question,
         top_tips=tips,

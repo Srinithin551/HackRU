@@ -11,9 +11,9 @@ backend or fully offline with `VITE_MOCK=1`.
 | Route | Screen |
 |---|---|
 | `/` | **Setup:** name, trial type, role or presentation topic, and an optional **file import** (slides, notes, a résumé or a job description; PDF, PowerPoint, Word or text, up to 10 MB). Creates the session, uploads the file (`POST /api/sessions/{id}/material`) and goes to the interview. |
-| `/session/:id` | **Live:** **left**, Judge (one interviewer: speaking halo, thinking dots), "Question 2 of 5" with a transition banner on every new question, the question, the answer controls and the questions asked so far. **Right**, your webcam (mirrored, nothing recorded) with live captions, the warm-up ring, Presage hints and Judge's **interrupts**. Under it: heart rate, composure gauge and breathing, with 60 s sparklines. |
-| `/session/:id/report` | **The record** (opens when the interview ends): composure score, where Judge saw you break, three tips, the replay chart (heart rate over composure, shaded answer bands, coach-flag dots, Gemini's notes on hover; a caption explains that only those highlighted metrics are drawn), the question breakdown with the toughest question marked, and per-question stats with feedback. |
-| `/session/:id/verdict` | **The ruling:** Judge's verdict and score. "Take the stand again" opens a gold light into a new session; "I'll come back later" dims the screen and adjourns. |
+| `/session/:id` | **Live:** **left**, Judge (one interviewer: speaking halo, thinking dots), "Question 2 of 5" with a transition banner on every new question, the question, the answer controls and the questions asked so far. **Right**, your webcam (mirrored, nothing recorded) with live captions, the warm-up ring, Presage hints and Judge's **interrupts** (stress, coaching, and "I suspect you of cheating" after repeated look-aways, tracked in the browser with MediaPipe while you answer). Under it: heart rate, composure gauge and breathing, with 60 s sparklines. |
+| `/session/:id/report` | **The record** (opens when the interview ends): composure score, where Judge saw you break, three tips, the replay chart (heart rate over composure, shaded answer bands, coach-flag dots, Gemini's notes on hover; a caption explains that only those highlighted metrics are drawn), the question breakdown with the toughest question marked, and per-question stats with feedback, plus a suspected-cheating notice when you were flagged. |
+| `/session/:id/verdict` | **The ruling:** Judge's verdict on the candidate by name ("The court's ruling on Ada Lovelace") and score. "Take the stand again" opens a gold light into a new session; "I'll come back later" dims the screen and adjourns. |
 | `/dev` | **Dev Console:** every WebSocket event logged, for debugging the wiring. |
 
 Names live in one place: `APP_NAME` ("Osiris") and `INTERVIEWER_NAME` ("Judge") in `src/lib/constants.ts`.
@@ -46,7 +46,8 @@ charts; a test keeps them in sync). Stress colours always come with an icon and 
 | `src/lib/cameraStream.ts` | The app's one webcam stream, opened when the app loads and kept for the life of the window. It tells the backend (`POST /api/sensor/page-camera`) so the Presage sensor opens the camera *after* the page. Opening it second used to change the camera's mode and crash Presage. Prefers the built-in camera over an iPhone. |
 | `src/hooks/useLiveSession.ts` | The live protocol: socket, audio → `answer_started`, vitals buffer, interrupts, Presage status, navigation on `session_ended`. |
 | `src/hooks/useSpeechToText.ts` | Chrome speech-to-text; the answer ends after 3.5 s of silence; typing fallback when unsupported. |
-| `src/hooks/useInterrupt.ts`, `src/lib/interrupts.ts` | The interrupt rules: reset on a new question, never show the same text twice, and the user must acknowledge ("Yes, Your Honor") before answering on. |
+| `src/hooks/useInterrupt.ts`, `src/lib/interrupts.ts` | The interrupt rules: reset on a new question, never show the same text twice, and go away on their own (spoken coaching when its narration ends, silent flags once they've been read). |
+| `src/hooks/useLookAway.ts`, `src/lib/lookAway.ts` | Look-away detection: MediaPipe's face landmarker (loaded from a CDN) reads head pose and eye direction while you answer; 1.5 s off screen sends one `look_away` event. Whether that adds up to suspected cheating is decided by `backend/brain/integrity.py`. |
 | `src/components/` | Interviewer panel, interrupt box, vitals row, gauge, sparklines, replay chart, overlays, shared UI. |
 | `src/mocks/` | An in-browser fake backend that follows Brain's event order (see "Mock mode"). |
 
@@ -80,7 +81,7 @@ after editing env files.
 
 ```bash
 npm run dev            # dev server on :5173
-npm test               # unit + contract tests (Vitest): 51
+npm test               # unit + contract tests (Vitest): 63
 npx tsc -b             # typecheck only
 npm run lint           # oxlint
 npm run build          # typecheck + production build into dist/
@@ -108,6 +109,8 @@ Fixtures in `src/mocks/`:
 - `question.index` / `total` are planned numbers ("Q 2 of 5"). A follow-up keeps its parent's number.
 - `question.coaching` (string or null) is feedback on the previous answer, spoken first in the same clip. It's shown as an interrupt.
 - `coach_flag` carries `message` (citing the number) and `command` (shown as "Please …").
+- `integrity_flag` (`{ts, question_id, message, command, look_aways}`) is "I suspect you of cheating", shown in the same interrupt box. The page sends `look_away` (`{question_id}`) for each look-away.
+- The report carries `candidate_name` (shown on the Report and Verdict pages) and `suspected_cheating`, `look_aways`, `integrity_flags`.
 - `sensor` events carry Presage's status; hints appear only once a problem has lasted 2.5 s.
 - `GET /report` returns 404 until it's ready. It's always ready by the time `session_ended` arrives.
 - `POST /start` is idempotent (`started` / `already_running` / `finished`).

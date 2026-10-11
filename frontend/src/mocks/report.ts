@@ -36,6 +36,7 @@ export function buildReport(replay: ReplayResponse, flags: readonly CoachFlagEve
 
   return {
     composure_score: score,
+    candidate_name: replay.session.user_name ?? '',
     summary: summary(questions, flags, score, hardest),
     hardest_moment: hardestMoment(hardest, baseHr),
     per_question: questions.map((q) => ({

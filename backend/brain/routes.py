@@ -18,8 +18,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
 from backend import config, ws
-from backend.brain import fake, insights, integrity, material
-from backend.brain.interviewer import run_session
+from backend.brain import fake, insights, integrity, lines, material, voice
+from backend.brain.interviewer import opening_lines, run_session, spoken_name
 from backend.brain.state import SessionMeta, SessionState, metas, prune_finished, states, tasks
 from backend.data import queries as data
 
@@ -51,9 +51,28 @@ async def create_session(body: CreateSessionBody):
         ws.forget(old)
     sid = await data.create_session(body.user_name, body.interview_type, body.role_title)
     sid = str(sid)
-    metas[sid] = SessionMeta(sid, body.user_name, body.interview_type, body.role_title)
+    meta = metas[sid] = SessionMeta(sid, body.user_name, body.interview_type, body.role_title)
     log.info("session %s created: %s / %r", sid, body.interview_type, body.role_title)
+    _prepare_greeting(meta)
     return {"session_id": sid}
+
+
+_greetings: set[asyncio.Task] = set()   # keeps the background voice tasks alive until they finish
+
+
+def _prepare_greeting(meta: SessionMeta) -> None:
+    """Start voicing the opener that greets them by name now, so it plays without a pause at /start (the
+    unnamed openers are pre-recorded at startup). A presentation's opener depends on whether a file gets
+    uploaded next, so both versions are made."""
+    if not spoken_name(meta):
+        return
+    openers = {opening_lines(meta)[0]}
+    if meta.asks_for_material:
+        openers.add(lines.calibration_lines(meta.spec.key, False, spoken_name(meta))[0])
+    for text in openers:
+        task = asyncio.create_task(voice.tts(text))
+        _greetings.add(task)
+        task.add_done_callback(_greetings.discard)
 
 
 class MaterialBody(BaseModel):

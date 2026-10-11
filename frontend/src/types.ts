@@ -207,6 +207,8 @@ export interface Report {
   top_tips: string[]
   // Additive fields from Brain's build (brain.md "As built"). Optional so the mock and older
   // reports still type-check.
+  /** The name typed on the setup page ("" if left blank), shown on the report and verdict pages. */
+  candidate_name?: string
   /** False when no usable vitals were captured: composure_score is then a neutral 50, not a verdict. */
   composure_measured?: boolean
   /** For the red/amber dots on the replay chart. */

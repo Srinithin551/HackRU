@@ -21,7 +21,7 @@ from backend.brain.models import Decision, DecisionReply, InterviewPlan, Opening
 from backend.brain.report import fallback_report, finalize_draft
 from backend.brain.specs import InterviewSpec, fallback_questions
 from backend.brain.state import SessionState
-from backend.brain.turns import split_coaching
+from backend.brain.turns import question_part, split_coaching, with_step_markers
 from backend.contracts import QuestionStats, WindowStats
 
 log = logging.getLogger("brain.gemini")
@@ -259,8 +259,14 @@ async def decide_next(s: SessionState, kind: str, question: str, transcript: str
         d = await generate("decide_next", prompts.DECIDE_SYSTEM, context, DecisionReply,
                            temperature=0.4, timeout=DECIDE_TIMEOUT_S, models=fast_models())
         text, coaching = _clean_turn(d.spoken_text), _LET_US.sub(r"\1et's ", _clean_spoken(d.coaching))
-        if d.action == "coach" and not coaching:
-            coaching, text = split_coaching(text)   # it put everything in spoken_text anyway
+        if d.action == "coach":
+            if coaching:
+                text = question_part(text, coaching)    # never say the coaching twice in one clip
+            else:
+                coaching, text = split_coaching(text)   # it put everything in spoken_text anyway
+            # The step out / step back in lines come from a rotating set, not from Gemini (which repeated
+            # one wording every time). No step back in when no question follows.
+            coaching = with_step_markers(coaching, s.actions.count("coach"), step_in=bool(s.queue))
         return Decision(action=d.action, spoken_text=text, coaching=coaching if d.action == "coach" else "",
                         answer_quality=max(1, min(5, d.answer_quality)), rationale=d.rationale)
     except Exception as e:

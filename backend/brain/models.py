@@ -81,6 +81,7 @@ class Adaptation(BaseModel):
 
 class Report(ReportDraft):
     """Served by GET /api/sessions/{id}/report. The brain.md fields plus additive extras."""
+    candidate_name: str = ""             # the name typed on the setup page ("" if blank), for the report and verdict pages
     composure_measured: bool = True      # False = no usable vitals, so composure_score is a neutral 50, not a verdict
     coach_flags: list[CoachFlag] = []    # for red dots on the replay chart
     adaptations: list[Adaptation] = []   # where the interviewer eased off / pushed / followed up
