@@ -105,6 +105,7 @@ Rules:
     If there were no usable vitals, say so.
   - advice: one concrete thing to do next time on this kind of question.
 - composure_score: 0-100, higher is calmer. Start from 100 minus the average stress, then adjust a little for recovery.
+  If no question had usable vitals, set it to 50 and say in the summary that composure couldn't be measured.
 - summary: 2-3 sentences, direct and specific, no fluff.
 - hardest_moment: the single biggest stress spike, with the question, the numbers, and when it happened.
 - top_tips: exactly 3 short, concrete, actionable tips tied to what actually happened.
