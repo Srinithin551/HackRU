@@ -5,9 +5,11 @@ import pytest
 from backend.brain import fake, lines, prompts
 from backend.brain.history import normalize_history, stats_line
 from backend.brain.interviewer import resolve_action
-from backend.brain.turns import final_coaching, split_coaching, spoken
+from backend.brain.turns import (as_planned, asks_something, covers, final_coaching, planned_repeat,
+                                 question_part, split_coaching, spoken, strip_step_markers,
+                                 with_step_markers)
 from backend.brain.models import QuestionFeedback, ReportDraft
-from backend.brain.report import fallback_report, finalize_draft
+from backend.brain.report import addressed, fallback_report, finalize_draft
 from backend.brain.specs import fallback_questions, get_spec, normalize_type
 from backend.brain.state import SessionMeta, SessionState
 from backend.brain.watcher import VARIANTS, driver_for, flag_for, level_for, pick_variant
@@ -39,13 +41,17 @@ def state(type_="Software Engineering") -> SessionState:
 @pytest.mark.parametrize("action,text,followups,redirects,queue,expected", [
     ("next", "", 0, 0, 2, "next"),
     ("next", "", 0, 0, 0, "wrap_up"),                    # nothing left to ask
-    ("ease_off", "Let me rephrase.", 0, 0, 2, "ease_off"),
-    ("ease_off", "Let me rephrase.", 1, 0, 2, "next"),   # max one follow-up per planned question
+    ("ease_off", "Let me rephrase: what's the first step?", 0, 0, 2, "ease_off"),
+    ("ease_off", "Let me rephrase: what's the first step?", 1, 0, 2, "next"),   # max one follow-up per planned question
     ("push", "", 0, 0, 2, "next"),                       # nothing to say → move on
     ("follow_up", "Example?", 1, 0, 0, "wrap_up"),
     ("wrap_up", "", 0, 0, 3, "next"),                    # can't wrap up with questions left
     ("wrap_up", "", 0, 0, 0, "wrap_up"),
-    ("push", "Harder one.", 0, 0, 0, "push"),            # follow-up allowed on the last question
+    ("push", "Harder one: what breaks first?", 0, 0, 0, "push"),   # follow-up allowed on the last question
+    ("push", "Take a guess at what breaks first.", 0, 0, 2, "push"),   # a request counts as asking
+    ("follow_up", "Python's flexibility is hard to beat.", 0, 0, 2, "next"),   # asks nothing: move on
+    ("redirect", "Let us circle back to database connections.", 0, 0, 2, "next"),
+    ("ease_off", "No worries at all.", 0, 0, 0, "wrap_up"),
     ("redirect", "Back to the question?", 0, 0, 2, "redirect"),
     ("redirect", "Back to the question?", 1, 0, 2, "redirect"),   # separate allowance from follow-ups
     ("redirect", "Back to the question?", 0, 1, 2, "next"),       # max one redirect per planned question
@@ -388,3 +394,165 @@ def test_calm_session_has_no_spike_in_hardest_moment():
 def test_resolve_respects_turn_budget_and_silence(action, turns_left, queue, answered, expected):
     assert resolve_action(action, "Some words to say here?", 0, 0, queue, turns_left=turns_left,
                           answered=answered) == expected
+
+
+# ---------------------------------------------------------------- turn checks (real turns from the 2026-10-10/11 logs)
+
+PLANNED = "Can you walk me through a particularly tricky bug you faced recently and how you figured out what was wrong?"
+
+
+@pytest.mark.parametrize("turn,planned,same", [
+    # reworded, with a reaction in front: still the planned question
+    ("Python's familiarity is a strong starting point. Can you walk me through a tricky bug you ran into recently "
+     "and how you figured out what was causing it?", PLANNED, True),
+    ("Makes sense. Bigger picture now: how would you design a chat app for a million users?",
+     "Walk me through how you'd design a chat app that has to support a million users.", True),
+    ("Love that you build APIs. Speaking of which, what project are you proudest of?",
+     "Tell me about a project you're proud of, in about thirty seconds.", True),
+    # a lead-in that asks nothing, and a question that isn't the planned one
+    ("Let's tackle our last scenario together.",
+     "How would you redesign a distributed database during a live split-brain outage without data loss?", False),
+    ("Let's move on to the next question. How do you approach designing a scalable API that needs to handle sudden "
+     "traffic spikes?", "How do you handle microservice failures when you need to maintain data consistency "
+     "across systems?", False),
+])
+def test_covers_tells_a_reworded_planned_question_from_another_question(turn, planned, same):
+    assert covers(turn, planned) is same
+    assert as_planned(turn, planned) == (turn if same else planned)
+
+
+def test_as_planned_with_no_turn_is_the_planned_text():
+    assert as_planned("", PLANNED) == PLANNED
+
+
+def test_planned_repeat_finds_a_follow_up_that_is_really_a_planned_question():
+    queue = ["How would you design a distributed rate limiter for a high-traffic API?",
+             "When would you choose a hash table over a balanced search tree despite worst-case collisions?"]
+    push = "Good breakdown of chaining and open addressing. Let's step it up. How would you design a distributed rate limiter for a high-traffic API?"
+    assert planned_repeat(push, queue) == 0
+    assert planned_repeat("Fixed memory versus pointers hits the core. When would you pick a hash table over a "
+                          "balanced search tree despite worst-case collisions?", queue) == 1
+    real = "Constant time lookups are the draw. Can you give me a situation where you'd pick a balanced tree instead?"
+    assert planned_repeat(real, queue) is None
+    assert planned_repeat(push, []) is None
+
+
+@pytest.mark.parametrize("text,asks", [
+    ("Which approach did you pick?", True),
+    ("Take a guess at what might trigger that worst-case performance.", True),
+    ("That's okay, let me put it more simply. Just walk me through the very first step you'd take.", True),
+    ("Let's tackle our last scenario together.", False),
+    ("Python's flexibility is hard to beat.", False),
+])
+def test_asks_something(text, asks):
+    assert asks_something(text) is asks
+
+
+@pytest.mark.parametrize("raw,body", [
+    ("Let me step out of the interview for a second. That would cost you. Say X. Okay, back in the interview.",
+     "That would cost you. Say X."),
+    ("Stepping out for a second: refusing to answer ends things. Own one failure.",
+     "Refusing to answer ends things. Own one failure."),
+    ("Okay, let me pause the interview here. That would cost you. Back to it.", "That would cost you."),
+    # never cut real feedback that merely mentions these words
+    ("Pausing that long would worry an interviewer. Fail over, then route traffic back to the primary.",
+     "Pausing that long would worry an interviewer. Fail over, then route traffic back to the primary."),
+])
+def test_strip_step_markers(raw, body):
+    assert strip_step_markers(raw) == body
+
+
+def test_with_step_markers_rotates_and_is_empty_without_feedback():
+    assert with_step_markers("Say X.", 0, step_in=True) == f"{lines.STEP_OUT_LINES[0]} Say X. {lines.STEP_IN_LINES[0]}"
+    assert with_step_markers("Say X.", 1, step_in=False) == f"{lines.STEP_OUT_LINES[1]} Say X."
+    n = len(lines.STEP_OUT_LINES)
+    assert with_step_markers("Say X.", n, step_in=False) == with_step_markers("Say X.", 0, step_in=False)
+    assert with_step_markers("Let me step out of the interview for a second. Okay, back in.", 0, step_in=True) == ""
+    assert len(set(lines.STEP_OUT_LINES)) == len(lines.STEP_OUT_LINES) == len(lines.STEP_IN_LINES)
+
+
+@pytest.mark.parametrize("text,coaching,question", [
+    ("That costs you. Say X. How would you shard it?", "That costs you. Say X.", "How would you shard it?"),
+    ("Let me step out. Reworded copy. Okay, back in the interview. How would you shard it?", "Original.",
+     "How would you shard it?"),
+    ("Let me step out of the interview for a second. Reworded copy with no end.", "Original.", ""),
+    # seen live: a reworded copy that shares its step out / back in sentences with the coaching
+    ("Let me step out of the interview for a second. Reworded. Okay, back in the interview. How would you shard it?",
+     "Let me step out of the interview for a second. Original. Okay, back in the interview.", "How would you shard it?"),
+    ("How would you shard it?", "That costs you.", "How would you shard it?"),
+])
+def test_question_part(text, coaching, question):
+    assert question_part(text, coaching) == question
+
+
+def test_decide_context_lists_later_planned_questions():
+    s = state()
+    s.current_planned = fallback_questions(s.spec)[0]
+    s.queue = fallback_questions(s.spec)[1:4]
+    ctx = prompts.decide_context(s, "main", "Q", "A", None, None)
+    assert f'NEXT PLANNED QUESTION: "{s.queue[0].text}"' in ctx
+    later = next(line for line in ctx.splitlines() if line.startswith("LATER PLANNED QUESTIONS"))
+    assert s.queue[1].text in later and s.queue[2].text in later and s.queue[0].text not in later
+    s.queue = s.queue[:1]
+    assert "never ask one as a follow-up): none" in prompts.decide_context(s, "main", "Q", "A", None, None)
+
+
+def test_decide_prompt_judges_only_this_answer_and_forgives_speech_to_text():
+    d = prompts.DECIDE_SYSTEM
+    flat = " ".join(d.split())   # the prompt wraps lines
+    assert "Earlier turns are context" in flat and '"cash" for "cache"' in flat
+    assert "Asking you to repeat or clarify the question is never a reason to coach" in flat
+    assert "Never use the NEXT PLANNED QUESTION or a LATER PLANNED QUESTION as your follow-up" in flat
+    # the examples Gemini copied word for word are gone; the code adds the step out / back in lines
+    for copied in ("Let me step out of the interview for a second.", "Okay, back in the interview.",
+                   "Let's switch gears.", "Let's dig in."):
+        assert copied not in d and copied not in prompts.OPEN_SYSTEM
+
+
+# ---------------------------------------------------------------- the candidate's name
+
+@pytest.mark.parametrize("typed,first", [("Ada Lovelace", "Ada"), ("  ada  ", "ada"), ("Ada,", "Ada"), ("", ""), ("   ", "")])
+def test_first_name_is_the_first_word_typed(typed, first):
+    assert SessionMeta("sid", typed, "Quick Demo", "").first_name == first
+
+
+def test_openers_greet_them_by_name():
+    assert lines.calibration_lines("swe", False, "Ada")[0] == \
+        "Thanks for joining me today, Ada. To start, tell me a little about yourself."
+    assert lines.calibration_lines("presentation", True, "Ada")[0].startswith(
+        "Thanks for joining me today, Ada. Before we begin, walk me through your presentation")
+    assert lines.calibration_lines("swe", False, "")[0] == lines.CALIBRATION_LINE
+    assert lines.calibration_lines("swe", False, "Ada")[1] == lines.CALIBRATION_EXTRA_LINES["swe"]
+
+
+def test_bridge_and_report_prompts_know_the_first_name():
+    s = state()   # user_name "Ada"
+    s.exchanges = [{"kind": "calibration", "text": "Tell me about yourself.", "transcript": "I build APIs."}]
+    assert "FIRST NAME: Ada" in prompts.open_context(s, fallback_questions(s.spec)[0])
+    assert "FIRST NAME is given, address them by it once" in " ".join(prompts.OPEN_SYSTEM.split())
+    assert "FIRST NAME: Ada" in prompts.report_context(s, normalize_history(history()))
+    assert "open with it" in prompts.REPORT_SYSTEM
+    blank = SessionState("sid", SessionMeta("sid", "", "Software Engineering", "Backend Engineer"))
+    assert "FIRST NAME: not given" in prompts.open_context(blank, fallback_questions(blank.spec)[0])
+
+
+@pytest.mark.parametrize("summary,want", [
+    ("You held steady until Q3.", "Ada, you held steady until Q3."),
+    ("Your heart rate rose on Q2.", "Ada, your heart rate rose on Q2."),
+    ("Ada, you held steady.", "Ada, you held steady."),        # already addressed: never twice
+    ("Q2 was the hardest moment.", "Q2 was the hardest moment."),   # not "Ada, q2 was…"
+])
+def test_summary_is_addressed_to_them(summary, want):
+    assert addressed(summary, "Ada") == want
+    assert addressed(summary, "") == summary
+
+
+def test_reports_carry_the_name_typed_on_the_setup_page():
+    s = state()   # user_name "Ada"
+    items = normalize_history(history())
+    r = fallback_report(s, items)
+    assert r.candidate_name == "Ada" and r.summary.startswith("Ada, you answered")
+    draft = ReportDraft(composure_score=60, summary="You stayed calm until Q2.", hardest_moment="Q2 at 78.",
+                        per_question=[], top_tips=["a", "b", "c"])
+    r = finalize_draft(s, items, draft)
+    assert r.candidate_name == "Ada" and r.summary == "Ada, you stayed calm until Q2."

@@ -23,8 +23,8 @@ so you never find out which question made you panic or how long it took you to r
    Demo) and, optionally, **import a file**: your slides or notes, a résumé, or a job description (PDF,
    PowerPoint, Word or text). Judge plans its questions from that file.
 2. **Take the stand.** Judge talks with you out loud (ElevenLabs voice). You answer by speaking (or typing).
-   - It starts with small talk while Presage locks on to your pulse and Osiris measures your calm
-     **baseline**.
+   - It greets you by the name you typed, then starts with small talk while Presage locks on to your
+     pulse and Osiris measures your calm **baseline**.
    - For a **Class Presentation with no file**, Judge first asks what your presentation covers, then plans
      its questions from your answer.
    - After each answer, Gemini decides the next turn: move on, follow up, ease off, push harder, ask you to
@@ -165,7 +165,7 @@ Each run's full output is saved to `backend/logs/run-<date>-<time>.log`, and eve
 
 ### Tests
 ```bash
-.venv/bin/python -m pytest tests                     # Brain: 171 tests
+.venv/bin/python -m pytest tests                     # Brain: 221 tests
 .venv/bin/python -m pytest backend/data/tests        # Data: 28 (real-database tests run when TIGER_DATABASE_URL is set)
 (cd sensing_client/presage_node && npm test)         # Presage sensor: 15
 (cd frontend && npx tsc -b && npm run lint && npm test && npm run build)   # Frontend: 51 + typecheck, lint, build

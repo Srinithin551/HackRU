@@ -317,7 +317,7 @@ def test_turns_after_small_talk_are_written_by_gemini(client, monkeypatch):
         Decision(action="redirect", spoken_text="Ha, fair. But back to it: which project are you proudest of?",
                  answer_quality=1, rationale="off-topic"),
         Decision(action="redirect", spoken_text="Still off topic. Once more?", answer_quality=1, rationale="again"),
-        Decision(action="next", spoken_text="Makes sense. Bigger picture now: how would you design a chat app for a million users?",
+        Decision(action="next", spoken_text="Makes sense. Bigger picture now: what's your biggest failure, and why should I still hire you?",
                  answer_quality=3, rationale="fine"),
         Decision(action="wrap_up", spoken_text="Thanks, that was a thoughtful answer.", answer_quality=4, rationale="done"),
     ]
@@ -342,7 +342,7 @@ def test_turns_after_small_talk_are_written_by_gemini(client, monkeypatch):
         "Love that you build APIs. Speaking of which, what project are you proudest of?",   # bridge
         "Ha, fair. But back to it: which project are you proudest of?",                     # redirect
         FALLBACK_BANK["demo"][1][0],         # second redirect capped → planned text, unworded
-        "Makes sense. Bigger picture now: how would you design a chat app for a million users?",
+        "Makes sense. Bigger picture now: what's your biggest failure, and why should I still hire you?",   # Q3, reworded
     ]
     assert [q["data"]["index"] for q in questions] == [1, 1, 2, 3]
     assert spoken[-1] == f"Thanks, that was a thoughtful answer. {lines.CLOSING_LINE}"   # one closing clip
@@ -397,6 +397,154 @@ def test_coaching_mid_interview_and_on_the_last_question(client, monkeypatch):
     assert [a["action"] for a in states[sid].adaptations] == ["coach", "next", "coach"]
 
 
+def run_scripted(client, monkeypatch, bridge, script):
+    """A Quick Demo in real mode with Gemini stubbed: `bridge` is the turn into Q1, `script` the decisions
+    after each answer, in order. Returns the question events after the small talk and the session state."""
+    monkeypatch.setattr(config, "BRAIN_FAKE", False)
+    script = list(script)
+
+    async def no_audio(text):
+        return None
+
+    async def opening(s, first):
+        return bridge
+
+    async def decide(s, kind, question, transcript, stats, window):
+        return script.pop(0)
+
+    monkeypatch.setattr(voice, "tts", no_audio)
+    monkeypatch.setattr(gemini, "open_interview", opening)
+    monkeypatch.setattr(gemini, "decide_next", decide)
+    sid = create(client)
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        answer(ws, recv_until(ws, "question", log), log=log)
+        questions = run_to_end(ws, log)
+    return questions, states[sid]
+
+
+DEMO = [text for text, _ in FALLBACK_BANK["demo"]]
+
+
+def test_a_push_that_is_really_the_next_planned_question_is_asked_once(client, monkeypatch):
+    """Seen live in 5 of 10 pushes: the "harder follow-up" was the next planned question, which then got asked
+    again (or replaced by an improvised one). It now counts as moving on, in Gemini's words."""
+    push = "Good breakdown. Let's step it up: how would you design a chat app that has to support a million users?"
+    questions, s = run_scripted(client, monkeypatch, None, [
+        Decision(action="push", spoken_text=push, answer_quality=5, rationale="calm and strong"),
+        Decision(action="next", spoken_text="", answer_quality=4, rationale="ok"),
+        Decision(action="wrap_up", spoken_text="", answer_quality=4, rationale="done"),
+    ])
+    assert [q["data"]["text"] for q in questions] == [DEMO[0], push, DEMO[2]]
+    assert [q["data"]["kind"] for q in questions] == ["main", "main", "main"]
+    assert [q["data"]["index"] for q in questions] == [1, 2, 3]
+    assert [a["action"] for a in s.adaptations] == ["next", "next", "wrap_up"]
+
+
+def test_a_push_that_is_a_later_planned_question_is_skipped(client, monkeypatch):
+    """Asking Q3 as a follow-up on Q1 would ask it twice; the next planned question comes instead, in order."""
+    questions, s = run_scripted(client, monkeypatch, None, [
+        Decision(action="push", spoken_text="Big jump: tell me about your biggest failure, and why I should still hire you.",
+                 answer_quality=5, rationale="calm and strong"),
+        Decision(action="next", spoken_text="", answer_quality=4, rationale="ok"),
+        Decision(action="wrap_up", spoken_text="", answer_quality=4, rationale="done"),
+    ])
+    assert [q["data"]["text"] for q in questions] == DEMO
+    assert [a["action"] for a in s.adaptations] == ["next", "next", "wrap_up"]
+
+
+def test_moving_on_always_asks_the_planned_question(client, monkeypatch):
+    """Seen live: a bridge or coaching turn that asks nothing ("Let's tackle our last scenario together."), and
+    turns that ask an improvised question instead of the planned one. Each falls back to the planned question."""
+    coaching = "That answer would cost you. Name a project and what you shipped."
+    questions, s = run_scripted(client, monkeypatch, "Love the energy. Let's get into it.", [
+        Decision(action="coach", coaching=coaching, spoken_text="Let's tackle our last scenario together.",
+                 answer_quality=1, rationale="off-topic"),
+        Decision(action="next", spoken_text="Nice. What's your favorite programming language?",
+                 answer_quality=4, rationale="ok"),
+        Decision(action="wrap_up", spoken_text="", answer_quality=4, rationale="done"),
+    ])
+    assert [q["data"]["text"] for q in questions] == DEMO
+    assert [q["data"]["coaching"] for q in questions] == [None, coaching, None]
+    assert [a["action"] for a in s.adaptations] == ["coach", "next", "wrap_up"]
+
+
+def test_a_follow_up_that_asks_nothing_moves_on(client, monkeypatch):
+    questions, s = run_scripted(client, monkeypatch, None, [
+        Decision(action="follow_up", spoken_text="Python's flexibility is hard to beat.", answer_quality=3,
+                 rationale="vague"),
+        Decision(action="next", spoken_text="", answer_quality=4, rationale="ok"),
+        Decision(action="wrap_up", spoken_text="", answer_quality=4, rationale="done"),
+    ])
+    assert [q["data"]["text"] for q in questions] == DEMO
+    assert [a["action"] for a in s.adaptations] == ["next", "next", "wrap_up"]
+
+
+def test_judge_greets_them_by_name_and_the_report_carries_it(client, monkeypatch):
+    """The name typed on the setup page: said in the opener (a clip voiced when the session is created, so it
+    plays without a pause), and served with the report for the report and verdict pages."""
+    monkeypatch.setattr(config, "BRAIN_FAKE", False)
+    voiced = []
+
+    async def fake_tts(text):
+        voiced.append(text)
+        return None
+
+    monkeypatch.setattr(voice, "tts", fake_tts)
+    r = client.post("/api/sessions", json={"user_name": "Ada Lovelace", "interview_type": "Quick Demo",
+                                            "role_title": "Backend Engineer"})
+    sid = r.json()["session_id"]
+    greeting = "Thanks for joining me today, Ada. To start, tell me a little about yourself."
+    deadline = time.monotonic() + 2
+    while greeting not in voiced and time.monotonic() < deadline:   # voiced in the background at create
+        time.sleep(0.01)
+    assert greeting in voiced
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        first = recv_until(ws, "question", log)
+        assert first["data"]["text"] == greeting
+        answer(ws, first, log=log)
+        run_to_end(ws, log)
+    report = client.get(f"/api/sessions/{sid}/report").json()
+    assert report["candidate_name"] == "Ada Lovelace"
+    assert report["summary"].startswith("Ada, you answered")
+
+
+def test_no_name_means_the_plain_opener_and_an_unnamed_report(client, monkeypatch):
+    monkeypatch.setattr(config, "BRAIN_FAKE", False)
+    voiced = []
+
+    async def fake_tts(text):
+        voiced.append(text)
+        return None
+
+    monkeypatch.setattr(voice, "tts", fake_tts)
+    sid = client.post("/api/sessions", json={"user_name": "  ", "interview_type": "Quick Demo",
+                                              "role_title": "Backend Engineer"}).json()["session_id"]
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        first = recv_until(ws, "question", log)
+        assert first["data"]["text"] == lines.CALIBRATION_LINE
+        answer(ws, first, log=log)
+        run_to_end(ws, log)
+    report = client.get(f"/api/sessions/{sid}/report").json()
+    assert report["candidate_name"] == "" and report["summary"].startswith("You answered")
+
+
+def test_fake_mode_keeps_the_pre_recorded_opener(client):
+    """Fake mode's clips are recorded word for word, so it never says the name."""
+    sid = create(client)   # user_name "Ada"
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        assert recv_until(ws, "question", log)["data"]["text"] == lines.CALIBRATION_LINE
+        ws.send_json({"type": "end_session", "data": {}})
+        recv_until(ws, "session_ended", log)
+
+
 def test_session_does_not_end_until_the_closing_clip_has_played(client, monkeypatch):
     from backend.brain import interviewer
     monkeypatch.setattr(interviewer, "CLOSING_SLACK_S", 0.0)
@@ -438,7 +586,7 @@ def test_second_small_talk_turn_reacts_to_the_first_answer(client, monkeypatch, 
     with client.websocket_connect(f"/ws/{sid}") as ws:
         client.post(f"/api/sessions/{sid}/start")
         first = recv_until(ws, "question", log)
-        assert first["data"]["text"] == lines.CALIBRATION_LINE
+        assert first["data"]["text"] == "Thanks for joining me today, Ada. To start, tell me a little about yourself."
         answer(ws, first, "I like turtles.", log)
         second = recv_until(ws, "question", log)
         ws.send_json({"type": "end_session", "data": {}})

@@ -31,6 +31,13 @@ class SessionMeta:
         return get_spec(self.interview_type)
 
     @property
+    def first_name(self) -> str:
+        """What Judge calls them: the first word of the name typed on the setup page ("Ada" from
+        "Ada Lovelace"), or "" if they left it blank."""
+        words = self.user_name.split()
+        return words[0].strip(".,;:!?") if words else ""
+
+    @property
     def role(self) -> str:
         return self.role_title.strip() or DEFAULT_ROLE[self.spec.key]
 

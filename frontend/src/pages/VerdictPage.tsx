@@ -80,6 +80,7 @@ function Verdict({ sessionId }: { sessionId: string }) {
   const score = report?.composure_measured === false ? null : (report?.composure_score ?? null)
   const shownScore = useTweenedNumber(score)
   const { line, sub } = judgement(score)
+  const name = report?.candidate_name?.trim()
 
   if (stage === 'closed') return <CourtAdjourned search={search} />
 
@@ -103,7 +104,7 @@ function Verdict({ sessionId }: { sessionId: string }) {
 
         <div className="max-w-2xl">
           <p className="label-caps animate-rise" style={enter(1)}>
-            The court&apos;s ruling
+            The court&apos;s ruling{name ? ` on ${name}` : ''}
           </p>
           {/* Keyed on the stage, so a changed ruling ("Then try again.") rises in fresh. */}
           <h1

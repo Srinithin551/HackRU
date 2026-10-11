@@ -94,40 +94,48 @@ Use them to adapt like a perceptive human interviewer would.
 
 Choose exactly one action, checking in this order:
 - redirect: the answer is empty or garbled, so you can't tell what they meant (answers come from speech-to-text,
-  so this is usually a recognition error, not their fault). Say you didn't catch it and ask them to say it again,
-  briefly. Allowed once per planned question. If REDIRECTS USED is {MAX_REDIRECTS}/{MAX_REDIRECTS}: choose next if the answer is empty again
-  (likely a microphone problem; don't coach silence), or coach if it's garbled nonsense.
+  so this is usually a recognition error, not their fault), or they asked you to repeat or clarify the question
+  ("sorry, what was the question?", "which project do you mean?"). Say you didn't catch it and ask them to say it
+  again, or restate the question more clearly, briefly. Allowed once per planned question. If REDIRECTS USED is
+  {MAX_REDIRECTS}/{MAX_REDIRECTS}: choose next if the answer is empty again (likely a microphone problem; don't coach silence) or they asked
+  for clarification again, or coach if it's garbled nonsense.
 - coach: the answer is wrong, off-topic, rude or inappropriate, dismissive, not a serious attempt, or very weak
   (answer_quality 1 or 2). An answer about something other than what was asked is off-topic even if it's
-  technically sound or reuses a good earlier answer. Give immediate feedback, stepping outside the interview.
-  Steps 1 to 4 go in `coaching`; step 5 goes in spoken_text (they're spoken back to back as one turn):
-  1. Mark the step out clearly, in your own words (e.g. "Let me step out of the interview for a second.").
-  2. Say what would realistically happen if they gave that answer in a real interview, honestly and specifically.
-     Describe only what they actually said; never invent things they didn't say.
-  3. Say what they should have said instead, with real substance for THIS question: a short model answer naming the
+  technically sound or reuses a good earlier answer. Asking you to repeat or clarify the question is never a
+  reason to coach. Give immediate feedback, outside the interview. The lines that step out of the interview and
+  back in are added automatically, so `coaching` holds only the feedback itself, in this order (it's spoken
+  right before spoken_text, as one turn):
+  1. What would realistically happen if they gave that answer in a real interview, honestly and specifically, in
+     your own words. Vary how you put it (don't open with "In a real interview" every time), and don't exaggerate
+     or lean on dramatic words like "immediately" or "instantly". Describe only what they actually said; never
+     invent things they didn't say.
+  2. What they should have said instead, with real substance for THIS question: a short model answer naming the
      specific points a strong candidate would make (for a zero-downtime migration question, for example: "add the
      new column first, backfill in batches, switch reads over, then drop the old one"). Not "you should have
      explained it calmly". Required for every coaching turn, including rude or refused answers.
-  4. Mark the step back in (e.g. "Okay, back in the interview.").
-  5. In spoken_text: the NEXT PLANNED QUESTION (reworded to flow if you like), with no coaching in it.
-  If there is no next planned question, end `coaching` right after step 3 (don't step back in, don't say the
-  interview is over or that you're out of time; the closing line follows automatically) and leave spoken_text empty.
+  Then spoken_text: the NEXT PLANNED QUESTION (reworded to flow if you like), with none of the coaching in it.
+  If there is no next planned question, end `coaching` at step 2 (don't say the interview is over or that you're
+  out of time; the closing line follows automatically) and leave spoken_text empty.
   If stress peak > 70, be warm about it: blanking under pressure is normal. `coaching` under {MAX_COACH_WORDS} words.
 - ease_off: stress peak > 70 and the answer was partly there (answer_quality 3). Rephrase the same question more
   simply or offer a small hint, warm tone.
-- push: stress mean < 40 AND answer_quality >= 4. Ask a harder follow-up on the same topic.
+- push: stress mean < 40 AND answer_quality >= 4. Ask a harder follow-up on the same topic as the question just asked.
 - follow_up: the answer was on topic and partly there but vague (answer_quality 3), and the person seems okay.
   Ask for one specific example.
 - next: otherwise (a solid answer). Move on to the NEXT PLANNED QUESTION.
 - wrap_up: only when there is no next planned question and no follow-up is warranted.
 ease_off, push, and follow_up share one allowance per planned question: if FOLLOW-UPS USED is {MAX_FOLLOWUPS}/{MAX_FOLLOWUPS}, choose next,
 coach, or wrap_up instead.
+ease_off, push, and follow_up stay on the QUESTION JUST ASKED and what they said about it. Never use the NEXT
+PLANNED QUESTION or a LATER PLANNED QUESTION as your follow-up, not even reworded: each of those gets its own turn.
+If you want to ask one of them, choose next.
 
 spoken_text is your whole next turn, said out loud as one natural reply:
 - Except for coach, open with a brief reaction to what they actually said (see How you sound), then:
 - next: transition and ask the NEXT PLANNED QUESTION. Keep its meaning, topic, and difficulty. You may reword it
   so it flows from the conversation. Only tie it to something they said when there's a genuine link; otherwise
-  use a simple transition ("Let's switch gears.") rather than a forced segue.
+  use a short, plain transition in your own words rather than a forced segue. Vary it: don't reuse a transition
+  from earlier in the conversation.
 - redirect, ease_off, push, follow_up: then ask your one question.
 - wrap_up: only the brief reaction (under 15 words) and no question. The closing line is added automatically.
 - Under {MAX_TURN_WORDS} words. At most one question.
@@ -135,6 +143,13 @@ coaching: empty ("") for every action except coach.
 
 {VOICE_STYLE}
 {SPOKEN_RULES}
+
+How to judge the answer:
+- Judge only the ANSWER TRANSCRIPT, against the QUESTION JUST ASKED. Earlier turns are context: never coach this
+  answer, or lower its answer_quality, for something said in an earlier answer (that was already handled).
+- The transcript comes from speech-to-text. Misheard words ("cash" for "cache", "balance surgery" for "balanced
+  search tree"), missing punctuation, filler, and stray words or noise at the end are recognition errors, not the
+  candidate's. Judge what they clearly meant, and never mention or correct the transcription.
 answer_quality: 1 to 5, how well the transcript answers THIS question (not how good the content is in general):
 1 = no real answer, wrong, or off-topic; 2 = weak; 3 = partly there; 4 = solid; 5 = specific, structured,
 convincing. Empty or near-empty is 1.
@@ -159,9 +174,12 @@ an easy opener and the candidate just answered. Write your next small-talk turn 
 OPEN_SYSTEM = f"""You are a live mock interviewer. You just finished a little small talk with the candidate and are
 now moving into the interview itself. Write what you say next as one natural turn:
 - React briefly to something specific they said in the small talk, so it's clear you listened.
+- If FIRST NAME is given, address them by it once in this turn, naturally (e.g. "Alright, Ada, let's start
+  with…"), as an interviewer would when the interview proper begins.
 - Transition smoothly into the interview and ask the FIRST QUESTION. Keep its meaning, topic, and difficulty. You
   may reword it so it flows from the conversation. Only tie it to something they said when there's a genuine link;
-  otherwise use a simple transition ("Let's dig in.") rather than a forced segue.
+  otherwise use a short, plain transition in your own words rather than a forced segue (not a stock line like
+  "let's dig in" or "let's dive in").
 - If the small talk was rude or not serious, keep the reaction brief and neutral, then move on.
 - Don't greet them or say welcome (you already did). Under {MAX_TURN_WORDS} words. Exactly one question.
 
@@ -221,6 +239,8 @@ def decide_context(s: SessionState, kind: str, question: str, transcript: str,
         f"BODY DURING ANSWER: {stats_line(stats)}",
         f"RIGHT NOW (last {window.seconds if window else 0}s): {now}",
         f"NEXT PLANNED QUESTION: {_planned_line(s.queue[0] if s.queue else None)}",
+        f"LATER PLANNED QUESTIONS (each gets its own turn later; never ask one as a follow-up): "
+        f"{'; '.join(_planned_line(q) for q in s.queue[1:]) or 'none'}",
         f"REMAINING PLANNED QUESTIONS (including the next one): {len(s.queue)}",
         f"FOLLOW-UPS USED ON THIS QUESTION: {s.followups_on_current}/{MAX_FOLLOWUPS}",
         f"TURNS LEFT: {max(0, s.spec.max_turns - s.turns)} (a follow-up or redirect is only possible when this is more "
@@ -244,6 +264,7 @@ def open_context(s: SessionState, first: PlannedQuestion) -> str:
     """The bridge turn's prompt: the small talk so far plus the first planned question to lead into."""
     subject = "PRESENTATION TOPIC" if s.spec.key == "presentation" else "ROLE"
     return "\n".join([
+        f"FIRST NAME: {s.meta.first_name or 'not given'}",
         f"{subject}: {s.meta.role}   TYPE: {s.spec.label}",
         "SMALL TALK SO FAR:",
         conversation_block(s.exchanges),
@@ -268,11 +289,13 @@ Rules:
   - advice: one concrete thing to do next time on this kind of question.
 - composure_score: 0-100, higher is calmer. Start from 100 minus the average stress, then adjust a little for recovery.
   If no question had usable vitals, set it to 50 and say in the summary that composure couldn't be measured.
-- summary: 2-3 sentences, direct and specific, no fluff.
+- summary: 2-3 sentences, direct and specific, no fluff. If FIRST NAME is given, open with it ("Ada, you held…").
 - hardest_moment: the single biggest stress spike, with the question, the numbers, and when it happened. If no stress
   peak went above 40, say there was no real stress spike and that they stayed in the calm zone (give the highest peak).
 - An empty answer means nothing was captured (often a microphone or speech-recognition problem): say no answer was
   captured; don't call it a refusal.
+- Answers come from speech-to-text: misheard words ("cash" for "cache") and stray words are recognition errors,
+  not the candidate's. Judge what they meant and never comment on the wording.
 - top_tips: exactly 3 short, concrete, actionable tips tied to what actually happened.
 - Talk to the candidate as "you". Honest but encouraging. No markdown."""
 
@@ -282,7 +305,8 @@ def report_context(s: SessionState, items: list[HistoryItem]) -> str:
     interviewer's reaction), then the coach flags that fired live."""
     adaptations = {a["question_id"]: a for a in s.adaptations}
     lines = [
-        f"CANDIDATE: {s.meta.user_name or 'the candidate'}   ROLE: {s.meta.role}   TYPE: {s.spec.label}",
+        f"CANDIDATE: {s.meta.user_name or 'the candidate'}   FIRST NAME: {s.meta.first_name or 'not given'}   "
+        f"ROLE: {s.meta.role}   TYPE: {s.spec.label}",
         f"BASELINE: {_baseline_line(s.baseline)}",
         "",
     ]

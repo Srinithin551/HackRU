@@ -240,7 +240,7 @@ pip install -r backend/requirements.txt
 cp .env.example .env                                  # fill in keys; BRAIN_FAKE=1 needs none
 BRAIN_FAKE=1 uvicorn backend.main:app                # from the repo root (never --reload for a demo)
 python scripts/fake_frontend.py                       # terminal stand-in for the browser
-pytest tests                                          # 171 tests, about 3 seconds
+pytest tests                                          # 221 tests, about 3 seconds
 ```
 
 `GET /health` reports fake mode, whether Gemini/ElevenLabs keys are set, and which routers are mounted.
@@ -287,6 +287,7 @@ pytest tests                                          # 171 tests, about 3 secon
   - `coach_flags: [{ts, question_id, level, stress, message}]`, for red dots on the replay chart;
   - `adaptations: [{question_id, action, answer_quality, rationale}]` (the decision made after that question's answer; `action` can be `coach`, `redirect`, `follow_up`, `ease_off`, `push`, `next`, `wrap_up`);
   - `generated_by: "gemini" | "fallback" | "fake"`;
+  - `candidate_name: str`: the name typed on the setup page (`""` if left blank), shown on the Report and Verdict pages. The summary is addressed to their first name;
   - `composure_measured: bool`. When false, no usable vitals were captured, so `composure_score` is a neutral 50 and shouldn't be read as a verdict (the Report page shows "Not measured");
   - `adaptations[].coaching`: the coaching that was spoken, for `coach` actions.
 

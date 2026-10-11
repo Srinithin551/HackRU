@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import pytest
 
 from backend import config
-from backend.brain import gemini
+from backend.brain import gemini, lines
 from backend.brain.history import normalize_history
-from backend.brain.specs import get_spec
+from backend.brain.specs import fallback_questions, get_spec
 from backend.brain.state import SessionMeta, SessionState
 from backend.contracts import QuestionStats
 
@@ -161,11 +161,17 @@ def test_small_talk_failure_returns_none(fake_gemini):
     assert asyncio.run(gemini.small_talk_follow_up(state())) is None
 
 
+def with_next_question(s):
+    s.queue = fallback_questions(s.spec)[:1]
+    return s
+
+
 def test_coach_decision_keeps_coaching_separate_from_the_question(fake_gemini):
     fake_gemini({"action": "coach", "coaching": "Let me step out for a second. That answer would cost you. Okay, back in.",
                  "spoken_text": "How would you shard it?", "answer_quality": 1, "rationale": "wrong"})
-    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "pizza", None, None))
-    assert d.coaching == "Let me step out for a second. That answer would cost you. Okay, back in."
+    d = asyncio.run(gemini.decide_next(with_next_question(state()), "main", "Q", "pizza", None, None))
+    # Gemini's own step out / back in lines are swapped for the rotating ones
+    assert d.coaching == f"{lines.STEP_OUT_LINES[0]} That answer would cost you. {lines.STEP_IN_LINES[0]}"
     assert d.spoken_text == "How would you shard it?"
 
 
@@ -173,9 +179,44 @@ def test_coach_blob_in_spoken_text_is_split(fake_gemini):
     fake_gemini({"action": "coach", "coaching": "",
                  "spoken_text": "Let me step out for a second. That would cost you. Okay, back in the interview. How would you shard it?",
                  "answer_quality": 1, "rationale": "wrong"})
-    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "pizza", None, None))
-    assert d.coaching == "Let me step out for a second. That would cost you. Okay, back in the interview."
+    d = asyncio.run(gemini.decide_next(with_next_question(state()), "main", "Q", "pizza", None, None))
+    assert d.coaching == f"{lines.STEP_OUT_LINES[0]} That would cost you. {lines.STEP_IN_LINES[0]}"
     assert d.spoken_text == "How would you shard it?"
+
+
+def test_coaching_repeated_in_spoken_text_is_said_once(fake_gemini):
+    """Seen live 4 times: the whole coaching in both fields, which would play it twice in one clip."""
+    coaching = ("Let me step out of the interview for a second. Telling the interviewer to shut up ends the interview. "
+                "You should have explained failover to a standby. Okay, back in the interview.")
+    fake_gemini({"action": "coach", "coaching": coaching, "spoken_text": f"{coaching} How do you recover the cluster?",
+                 "answer_quality": 1, "rationale": "rude"})
+    d = asyncio.run(gemini.decide_next(with_next_question(state()), "main", "Q", "shut up", None, None))
+    assert d.spoken_text == "How do you recover the cluster?"
+    assert d.coaching.count("failover") == 1
+
+
+def test_reworded_copy_of_the_coaching_is_dropped_too(fake_gemini):
+    fake_gemini({"action": "coach",
+                 "coaching": "Using a graph doesn't reduce memory. You should have described streaming in chunks.",
+                 "spoken_text": "Let me step out of the interview for a second. A tree won't fix a memory spike. Stream "
+                                "the records lazily instead. Okay, back in the interview. How would you design an O(1) set?",
+                 "answer_quality": 2, "rationale": "vague"})
+    d = asyncio.run(gemini.decide_next(with_next_question(state()), "main", "Q", "a graph", None, None))
+    assert d.spoken_text == "How would you design an O(1) set?"
+
+
+def test_step_lines_rotate_and_skip_stepping_back_in_on_the_last_question(fake_gemini):
+    s = with_next_question(state())
+    s.actions = ["next", "coach", "coach"]   # two coaching turns already
+    fake_gemini({"action": "coach", "coaching": "That would cost you. Say X instead.", "spoken_text": "Next?",
+                 "answer_quality": 1, "rationale": "wrong"},
+                {"action": "coach", "coaching": "That would cost you. Say X instead.", "spoken_text": "",
+                 "answer_quality": 1, "rationale": "wrong"})
+    d = asyncio.run(gemini.decide_next(s, "main", "Q", "pizza", None, None))
+    assert d.coaching == f"{lines.STEP_OUT_LINES[2]} That would cost you. Say X instead. {lines.STEP_IN_LINES[2]}"
+    s.queue = []   # the last question: no step back in, the closing line follows
+    d = asyncio.run(gemini.decide_next(s, "main", "Q", "pizza", None, None))
+    assert d.coaching == f"{lines.STEP_OUT_LINES[2]} That would cost you. Say X instead."
 
 
 def test_coaching_is_dropped_for_other_actions(fake_gemini):

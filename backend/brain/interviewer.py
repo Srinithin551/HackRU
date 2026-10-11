@@ -19,14 +19,14 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from backend import ws
+from backend import config, ws
 from backend.brain import gemini, lines, material, voice
 from backend.brain.history import as_baseline, as_question_stats, as_window_stats, normalize_history
 from backend.brain.models import Decision
 from backend.brain.report import fallback_report
 from backend.brain.state import SessionState
 from backend.brain.turns import (MAX_COACH_WORDS, MAX_FOLLOWUPS, MAX_REDIRECTS, MAX_TURN_WORDS,
-                                 final_coaching, spoken)
+                                 as_planned, asks_something, final_coaching, planned_repeat, spoken)
 from backend.brain.watcher import watch_stress
 from backend.data import queries as data
 from backend.ws import broadcast
@@ -158,6 +158,8 @@ def resolve_action(action: str, text: str, followups_on_current: int, redirects_
         action = "next"
     if not spoken(text, word_limit(action)) and action not in ("next", "wrap_up"):
         return "next" if queue_len else "wrap_up"   # nothing usable to say: move on with the planned text
+    if action in (*FOLLOW_UP_ACTIONS, "redirect") and not asks_something(text):
+        action = "next"   # a follow-up that asks nothing leaves them nothing to answer: move on instead
     if action in FOLLOW_UP_ACTIONS and followups_on_current >= MAX_FOLLOWUPS:
         action = "next"
     elif action == "redirect" and redirects_on_current >= MAX_REDIRECTS:
@@ -193,6 +195,16 @@ def record_adaptation(s: SessionState, qid: str, decision: Decision, action: str
 
 # ---------------------------------------------------------------- phases
 
+def spoken_name(meta) -> str:
+    """The first name Judge greets them with. None in fake mode, whose clips are pre-recorded word for word."""
+    return "" if config.BRAIN_FAKE else meta.first_name
+
+
+def opening_lines(meta) -> tuple[str, str]:
+    """(opener, fallback second small-talk turn) for this session."""
+    return lines.calibration_lines(meta.spec.key, meta.asks_for_material, spoken_name(meta))
+
+
 async def calibrate(s: SessionState) -> None:
     """Small talk while Presage warms up and Data collects the calm baseline. The opener is pre-recorded
     so the session starts instantly; the second turn (only if the baseline needs more time) is written
@@ -205,7 +217,7 @@ async def calibrate(s: SessionState) -> None:
     """
     await set_state(s, "calibrating")
     asks_for_material = s.meta.asks_for_material
-    line, fallback = lines.calibration_lines(s.spec.key, asks_for_material)
+    line, fallback = opening_lines(s.meta)   # the opener greets them by name
     for turn in range(2):
         qid = str(await data.insert_question(s.session_id, 0, "calibration", line))
         await ask(s, qid, line, "calibration")
@@ -252,7 +264,7 @@ def _next_planned(s: SessionState):
 async def interview(s: SessionState) -> None:
     """Main loop. Returns when the plan is exhausted, the budget runs out, or the user ends."""
     q = _next_planned(s)
-    next_text = spoken(await gemini.open_interview(s, q) or "") or q.text   # bridge from the small talk
+    next_text = as_planned(spoken(await gemini.open_interview(s, q) or ""), q.text)   # bridge from the small talk
     kind, coaching = "main", ""
 
     while True:
@@ -286,10 +298,18 @@ async def interview(s: SessionState) -> None:
         needed = decision.coaching if decision.action == "coach" else decision.spoken_text
         action = resolve_action(decision.action, needed, s.followups_on_current, s.redirects_on_current,
                                 len(s.queue), turns_left=s.spec.max_turns - s.turns, answered=bool(transcript))
+        # A follow-up that is really a planned question would ask it twice (now, then on its own turn).
+        # If it's the next one, ask it now as that question, in Gemini's words; if it's a later one, skip
+        # the follow-up and ask the next planned question, so the difficulty order holds.
+        early = (planned_repeat(decision.spoken_text, [p.text for p in s.queue])
+                 if action in FOLLOW_UP_ACTIONS and action == decision.action else None)
+        if early is not None:
+            action = "next"
         record_adaptation(s, qid, decision, action)
         # Gemini's wording only fits if its action survived the rules; otherwise use the planned text.
         # (Silence turned from coach into next keeps its spoken_text: that's already the next question.)
-        kept = action == decision.action or (decision.action == "coach" and action == "next" and not transcript)
+        kept = (action == decision.action or early == 0
+                or (decision.action == "coach" and action == "next" and not transcript))
         turn = spoken(decision.spoken_text) if kept else ""
         coaching = spoken(decision.coaching, MAX_COACH_WORDS) if kept and action == "coach" else ""
 
@@ -298,7 +318,8 @@ async def interview(s: SessionState) -> None:
             return
         if action in ADVANCING_ACTIONS:
             q = _next_planned(s)
-            next_text, kind = turn or q.text, "main"
+            # Moving on must ask the planned question: not a lead-in with no question, not a new question.
+            next_text, kind = as_planned(turn, q.text), "main"
         else:
             if action == "redirect":
                 s.redirects_on_current += 1

@@ -169,6 +169,7 @@ function SessionReport({ sessionId }: { sessionId: string }) {
   if (!data || !view) return <AnalyzingScreen />
 
   const { report, replay } = data
+  const name = report.candidate_name || replay.session.user_name
   const selected = view.questions.find((q) => q.id === (selectedId ?? view.weakestId)) ?? view.questions.find((q) => q.kind !== 'calibration') ?? null
 
   return (
@@ -176,7 +177,7 @@ function SessionReport({ sessionId }: { sessionId: string }) {
       <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-hairline px-gutter">
         <Brand />
         <p className="hidden text-caption text-ink-secondary md:block">
-          {INTERVIEWER_NAME}&apos;s record{replay.session.user_name ? ` · ${replay.session.user_name}` : ''}
+          {INTERVIEWER_NAME}&apos;s record{name ? ` · ${name}` : ''}
           {report.generated_by === 'fallback' && ' · numbers-only report (Gemini unavailable)'}
         </p>
         <Link to={{ pathname: `/session/${sessionId}/verdict`, search }}>
