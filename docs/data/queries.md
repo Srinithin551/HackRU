@@ -60,7 +60,7 @@ INSERT INTO vitals (time, session_id, heart_rate, breathing_rate, focus, express
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)          -- executemany: one prepared statement, one round trip
 ```
 
-- Readings below the confidence cutoff (`DATA_MIN_CONFIDENCE`, default 0.5) are skipped (never stored) but still returned so the ingest route can broadcast "no face".
+- Readings below the confidence cutoff (`DATA_MIN_CONFIDENCE`, default 0.4: Presage's accuracy standard for heart rate) are skipped (never stored) but still returned so the ingest route can broadcast "no face".
 - Stress is computed in Python with the cached baseline before the insert. No DB read per reading (the baseline cache misses at most once per 10 s until calibration ends).
 - `executemany` sends the whole batch (1 row normally, up to 30 after a sensing-client outage) in one round trip.
 - Readings without a `session_id` go to the active session (cached 2 s). With no active session they're dropped.

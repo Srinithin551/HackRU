@@ -23,11 +23,12 @@ HR_MAX_PCT = 25.0        # HR this % above baseline = full HR contribution
 BR_MAX_PCT = 40.0        # breathing this % above baseline = full BR contribution
 FOCUS_MAX_DROP = 0.5     # focus this far below baseline = full focus contribution
 W_HR, W_BR, W_FOCUS = 0.5, 0.3, 0.2
-# Readings below this are never stored and never scored. 0.5 is the team contract (PLAN.md, sensing.md,
-# data.md). Measured with the real sensing client: at 0.7, a Presage signal around 60% confidence lost
-# 100% of readings, and a 90% signal updating every 2 s lost 27% (the client lowers confidence while it
-# repeats a stale value). Tune on the demo laptop with DATA_MIN_CONFIDENCE in .env, no code change.
-MIN_CONFIDENCE = float(os.getenv("DATA_MIN_CONFIDENCE") or 0.5)
+# Readings below this are never stored and never scored. 0.4 is Presage's own accuracy standard for heart
+# rate: SmartSpectra marks pulse_rate "stable" (within +/-3 bpm) at confidence >= 40 (docs/data-types.md in
+# Presage-Security/SmartSpectra); the sensing client sends that pulse confidence / 100. Measured with the
+# real sensing client: at 0.7, a Presage signal around 60% confidence lost 100% of readings. Tune on the
+# demo laptop with DATA_MIN_CONFIDENCE in .env, no code change.
+MIN_CONFIDENCE = float(os.getenv("DATA_MIN_CONFIDENCE") or 0.4)
 
 # Ingestion counts since startup ("stored" / "below_cutoff"), shown in /health, so you can see live
 # whether Presage readings are passing the cutoff.

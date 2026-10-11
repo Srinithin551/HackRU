@@ -74,7 +74,7 @@ One row per reading from Presage (or `mock_vitals.py`), about 1 per second while
 | `breathing_rate` | REAL | yes | breaths/min, ~6 to 40 | | Null if not supported |
 | `focus` | REAL | yes | 0.0 to 1.0 | Presage attention/engagement | Null if not supported |
 | `expression` | TEXT | yes | `neutral`, `happy`, `surprised`, `frown`, `confused`, `unknown` | Dominant facial expression | Enum enforced by Pydantic (`Expression`), not the DB |
-| `confidence` | REAL | yes* | 0.0 to 1.0 | Face / signal quality | *Always set in practice (contract default 1.0). **Readings below the confidence cutoff (`DATA_MIN_CONFIDENCE`, default 0.5) are never stored** (they still reach the live chart via the broadcast) |
+| `confidence` | REAL | yes* | 0.0 to 1.0 | Face / signal quality | *Always set in practice (contract default 1.0). **Readings below the confidence cutoff (`DATA_MIN_CONFIDENCE`, default 0.4: Presage's accuracy standard for heart rate) are never stored** (they still reach the live chart via the broadcast) |
 | `stress` | REAL | yes | 0 to 100 | Computed on insert by `metrics.stress_score` | NULL when: no baseline yet (calibration) or all of HR/BR/focus missing. `compute_baseline` backfills calibration rows |
 
 ### Stress score
@@ -111,7 +111,7 @@ A bucket where the face was lost for the whole 5 s has all-null values: the char
 ## Gotchas
 
 1. **Stress is null before the baseline exists.** The first ~40 s of every session (calibration) have `stress = NULL` until Brain calls `compute_baseline`, which then backfills them. If the chart starts empty, `compute_baseline` wasn't called.
-2. **Readings below the confidence cutoff (`DATA_MIN_CONFIDENCE`, default 0.5) are never stored.** A lost face shows up as a gap in `vitals` and `vitals_5s`, not as null rows. `insert_vitals` still returns them (stress null) so the live chart can show "no face".
+2. **Readings below the confidence cutoff (`DATA_MIN_CONFIDENCE`, default 0.4: Presage's accuracy standard for heart rate) are never stored.** A lost face shows up as a gap in `vitals` and `vitals_5s`, not as null rows. `insert_vitals` still returns them (stress null) so the live chart can show "no face".
 3. **`get_window_stats` uses the database clock** (`now()`), while `vitals.time` comes from the laptop. Clock skew of a few seconds just shifts the window.
 4. **Backfilled stress reaches `vitals_5s` on the next refresh** (≤ 30 s). The replay is fetched after the session, so this never shows.
 5. **Deltas are percentages**, not fractions: `hr_delta_pct = 22.0` means 22% above baseline.
