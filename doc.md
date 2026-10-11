@@ -1,5 +1,25 @@
 # StressTest: re-test report and improvement points
 
+> **Status at submission (HackRU 2026).** This report was written on 2026-10-10, before the app became
+> **Osiris**. It's kept as a record. Where each issue stands now:
+>
+> | Issue | Status |
+> |---|---|
+> | P1 breathing used at 0% confidence | ✅ Fixed: the Node sensor uses breathing only at Presage's "stable" confidence (≥ 45) |
+> | P2 slow pulse cadence dropped most readings | ✅ Fixed: the pulse is held at its own confidence for 8 s, and a strong recent pulse beats a weak new one |
+> | P3 a "push" follow-up can repeat the next planned question | Open |
+> | P4 an empty follow-up answer moves on without a redirect | Open |
+> | P5 Gemini free-tier daily limit | Open: the fallback to `gemini-3.5-flash-lite` handles it |
+> | P6 ~60 ms Tiger Cloud round trip | Unchanged (fine for a 3 s watcher) |
+> | P7 database URL ownership and a Data test design flaw | Not re-checked |
+> | P8 report breakdown truncated question text | ✅ Fixed: the report page was rebuilt, and the follow-up label no longer overlaps |
+> | P9 frontend bundle over 500 kB | Open (a build warning only) |
+> | P10 mock mode still played filler clips | ✅ Fixed: no filler between turns, like the real backend |
+> | P11 Presage setup needed Xcode and a patched app | ✅ Fixed: the headless Node SDK needs only `npm install` |
+> | P12 a backend restart drops the running interview | Partly: `/start` rebuilds a session's setup from Data, but a running interview still ends |
+> | P13 rotate the API keys after the hackathon | Still to do |
+> | P14 seat the demo person facing a light, face and chest in view | Still the right advice |
+
 **Date:** 2026-10-10 · **Branch tested:** `brain-conversation` (merged into `main` with this doc) · **Tester:** Brain (Srinithin, with Claude)
 
 Scope: everything this branch changes compared with `main` (71 files: Brain, Data's `queries.py`/`metrics.py`,

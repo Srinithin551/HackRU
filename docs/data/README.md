@@ -1,4 +1,4 @@
-# Data: how StressTest stores, scores and replays vitals
+# Data: how Osiris stores, scores and replays vitals
 
 **Owner:** Likhil. Code in [`backend/data/`](../../backend/data/), tools in [`scripts/`](../../scripts/).
 Everything here runs on **Tiger Data** (Postgres + TimescaleDB). Nobody outside `backend/data/` writes SQL:
@@ -25,30 +25,34 @@ flowchart LR
 ### Ingest rules (what gets refused)
 
 - **Only this backend's sessions.** A reading with no `session_id` goes to the active session. An explicit `session_id` must be a session this backend process created (`_mine` in `queries.py`), otherwise the reading is dropped, never stored under a malformed id or filed under someone else's session. `get_active_session` follows the same rule, so a sensor never attaches to a teammate's session on a shared Tiger Data service.
-- **Cleaned before storage** (`backend/sensing/routes.py`): readings stamped more than 5 s in the future are dropped, NaN and impossible heart/breathing rates become null, focus and confidence are clamped to 0-1, and a POST carries at most 120 readings. The live window (`get_window_stats`) also ignores rows ahead of `now()`, as a second line of defence.
-- **Local only.** `GET /api/sessions/active`, `POST /api/vitals` and `POST /api/sensor/status` answer only requests from this machine (`backend/guards.py`; `ALLOW_REMOTE_SENSOR=1` lifts it).
+- **Cleaned before storage** (`backend/sensing/routes.py`): readings stamped more than 5 s in the future are dropped, NaN and impossible heart/breathing rates become null, confidence is clamped to 0-1, and a POST carries at most 120 readings. The live window (`get_window_stats`) also ignores rows ahead of `now()`, as a second line of defence.
+- **Local only.** `GET /api/sessions/active`, `POST /api/vitals`, `POST /api/sensor/status` and `/api/sensor/page-camera` answer only requests from this machine (`backend/guards.py`; `ALLOW_REMOTE_SENSOR=1` lifts it).
 - **Confidence cutoff.** `DATA_MIN_CONFIDENCE` is a 0-1 fraction; a percentage such as `40` is read as 0.40 and a typo falls back to 0.4 with a warning, instead of crashing the backend at startup.
 
 ## Schema in one minute
 
 | Table | One row per | What matters |
 |---|---|---|
-| `sessions` | interview | `baseline_hr/br/focus` (the calm reference), `report` (Gemini's JSON) |
-| `questions` | question asked | `answer_started_at` → `answered_at` is the answer window |
+| `sessions` | interview | `baseline_hr/br` (the calm reference), `report` (Gemini's JSON) |
+| `questions` | question asked | `answer_started_at` → `answered_at` is the answer window; indexed on `(session_id, idx, created_at)` |
 | `vitals` | reading (~1/s) | hypertable on `time`, indexed on `(session_id, time DESC)`; `stress` is computed on insert |
-| `vitals_5s` | 5 s × session | continuous aggregate (`avg` HR/BR/focus/stress, `max` stress), real-time |
+| `vitals_5s` | 5 s × session | continuous aggregate (`avg` HR/BR/stress, `max` stress), real-time, refreshed at the end of each session |
 
-Every column, unit and gotcha: **[DATA_CONTEXT.md](DATA_CONTEXT.md)**. SQL and query plans: **[queries.md](queries.md)**.
+There is no `focus` column any more: Presage never measures focus, so it was removed from the schema and the
+contracts on 2026-10-11. Every launch of `scripts/run_demo.py` drops and recreates these tables
+(`scripts/init_db.py --fresh --columnstore`), so a run always starts empty; `--keep-data` skips that.
+
+Every column, unit and gotcha: **[DATA_CONTEXT.md](DATA_CONTEXT.md)** (written before `focus` was removed). SQL and query plans: **[queries.md](queries.md)**.
 
 ## The stress score
 
-Stress is 0 to 100 and always **relative to your own calm baseline**, measured during the calibration chat (first 10 s skipped for Presage warm-up). Brain keeps calibration going for at least ~35 s: if the small talk is quick it holds a few seconds more (up to 20 s, `CALIBRATION_MAX_WAIT_S` in `backend/brain/interviewer.py`), because fewer than 10 usable samples means falling back to population averages (75 bpm, 15/min, 0.75). Heart rate counts for half: +25% over baseline maxes its part out. Breathing counts 30% (maxed at +40%), and a focus drop of 0.5 counts 20%. If a signal is missing, the others are re-weighted, and readings with face confidence under the cutoff (`DATA_MIN_CONFIDENCE`, default 0.4: Presage's accuracy standard for heart rate) aren't stored or scored at all (a lost face shows as a gap). So **+25% heart rate alone = 50**, and a full mock spike (HR +25%, breathing +30%, focus 0.5) peaks around **85**. Everyone uses the same thresholds: **under 40 calm, 40 to 70 rising, over 70 high**.
+Stress is 0 to 100 and always **relative to your own calm baseline**, measured during the calibration chat (first 10 s skipped for Presage warm-up). Brain keeps calibration going for at least ~35 s: if the small talk is quick it holds a few seconds more (up to 20 s, `CALIBRATION_MAX_WAIT_S` in `backend/brain/interviewer.py`), because fewer than 10 usable samples means falling back to population averages (75 bpm, 15/min). Heart rate weighs 5/8 (+25% over baseline maxes its part out) and breathing 3/8 (maxed at +40%). If a signal is missing, the other is re-weighted, and readings with face confidence under the cutoff (`DATA_MIN_CONFIDENCE`, default 0.4: Presage's accuracy standard for heart rate) aren't stored or scored at all (a lost face shows as a gap). So **+25% heart rate alone = 62.5**, and a full mock spike (HR +25%, breathing +30%) peaks around **91**. Everyone uses the same thresholds: **under 40 calm, 40 to 70 rising, over 70 high**. (The charts below were drawn while a 0.2 focus weight still existed, which Presage data never filled.)
 
 ![Stress score vs heart-rate rise](charts/chart2_stress_response_curve.png)
 
 ## What it looks like
 
-A mock session through Brain's real interview loop, stored on Tiger Data. The `s` key spike takes stress from 3 to 88 in six seconds, the `d` distraction raises it to about 24 (focus only), and `f` (face lost) leaves a gap, since readings under the confidence cutoff aren't stored:
+A mock session through Brain's real interview loop, stored on Tiger Data. The `s` key spike takes stress from 3 to 88 in six seconds, and `f` (face lost) leaves a gap, since readings under the confidence cutoff aren't stored (the chart also shows the old `d` distraction key, which only moved focus and has been removed):
 
 ![One mock session](charts/chart1_session_timeline.png)
 
@@ -65,6 +69,7 @@ python -m pip install -r backend/requirements.txt -r requirements-dev.txt
 python scripts/init_db.py              # create tables, hypertable, continuous aggregate (safe to re-run)
 python scripts/init_db.py --check      # verify only
 python scripts/init_db.py --reset      # drop everything and recreate (asks you to type RESET)
+python scripts/init_db.py --fresh --columnstore   # the same with no prompt: what run_demo.py does every launch
 
 uvicorn backend.main:app --reload      # Data's routes and the DB pool load automatically
 ```
@@ -75,15 +80,14 @@ uvicorn backend.main:app --reload      # Data's routes and the DB pool load auto
 
 | Key | What happens |
 |---|---|
-| `s` | stress spike: HR ramps to +25% over 6 s, breathing +30%, focus 0.5, frown; decays over 20 s |
-| `d` | distraction: focus 0.3 for 8 s, HR unchanged |
+| `s` | stress spike: HR ramps to +25% over 6 s, breathing +30%, frown; decays over 20 s |
 | `f` | face lost: 5 s of nulls, confidence 0 (not stored; shows as a gap) |
 | `q` | quit |
 
 | Flag | Use |
 |---|---|
 | `--auto` | spike ~10 s into every other question (Q1, Q3...) by polling `/api/sessions/active` + Brain's `/status` |
-| `--events "60:s,95:d,120:f"` | fire events at fixed seconds (no keyboard needed) |
+| `--events "60:s,120:f"` | fire events at fixed seconds (no keyboard needed) |
 | `--duration 180` | stop after 180 s |
 | `--url http://host:8000` | backend (default `http://localhost:8000`) |
 | `--stdout` | print NDJSON instead of posting (no backend needed); `--fast` makes it instant |

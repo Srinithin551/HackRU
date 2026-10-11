@@ -1,13 +1,17 @@
-# StressTest Build Plan
+# Osiris build plan and contracts
 
-**Everyone reads this file first, then their own role file.** This file is the single source of truth for how the pieces connect. If you need to change anything in the "Contracts" section, tell the whole team before you push.
+The team's shared plan from HackRU 2026 (written when the app was still called *StressTest*). Sections 1-5
+and 8 are kept up to date with what was built; sections 6, 7 and 9 are the original plan, kept for the
+record. The product overview is in the [README](../README.md).
 
-| Role | Owner | Plan |
+**Contracts (section 3) are the single source of truth for how the pieces connect.**
+
+| Role | Owner | Guide |
 |---|---|---|
 | Brain (interview logic, Gemini, ElevenLabs) | Srinithin | [roles/brain.md](roles/brain.md) |
-| Data (Tiger Data, metrics, replay) | _teammate_ | [roles/data.md](roles/data.md) |
-| Sensing (Presage, vitals ingest) | _teammate_ | [roles/sensing.md](roles/sensing.md) |
-| Frontend (React UI, demo, domain) | _teammate_ | [roles/frontend.md](roles/frontend.md) |
+| Data (Tiger Data, metrics, replay) | Likhil | [roles/data.md](roles/data.md) |
+| Sensing (Presage, vitals ingest) | Sharvil | [roles/sensing.md](roles/sensing.md) |
+| Frontend (React UI, demo) | Shreyas | [roles/frontend.md](roles/frontend.md) |
 
 ---
 
@@ -15,8 +19,8 @@
 
 ```
  ┌──────────────────────────── Browser (Frontend) ─────────────────────────────┐
- │  setup page · live interview page · replay page                             │
- │  plays interviewer audio · mic speech-to-text · live charts                 │
+ │  setup (file import) · live interview · report + replay · verdict           │
+ │  plays Judge's voice · mic speech-to-text · live vitals · webcam preview    │
  └───────────────▲──────────────────────────────────────────┬──────────────────┘
                  │ WebSocket events + REST                  │ answer transcripts
                  │                                          ▼
@@ -34,24 +38,24 @@
                      Tiger Data (Postgres + TimescaleDB, cloud)
         sessions · questions · vitals (hypertable) · vitals_5s (continuous aggregate)
 
- Presage sensing client (browser module OR local process on the demo laptop)
-        └── POSTs one VitalsReading per second to /api/vitals
+ Presage sensor: sensing_client/presage_node/sensor.mjs, a hidden Node.js process (SmartSpectra Node SDK)
+        └── POSTs one VitalsReading per second to /api/vitals, and its status to /api/sensor/status
 ```
 
 Key idea: **Sensing writes, Data computes, Brain decides, Frontend shows.** Brain never talks to Presage directly and Sensing never talks to Gemini. Everything flows through Data's functions and the contracts below, which is what lets all four people build in parallel.
 
 ## 2. What happens during one question
 
-1. Brain picks the next question (from Gemini) and calls `data.insert_question()`.
-2. Brain sends the text to ElevenLabs, saves `/audio/<question_id>.mp3`, and emits a `question` WebSocket event.
+1. Brain has the next turn (written by Gemini: a short reaction, then the question) and calls `data.insert_question()`.
+2. Brain sends the text to ElevenLabs (one voice, Judge's), caches the mp3 under `/audio/<hash>.mp3`, and emits a `question` WebSocket event. Coaching on the previous answer, if any, rides in the same clip and in `question.coaching`.
 3. Frontend plays the audio. When it ends, Frontend sends `answer_started` and turns on the mic.
-4. The whole time, Sensing posts a reading every second. Data stores it, computes `stress`, and the ingest route broadcasts a `vitals` event so the live chart moves.
-5. Brain's watcher loop reads `data.get_window_stats()` every 3 seconds and emits `coach_flag` events when stress is high (on screen only).
-6. User finishes. Frontend sends `answer_done` with the transcript.
-7. Brain immediately plays a short filler clip ("Okay."), then calls `data.get_question_stats()` and asks Gemini what to do next (follow up, ease off, push harder, next question, or wrap up).
-8. Loop. After the last question Brain generates the report, Data saves it, and Brain emits `session_ended`.
+4. The whole time, Sensing posts a reading every second. Data stores it, computes `stress`, and the ingest route broadcasts a `vitals` event so the live numbers move.
+5. Brain's watcher reads `data.get_window_stats()` every 3 seconds and emits `coach_flag` events when stress rises: a message citing the number plus one command, shown as an interrupt the user acknowledges.
+6. User finishes (silence auto-stop or "I've answered"). Frontend sends `answer_done` with the transcript.
+7. Brain calls `data.get_question_stats()` and asks Gemini what to do next: `next`, `follow_up`, `ease_off`, `push`, `redirect` ("didn't catch that") or `coach` (step out and give a model answer). Code enforces the limits. There is no filler clip between turns.
+8. Loop. After the last question the closing line plays (the only `filler` event) while Brain writes the report; Data saves it, and Brain emits `session_ended`.
 
-Session start: a 30 to 45 second **calibration** chat ("Hey, how's HackRU going?") runs first. Data computes the person's calm **baseline** from those readings. Every stress number afterward is relative to that baseline. This also covers Presage's warm-up time.
+Session start: a **calibration** chat of at least 35 seconds runs first ("tell me a little about yourself"; for a Class Presentation with no imported file, "walk me through your presentation", and the questions are then planned from the answer). Data computes the person's calm **baseline** from those readings. Every stress number afterward is relative to that baseline. Presage starts before the interview (pre-warm), so its 10-20 s lock-on is already done.
 
 ## 3. Contracts (do not change without telling everyone)
 
@@ -123,9 +127,11 @@ Missing inputs drop out and the remaining weights are renormalized. Thresholds e
 | POST | `/api/sessions` | Brain | body `{user_name, interview_type, role_title}` → `{session_id}` |
 | POST | `/api/sessions/{id}/start` | Brain | starts calibration + interview loop in background |
 | POST | `/api/sessions/{id}/material` | Brain | optional, before /start: `{filename, data (base64)}` (.pdf .pptx .docx .txt .md) → `{name, kind, chars}`; the questions are planned from it |
+| GET | `/api/sessions/{id}/insights` | Brain | Gemini-written notes per question and variable, for the replay chart's tooltips |
 | GET | `/api/sessions/active` | Data | `{session_id}` or `null` (sensing client uses this) |
 | POST | `/api/vitals` | Sensing (route), Data (storage) | body `VitalsBatch` → `{stored: n}` |
 | POST | `/api/sensor/status` | Sensing | body `{state, message, simulated}` from the Presage sensor, broadcast as `sensor` |
+| POST / GET | `/api/sensor/page-camera` | Sensing | `{open}`: the page reports its webcam open (it opens it once, at load); the sensor waits for it before starting Presage |
 | GET | `/api/sessions/{id}/replay` | Data | chart series + questions + per-question stats |
 | GET | `/api/sessions/{id}/report` | Brain | Gemini feedback JSON (shape in brain.md) |
 | GET | `/audio/{file}.mp3` | Brain | static files from `backend/static/audio/` |
@@ -140,10 +146,10 @@ Server → client:
 | type | data | sent by |
 |---|---|---|
 | `state` | `{state: "calibrating" \| "asking" \| "listening" \| "thinking" \| "done"}` | Brain |
-| `question` | `{question_id, index, total, kind, text, audio_url}` | Brain |
-| `filler` | `{audio_url}` | Brain |
+| `question` | `{question_id, index, total, kind, text, coaching, audio_url}` | Brain |
+| `filler` | `{audio_url}`: the closing line only | Brain |
 | `vitals` | `{ts, heart_rate, breathing_rate, stress}` (about 1 per second) | Sensing route |
-| `coach_flag` | `{ts, level: "rising" \| "high", message}` | Brain |
+| `coach_flag` | `{ts, level: "rising" \| "high", message, command}` | Brain |
 | `sensor` | `{state: "idle" \| "starting" \| "warming_up" \| "measuring" \| "adjust" \| "error", message, simulated}` (every 3 s and on change) | Sensing route |
 | `session_ended` | `{report_url, replay_url}` | Brain |
 
@@ -184,19 +190,24 @@ get_report(session_id) -> dict | None
 
 ```
 backend/
-  main.py              FastAPI app, mounts routers + /audio static   (Brain)
-  config.py            env vars                                       (Brain)
-  contracts.py         shared models above                           (Brain, frozen after hour 1)
-  ws.py                WebSocket hub: connect, broadcast(session_id, event)   (Brain)
-  brain/               interviewer.py, gemini.py, prompts.py, voice.py, watcher.py   (Brain)
-  data/                db.py, schema.sql, metrics.py, queries.py, routes.py   (Data)
-  sensing/             routes.py (POST /api/vitals)                  (Sensing)
-  static/audio/        generated mp3s (gitignored)
-  requirements.txt
-sensing_client/        Presage client if it runs as a separate process   (Sensing)
-frontend/              Vite + React app                               (Frontend)
+  main.py              FastAPI app, mounts routers, /audio, /health          (Brain)
+  config.py            env vars, APP_NAME                                    (Brain)
+  contracts.py         shared models above                                   (Brain)
+  ws.py, guards.py     WebSocket hub; local-only guard for sensor endpoints  (Brain)
+  brain/               interviewer, gemini, prompts, material, voice, watcher, report, insights   (Brain)
+  data/                db.py, schema.sql, columnstore.sql, metrics.py, queries.py, routes.py      (Data)
+  sensing/             routes.py: /api/vitals, /api/sensor/status, /api/sensor/page-camera       (Sensing)
+  static/audio/        generated mp3s (gitignored, emptied every launch)
+  logs/                Gemini log and per-run launcher logs (gitignored)
+sensing_client/
+  presage_node/        the hidden Presage sensor (Node.js)                   (Sensing)
+  presage_macos/, client.py   the earlier SmartSpectra-app setup (--legacy-presage)
+frontend/              Vite + React app: Setup, Live, Report, Verdict        (Frontend)
 scripts/
-  mock_vitals.py       fake vitals with keyboard-triggered stress spikes   (Data)
+  run_demo.py          one-command launcher (wipes data, supervises the sensor, opens Chrome)
+  init_db.py           schema + checks (--fresh is the launcher's wipe)      (Data)
+  mock_vitals.py       fake vitals with keyboard-triggered stress spikes     (Data)
+  fake_frontend.py     drives an interview from the terminal                 (Brain)
 docs/
 .env.example
 ```
@@ -206,7 +217,8 @@ docs/
 | Mock | Owner | Ready by | Who it unblocks |
 |---|---|---|---|
 | Stubbed `data/queries.py` | Data | hour 1 | Brain |
-| `scripts/mock_vitals.py` (press `s` to spike stress) | Data | hour 2 | Brain, Frontend, Data's own testing |
+| `scripts/mock_vitals.py` (`s` = stress spike, `f` = face lost) | Data | hour 2 | Brain, Frontend, Data's own testing |
+| `sensor.mjs --simulate` / `run_demo.py --simulate-vitals`: a scripted Presage | Sensing | added later | everyone, without a camera |
 | `BRAIN_FAKE=1` mode: canned questions, no Gemini/ElevenLabs calls, uses pre-made mp3s | Brain | hour 2 | Frontend |
 | `frontend/src/mocks/` fixture JSON for replay + fake WS emitter | Frontend | hour 1 | Frontend only |
 
@@ -214,7 +226,7 @@ With `uvicorn backend.main:app` + `mock_vitals.py` + `BRAIN_FAKE=1`, the full ap
 
 ## 6. Timeline
 
-Assumes submissions close Sunday around 10:00 AM. **Check the real deadline and shift everything.**
+The original plan, kept for the record.
 
 | When | Goal | Checkpoint |
 |---|---|---|
@@ -235,21 +247,14 @@ Assumes submissions close Sunday around 10:00 AM. **Check the real deadline and 
 - Every integration checkpoint: everyone pulls `main`, runs the full stack on the **demo laptop**, and fixes what breaks before moving on.
 - Post in the group chat when you finish a checklist item so others know what's real vs mocked.
 
-## 8. Environment variables (`.env.example`)
+## 8. Environment variables
 
-```
-GEMINI_API_KEY=
-GEMINI_MODEL=              # a fast Flash model, check AI Studio for the current name
-ELEVENLABS_API_KEY=
-ELEVENLABS_VOICE_ID=
-ELEVENLABS_MODEL=          # a low-latency model, check ElevenLabs docs
-PRESAGE_API_KEY=
-TIGER_DATABASE_URL=postgres://...
-BRAIN_FAKE=0
-PUBLIC_BASE_URL=http://localhost:8000
-```
+Every setting, with an explanation, is in [`.env.example`](../.env.example): Gemini (`GEMINI_API_KEY`, the two
+models, thinking level), ElevenLabs (key, `ELEVENLABS_VOICE_ID` = Judge's voice, model), Presage
+(`PRESAGE_API_KEY`, `PRESAGE_BACKUP_API_KEYS`, `PRESAGE_CAMERA`), `TIGER_DATABASE_URL`, `DATA_MIN_CONFIDENCE`,
+`BRAIN_FAKE`, `PUBLIC_BASE_URL`, `CORS_ORIGINS` and `ALLOW_REMOTE_SENSOR`.
 
-## 9. Risks and fallbacks
+## 9. Risks and fallbacks (the original plan)
 
 | Risk | Fallback | Owner |
 |---|---|---|
@@ -263,6 +268,6 @@ PUBLIC_BASE_URL=http://localhost:8000
 ## 10. Demo script (2 minutes)
 
 1. (15s) The problem: interview prep tools hear your words, not your panic.
-2. (75s) Live: a teammate does a short session. Judges watch the heart rate line. A hard question lands, stress spikes, the coach flag pops, the interviewer adapts.
-3. (20s) Replay page: shaded question regions, the spike, Gemini's advice with real numbers.
-4. (10s) Sponsor callouts: Presage sensing, Tiger Data time-series + continuous aggregates, Gemini adaptive logic, ElevenLabs voice, stresstest.tech.
+2. (75s) Live: a teammate takes the stand for a Class Presentation, importing their slides. Judge questions them out loud on those slides while the heart rate moves. A hard question lands, stress spikes, Judge interrupts with the number, and adapts.
+3. (20s) The record: shaded answer bands, the spike, Gemini's notes and advice with real numbers, then the ruling.
+4. (10s) Sponsor callouts: Presage (headless webcam vitals), Tiger Data (hypertable, continuous aggregate, columnstore), Gemini (planning from your file, adaptive turns, report), ElevenLabs (Judge's voice).

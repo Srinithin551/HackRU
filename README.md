@@ -1,175 +1,185 @@
-# StressTest
+# Osiris
 
-**An AI interviewer that can see you sweat.**
+**Take the stand. Your body testifies too.**
 
-StressTest runs a live mock interview with an AI voice while your webcam tracks your heart rate and breathing. When you're done, you get a replay timeline showing exactly which questions spiked your stress, plus specific coaching on how to answer them better.
+Osiris is a spoken mock interview with an AI interviewer called **Judge**. While you answer, your webcam reads
+your heart rate and breathing, with no wearables. Judge adapts to what you say and to how your body reacts,
+and when you lose composure it interrupts you mid-answer. Afterwards a replay lines up every question with
+your heart rate and stress, and explains where you broke and how to hold it next time.
 
-Built at **HackRU 2026** (Rutgers University).
-
----
-
-## The Problem
-
-Interview anxiety is universal, but practice tools only judge *what* you said. They miss *how your body reacted* while you said it. You can't fix the panic if you never see when it happens.
-
-## The Solution
-
-1. Pick an interview type (software engineering, behavioral, class presentation, or a quick 3-question demo).
-2. An AI interviewer holds a spoken conversation: small talk first, then questions that adapt to your answers. A wrong or off-topic answer gets immediate coaching before the next question.
-3. Your webcam measures heart rate and breathing every second (Presage), no wearables needed.
-4. After the session, a replay timeline lines up each question with your heart rate and stress, and the AI explains where you lost composure and how to recover next time.
+Built at **HackRU 2026** (Rutgers University). Early commits and some docs call it by its working name,
+*StressTest*.
 
 ---
 
-## Tech Stack and Sponsor Integrations
+## The problem
 
-| Sponsor | Role in StressTest |
+Interview practice tools judge *what* you said. They can't see *how your body reacted* while you said it,
+so you never find out which question made you panic or how long it took you to recover.
+
+## What Osiris does
+
+1. **Set up.** Pick a trial type (Software Engineering, Behavioral, Class Presentation, or a 3-question Quick
+   Demo) and, optionally, **import a file**: your slides or notes, a résumé, or a job description (PDF,
+   PowerPoint, Word or text). Judge plans its questions from that file.
+2. **Take the stand.** Judge talks with you out loud (ElevenLabs voice). You answer by speaking (or typing).
+   - It starts with small talk while Presage locks on to your pulse and Osiris measures your calm
+     **baseline**.
+   - For a **Class Presentation with no file**, Judge first asks what your presentation covers, then plans
+     its questions from your answer.
+   - After each answer, Gemini decides the next turn: move on, follow up, ease off, push harder, ask you to
+     repeat, or step out of the interview to **coach** a wrong or off-topic answer.
+   - If your stress rises, Judge **interrupts** on screen with the number that triggered it and one thing to
+     do ("Please take one slow breath"). You acknowledge it ("Yes, Your Honor") before going on.
+3. **The record.** The report shows:
+   - a **composure score** and where Judge saw you break;
+   - three tips;
+   - a **replay chart**: heart rate over stress, a shaded band for each answer, coach-flag dots, and hover
+     notes written by Gemini;
+   - per-question numbers and feedback that cite your real measurements.
+4. **The ruling.** Judge delivers a verdict. You can take the stand again or adjourn.
+
+---
+
+## Sponsor technology
+
+| Sponsor | How Osiris uses it |
 |---|---|
-| **Presage** | Camera-based vitals (heart rate, breathing rate) through the SmartSpectra Node SDK, running hidden in the background |
-| **ElevenLabs** | Natural voice for the AI interviewer |
-| **Gemini API** | Plans the questions, writes every conversational turn and the live coaching, adapts to stress signals, writes post-session feedback |
-| **Tiger Data** | Time-series storage for per-second vitals; continuous aggregates power the replay timeline |
-| **.Tech** | Project domain (stresstest.tech) |
-| **Solana** *(stretch)* | Mint a "Certified Calm" badge on devnet when you pass a session under a stress threshold |
-| **DEV** | Post-hackathon write-up |
+| **Presage** | Camera-based heart rate and breathing rate through the SmartSpectra **Node.js SDK**. It runs headless in the background (no window), one reading per second, each with Presage's own confidence. Presage's framing hints ("Hold still", "No face found") are shown on the live page. |
+| **Tiger Data** | Every reading goes into a TimescaleDB **hypertable**. A **continuous aggregate** (5-second buckets, real-time) drives the replay chart. A time-range join between answer windows and vitals gives each question's stats, and the **columnstore** compresses old sessions. |
+| **Gemini** | Plans the questions (from your imported file when there is one) and writes every spoken turn after the small talk. It also decides how to adapt after each answer, writes the coaching, the report and the chart notes. Two models with automatic failover. |
+| **ElevenLabs** | Judge's voice (one voice for the whole interview), cached on disk by text. |
 
-**Frontend:** React 19 + Vite + Tailwind ([frontend/README.md](frontend/README.md))
-**Backend:** Python (FastAPI)
-**Database:** Tiger Data (PostgreSQL + TimescaleDB), or in memory when no database is configured
-**Sensor:** Node.js + Presage SmartSpectra SDK ([sensing_client/presage_node/README.md](sensing_client/presage_node/README.md))
-
-Presage's SDK can also report focus and facial expression, but this build doesn't request them, so the
-stress score uses heart rate and breathing only (the formula renormalizes the weights of missing inputs).
+**Stack:** FastAPI (Python 3.12) · React 19 + Vite + Tailwind 4 + Recharts · Node.js sensor · TimescaleDB.
 
 ---
 
 ## How it works
 
 ```
- Webcam ─> Presage sensor (hidden Node process) ──POST /api/vitals, 1/s──┐
-                                                                         ▼
- Browser (React, :5173) <══ WebSocket /ws/{id} ══> FastAPI backend (:8000) ──> Tiger Data
-   mic → speech-to-text ─── answers ──────────────>   brain/  interview loop ──> Gemini
-   plays interviewer audio <── /audio/*.mp3 ──────    voice   ─────────────────> ElevenLabs
-   replay + report  <── GET /replay, /report ─────    data/   stress score, baseline, replay
+                 page opens the webcam once, at load ──► POST /api/sensor/page-camera
+                                                                  │ (sensor waits for this)
+ Webcam ──► Presage sensor (hidden Node process) ── POST /api/vitals, 1/s ──┐
+                                                  ── POST /api/sensor/status ┤
+                                                                             ▼
+ Chrome window (React, :5173) ◄══ WebSocket /ws/{id} ══► FastAPI backend (:8000) ──► Tiger Data
+   mic → speech-to-text ──── answers ────────────────►     brain/  interview loop ──► Gemini
+   plays Judge's voice ◄──── /audio/*.mp3 ────────────     voice   ──────────────────► ElevenLabs
+   report + replay ◄──────── /report, /replay ────────     data/   stress score, baseline, replay
 ```
 
-One interview, end to end:
+**Sensing writes, Data computes, Brain decides, Frontend shows.** `scripts/run_demo.py` starts all of it with one command and opens the app in its own Chrome window. Presage has no window, so Chrome is the only thing you see.
+
+### One interview, end to end:
 
 1. **Setup page** → `POST /api/sessions`. The live page opens the WebSocket, then calls `/start`.
-2. **Small talk (calibration, ~35 s).** While you chat, the Presage sensor (it starts when an interview
-   starts) locks on, and Data computes your calm **baseline**. Every stress number afterwards is relative to it.
-3. **Questions.** Gemini planned them during the small talk. After each answer the backend reads your vitals
-   for that answer, and Gemini decides the next turn: move on, follow up, ease off, push harder, ask you to
-   repeat, or step out of the interview to coach you. Code enforces the rules (one follow-up per question,
-   every planned question gets asked within the turn budget). Coach flags pop up on screen when stress rises,
-   and remove themselves once read (coaching, which is spoken, leaves when its narration ends).
-   **Suspected cheating:** while you answer, the page tracks your head and eyes on the camera (MediaPipe face
-   landmarker, in the browser, loaded from a CDN). Looking off screen for 1.5 s is one look-away; 3 within a
-   minute raise "I suspect you of cheating" on screen and in the report ([backend/brain/integrity.py](backend/brain/integrity.py)).
-4. **Report.** The closing line plays while Gemini writes the report; the page then shows the replay chart
-   (5-second buckets from a TimescaleDB continuous aggregate) and per-question feedback that cites real numbers.
+2. **Small talk (calibration, ~35 s).** While you chat, the Presage sensor (it starts when an interview starts) locks on, and Data computes your calm **baseline**. Every stress number afterwards is relative to it. Gemini plans the questions in the background.
+3. **Questions.** After each answer the backend reads your vitals for that answer, and Gemini decides the next turn: move on, follow up, ease off, push harder, ask you to repeat, or step out of the interview to coach you. Code enforces the rules (one follow-up per question, every planned question gets asked within the turn budget). Coach flags pop up on screen when stress rises, and remove themselves once read (coaching, which is spoken, leaves when its narration ends).
+   **Suspected cheating:** while you answer, the page tracks your head and eyes on the camera (MediaPipe face landmarker, in the browser, loaded from a CDN). Looking off screen for 1.5 s is one look-away; 3 within a minute raise "I suspect you of cheating" on screen and in the report (`backend/brain/integrity.py`).
+4. **Report.** The closing line plays while Gemini writes the report; the page then shows the replay chart (5-second buckets from a TimescaleDB continuous aggregate) and per-question feedback that cites real numbers.
 
-Every external call has a timeout and a fallback (canned questions, rule-based decisions, a numbers-only
-report, text without audio), so a slow or missing API never stalls a live session.
+Every external call has a timeout and a fallback (canned questions, rule-based decisions, a numbers-only report, text without audio), so a slow or missing API never stalls a live session.
 
-**Stress score** (0-100, [backend/data/metrics.py](backend/data/metrics.py)): heart rate vs your baseline
-(+25% = max) weighted 0.5, breathing (+40% = max) 0.3, focus drop 0.2, with missing inputs dropped and the
-rest renormalized. Below 40 is calm, 40 to 70 rising, above 70 high.
+**Stress score** (0-100, `backend/data/metrics.py`), always relative to **your** baseline: heart rate (+25% = max) weighted 0.5, breathing (+40% = max) 0.3, focus drop 0.2, with missing inputs dropped and the rest renormalized. Below 40 is calm, 40 to 70 rising, above 70 high.
 
-**Data model:** [backend/data/schema.sql](backend/data/schema.sql). `sessions` (setup, baseline, report),
-`questions` (each spoken turn with its answer window and transcript), `vitals` (a hypertable, one row per
-second, stress computed on insert) and `vitals_5s` (the continuous aggregate behind the replay).
+**One interview, end to end**
+1. `POST /api/sessions` (and `/material` if you imported a file). The live page opens the WebSocket and calls `/start`.
+2. **Warm-up (at least 35 s).** Small talk while Data collects the calm baseline. Gemini plans the questions in
+   the background.
+3. **Questions.** After each answer the backend reads your vitals for that answer window, and Gemini picks the
+   next turn. Code enforces the rules: at most one follow-up and one "didn't catch that" per question, every
+   planned question asked within the turn budget, silence never coached. A watcher checks your stress every
+   3 s and raises interrupts.
+4. **Report.** The closing line plays while Gemini writes the report. The page then shows the record and the ruling.
 
-### Limits worth knowing
+**Stress score** (0-100, [`backend/data/metrics.py`](backend/data/metrics.py)), always relative to *your*
+baseline:
 
-- **One person, one laptop.** All live interview state is in the backend's memory, so run a single backend
-  process (no `--workers`, no `--reload` during a demo). Sensor vitals always go to the newest session.
-- **No login.** Instead: the sensor endpoints (`/api/vitals`, `/api/sensor/status`, `/api/sessions/active`)
-  only answer requests from this machine (`ALLOW_REMOTE_SENSOR=1` lifts that), browsers may only open the
-  WebSocket from the app's own origin (`CORS_ORIGINS` or any localhost port), and `/start` only starts
-  sessions that exist. Don't expose the backend to the internet as is.
-- **What's stored:** transcripts, vitals and the report go to the database, and every Gemini prompt and reply
-  (transcripts included) to `backend/logs/`. Video never leaves the camera.
+| Part | Maxes out at | Weight |
+|---|---|---|
+| Heart rate | +25% over baseline | 5/8 |
+| Breathing rate | +40% over baseline | 3/8 |
+
+A missing input drops out and the other is re-weighted. Below 40 is calm, 40 to 70 rising, above 70 high.
+Readings below Presage's own accuracy standard (confidence 0.4) are never stored or scored.
+
+**Built to survive a live demo**
+- **Every external call has a timeout and a fallback:** canned questions, rule-based decisions, a
+  numbers-only report, or text without audio.
+- **Presage restarts on its own.** If its engine crashes, the launcher restarts only the sensor, and the
+  interview keeps going.
+- **API keys fail over.** When a Presage key runs out of credits, the next key in `PRESAGE_BACKUP_API_KEYS`
+  takes over.
+- **Gemini models fail over.** On a quota error or overload, the other model takes over.
+- **A weak pulse never replaces a recent strong one.** Hints wait 2.5 s before showing, so they don't flicker.
+- **No camera fight.** The page opens the camera first and Presage second, so the two never fight over the
+  camera's mode.
 
 ---
 
-## Getting Started
+## Getting started
 
 ### Prerequisites
-- Python 3.12 (`brew install python@3.12`; 3.13+ also works)
-- Node.js 20+ (the frontend and the Presage sensor)
-- Google Chrome (speech-to-text uses its Web Speech API)
-- API keys: Presage, ElevenLabs, Gemini, Tiger Data connection string (none are needed for fake mode)
+- An Apple Silicon Mac (the Presage sensor also runs on Linux and Windows)
+- Python 3.12, Node.js 20+, Google Chrome (speech-to-text uses Chrome's Web Speech API)
+- Keys for Presage, ElevenLabs and Gemini, and a Tiger Data connection string. **None are needed for a
+  keyless run** (see below).
 
-### Environment variables
-
-Copy `.env.example` to `.env` at the repo root and fill in the keys. Every setting is explained there.
-With `BRAIN_FAKE=1` and no `TIGER_DATABASE_URL`, everything runs end to end with no keys at all.
+### Install
+```bash
+python3.12 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt -r requirements-dev.txt
+(cd frontend && npm install)
+cp .env.example .env        # fill in the keys; every setting is explained in the file
+```
 
 ### Database (Tiger Data / TimescaleDB)
-
-Tiger Data runs on TimescaleDB. For a Tiger Data cloud service, paste its connection string into
-`TIGER_DATABASE_URL` in `.env`. To run the same engine locally for free (needs Docker Desktop):
-
-```bash
-docker run -d --name stresstest-tigerdb --restart unless-stopped -p 127.0.0.1:5433:5432 \
-  -e POSTGRES_PASSWORD=<pick-a-password> -e POSTGRES_DB=stresstest \
-  -v stresstest-tigerdb:/var/lib/postgresql/data timescale/timescaledb:latest-pg17
-# then in .env:  TIGER_DATABASE_URL=postgres://postgres:<pick-a-password>@127.0.0.1:5433/stresstest
-python scripts/init_db.py --columnstore      # hypertable, 5 s continuous aggregate, columnstore
-```
-
-Without `TIGER_DATABASE_URL`, Data runs in memory (nothing is saved). `/health` shows which is live
-(`"data_store": "tiger_data"` or `"in_memory"`).
-
-### Run everything (one command)
+Paste a Tiger Data service's connection string into `TIGER_DATABASE_URL`. To run the same engine locally
+(needs Docker):
 
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt
-(cd frontend && npm install)
-.venv/bin/python scripts/run_demo.py            # backend + hidden Presage sensor + frontend, opens Chrome
+docker run -d --name stresstest-tigerdb -p 127.0.0.1:5433:5432 \
+  -e POSTGRES_PASSWORD=<pick-a-password> -e POSTGRES_DB=stresstest timescale/timescaledb:latest-pg17
+# .env:  TIGER_DATABASE_URL=postgres://postgres:<pick-a-password>@127.0.0.1:5433/stresstest
 ```
 
-The first run installs Presage's Node SDK into `sensing_client/presage_node` (about 400 MB) and macOS asks
-whether your terminal may use the camera. The launcher prints when Presage vitals go live and stops
-everything on Ctrl+C.
+With no `TIGER_DATABASE_URL`, Data runs in memory and nothing is saved.
+
+### Run (one command)
+```bash
+.venv/bin/python scripts/run_demo.py
+```
+
+This starts the backend, the hidden Presage sensor and the frontend, then opens Osiris in a Chrome window.
+On the first run it installs Presage's Node SDK into `sensing_client/presage_node` (about 400 MB). macOS
+asks whether your terminal and Chrome may use the camera: allow both. **Ctrl+C** stops everything.
+
+> ⚠️ **Every launch starts from an empty database.** The launcher drops and recreates the Tiger Data tables
+> (`scripts/init_db.py --fresh --columnstore`) and deletes the cached voice clips. Pass `--keep-data` to keep
+> earlier sessions.
 
 | Flag | Effect |
 |---|---|
-| `--fake` | `BRAIN_FAKE=1`: canned questions and pre-recorded audio, no Gemini or ElevenLabs calls |
-| `--simulate-vitals` | artificial Presage vitals, no camera (the live page labels them "Simulated") |
-| `--no-sensing` | no Presage at all (drive vitals with `scripts/mock_vitals.py` instead) |
-| `--no-preview` | the page doesn't show the webcam (Presage still uses it) |
-| `--no-open` | don't open the Chrome window |
-| `--legacy-presage` | old setup: the SmartSpectra app window + `sensing_client/client.py` ([sensing_client/presage_macos/README.md](sensing_client/presage_macos/README.md)) |
+| `--fake` | No Gemini or ElevenLabs calls: canned questions and pre-recorded audio |
+| `--simulate-vitals` | Artificial Presage vitals, no camera (the page labels them "Simulated vitals") |
+| `--keep-data` | Don't empty the database and voice cache at startup |
+| `--no-preview` | The page doesn't show the webcam (Presage still uses it) |
+| `--no-open` | Don't open the Chrome window |
+| `--no-sensing` | No Presage at all (drive vitals with `scripts/mock_vitals.py`) |
+| `--legacy-presage` | The old setup: Presage's SmartSpectra app window plus a log-file client |
 
-No keys at all? `.venv/bin/python scripts/run_demo.py --fake --simulate-vitals` runs the whole product.
+**No keys at all?** `.venv/bin/python scripts/run_demo.py --fake --simulate-vitals` runs the whole product
+offline.
 
-### Run pieces by hand
-
-> For a demo, never start the backend with `--reload`: a reload restarts the server and drops the live
-> interview. `scripts/run_demo.py` never uses it.
-
-```bash
-source .venv/bin/activate
-uvicorn backend.main:app                          # backend (BRAIN_FAKE=1 for no API calls)
-node sensing_client/presage_node/sensor.mjs       # Presage → /api/vitals (add --simulate for no camera)
-(cd frontend && npm run dev)                      # http://localhost:5173
-python scripts/fake_frontend.py                   # or drive an interview from the terminal
-python scripts/mock_vitals.py                     # or fake vitals with keyboard spikes (s / d / f)
-```
+Each run's full output is saved to `backend/logs/run-<date>-<time>.log`, and every Gemini prompt and reply to
+`backend/logs/gemini-<date>.jsonl`.
 
 ### Tests
-
 ```bash
-pytest                                            # Brain (tests/) + Data (backend/data/tests/)
-(cd frontend && npm test)                         # mock engine, replay/report builders, contracts
-(cd sensing_client/presage_node && npm test)      # Presage → VitalsReading mapping, simulator
+.venv/bin/python -m pytest tests                     # Brain: 171 tests
+.venv/bin/python -m pytest backend/data/tests        # Data: 28 (real-database tests run when TIGER_DATABASE_URL is set)
+(cd sensing_client/presage_node && npm test)         # Presage sensor: 15
+(cd frontend && npx tsc -b && npm run lint && npm test && npm run build)   # Frontend: 51 + typecheck, lint, build
 ```
-
-Data's `test_queries_db.py` runs against the real Tiger Data service whenever `TIGER_DATABASE_URL` is set
-(it deletes every row it writes) and skips otherwise.
 
 ---
 
@@ -177,50 +187,47 @@ Data's `test_queries_db.py` runs against the real Tiger Data service whenever `T
 
 | Path | What's there |
 |---|---|
-| `backend/main.py`, `ws.py`, `config.py`, `guards.py` | FastAPI app, WebSocket hub, settings, the local-only guard |
-| `backend/brain/` | Interview loop, Gemini calls and prompts, ElevenLabs voice, coach-flag watcher, report |
-| `backend/data/` | Tiger Data queries (and their in-memory twin), stress score, schema ([docs/data/README.md](docs/data/README.md)) |
-| `backend/sensing/routes.py` | `POST /api/vitals` (cleans and stores readings) and `POST /api/sensor/status` |
-| `sensing_client/` | The Presage sensor ([presage_node](sensing_client/presage_node/README.md)) and the legacy app-window setup ([presage_macos](sensing_client/presage_macos/README.md)) |
-| `frontend/` | The React app ([frontend/README.md](frontend/README.md)) |
-| `scripts/` | `run_demo.py` launcher, `init_db.py`, `mock_vitals.py`, `fake_frontend.py`, export and chart scripts |
-| `docs/` | Build plan and contracts ([PLAN.md](docs/PLAN.md)), role guides, Data's analysis |
+| [`backend/main.py`](backend/main.py), `ws.py`, `config.py`, `guards.py`, `contracts.py` | FastAPI app, WebSocket hub, settings (`APP_NAME` lives here), the local-only guard, shared types |
+| [`backend/brain/`](backend/brain/) | Interview loop, Gemini calls and prompts, imported material, Judge's voice, stress watcher, report |
+| [`backend/data/`](backend/data/) | Tiger Data schema and queries (and their in-memory twin), stress score ([docs](docs/data/README.md)) |
+| [`backend/sensing/routes.py`](backend/sensing/routes.py) | Where readings enter: cleans and stores vitals, Presage status, the page-camera signal |
+| [`sensing_client/presage_node/`](sensing_client/presage_node/README.md) | The hidden Presage sensor (Node.js) |
+| [`frontend/`](frontend/README.md) | The React app: Setup, Live, Report, Verdict |
+| [`scripts/`](scripts/) | `run_demo.py` launcher, `init_db.py`, `mock_vitals.py`, `fake_frontend.py`, export and chart scripts |
+| [`docs/`](docs/) | Contracts and build plan ([PLAN.md](docs/PLAN.md)), role guides, Data's Tiger Data analysis ([docs/data](docs/data/README.md)) |
+
+The product name is one variable on each side: `APP_NAME` in [`frontend/src/lib/constants.ts`](frontend/src/lib/constants.ts)
+and [`backend/config.py`](backend/config.py), next to `INTERVIEWER_NAME` ("Judge").
 
 ---
 
-## Team Roles
+## Known limits
 
-Full build plan and integration contracts: **[docs/PLAN.md](docs/PLAN.md)**
+- **Built for one person on one laptop.** Live interview state is in the backend's memory, so run a single
+  backend process (no `--workers`, never `--reload` during a demo). Sensor vitals go to the newest interview.
+- **No login.** The sensor endpoints only answer requests from the same machine, and the WebSocket only
+  accepts the app's own origin. Don't expose the backend to the internet as is.
+- **What's stored:** transcripts, vitals and the report go to the database, and Gemini prompts and replies
+  (transcripts included) go to `backend/logs/`. Video never leaves the camera.
+- **Presage needs light and stillness.** Sit facing a light with your face and chest in view. The first
+  stable pulse takes 10-20 s, which the warm-up covers.
+- **The Gemini free tier is small.** `gemini-3.6-flash` allows about 20 requests a day; after that Osiris
+  falls back to `gemini-3.5-flash-lite`.
+- **Large frontend bundle.** The production build warns about a chunk over 500 kB (the chart library).
 
-| Area | Owner | Plan |
+---
+
+## Team
+
+| Area | Owner | Guide |
 |---|---|---|
-| Brain (Gemini, ElevenLabs, interview loop) | Srinithin | [docs/roles/brain.md](docs/roles/brain.md) |
-| Data (Tiger Data, stress score, replay) | Likhil | [docs/roles/data.md](docs/roles/data.md) |
-| Sensing (Presage, vitals ingest) | Sharvil | [docs/roles/sensing.md](docs/roles/sensing.md) |
-| Frontend (React UI, domain, demo) | Shreyas | [docs/roles/frontend.md](docs/roles/frontend.md) |
+| Brain: Gemini, ElevenLabs, the interview loop | Srinithin | [docs/roles/brain.md](docs/roles/brain.md) |
+| Data: Tiger Data, stress score, replay | Likhil | [docs/roles/data.md](docs/roles/data.md) |
+| Sensing: Presage, vitals ingest | Sharvil | [docs/roles/sensing.md](docs/roles/sensing.md) |
+| Frontend: React UI, demo | Shreyas | [docs/roles/frontend.md](docs/roles/frontend.md) |
 
----
-
-## Build Plan
-
-- [x] **MVP loop:** one question spoken by ElevenLabs, answer recorded, Presage heart rate logged to Tiger Data
-- [x] Gemini generates questions and adapts to stress spikes
-- [x] Live dashboard with heart rate and stress charts
-- [x] Post-session replay timeline with AI feedback
-- [ ] Register .tech domain and deploy
-- [ ] *(Stretch)* Solana "Certified Calm" badge
-- [ ] Demo script and slides
-- [ ] DEV post
-
-## Demo
-
-1. A teammate starts a software engineering interview live.
-2. Judges watch the heart rate line on the dashboard.
-3. A hard question lands, the line spikes, and the AI calls it out.
-4. Replay shows the exact moment and Gemini's coaching.
-
----
+The role guides are the plans written at the start of the hackathon; this README describes what was built.
 
 ## License
 
-MIT
+MIT, see [LICENSE.md](LICENSE.md).

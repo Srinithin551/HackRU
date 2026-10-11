@@ -1,8 +1,8 @@
-# Tiger Data in StressTest
+# Tiger Data in Osiris
 
 *Draft for the Devpost "How we built it" section. Numbers are measured on our Tiger Data service (PostgreSQL 18.6, TimescaleDB 2.30.2).*
 
-StressTest reads your heart rate, breathing and focus from your webcam once per second while an AI interviewer questions you, then shows exactly which question made your body react. That makes it a time-series problem from start to finish. Every reading, question and replay chart lives in **Tiger Data**, and four TimescaleDB features carry it.
+Osiris reads your heart rate and breathing from your webcam once per second while an AI interviewer (Judge) questions you, then shows exactly which question made your body react. That makes it a time-series problem from start to finish. Every reading, question and replay chart lives in **Tiger Data**, and four TimescaleDB features carry it.
 
 ### 1. A hypertable for the 1 Hz vitals stream
 
@@ -16,10 +16,10 @@ CREATE INDEX vitals_session_time ON vitals (session_id, time DESC);
 Each reading is scored on the way in: a 0 to 100 stress number relative to *your own* calm baseline from a short warm-up chat. While you answer, the interviewer asks "how are they right now?" every 3 seconds:
 
 ```sql
-SELECT count(*), avg(heart_rate), avg(breathing_rate), avg(focus), avg(stress),
+SELECT count(*), avg(heart_rate), avg(breathing_rate), avg(stress),
        mode() WITHIN GROUP (ORDER BY expression)
 FROM vitals
-WHERE session_id = $1 AND time > now() - make_interval(secs => $2) AND confidence >= 0.7;
+WHERE session_id = $1 AND time > now() - make_interval(secs => $2) AND confidence >= 0.4;
 ```
 
 TimescaleDB skips every chunk outside the window, and the index finds the session's last few seconds: **0.07 ms** of execution on Tiger. When stress crosses 70, the interviewer eases off. When you're calm, it pushes harder.
@@ -46,7 +46,7 @@ The replay timeline reads 5-second rollups, not raw rows:
 ```sql
 CREATE MATERIALIZED VIEW vitals_5s WITH (timescaledb.continuous) AS
 SELECT time_bucket('5 seconds', time) AS bucket, session_id,
-       avg(heart_rate) AS hr, avg(breathing_rate) AS br, avg(focus) AS focus,
+       avg(heart_rate) AS hr, avg(breathing_rate) AS br,
        avg(stress) AS stress, max(stress) AS stress_peak
 FROM vitals GROUP BY bucket, session_id WITH NO DATA;
 ALTER MATERIALIZED VIEW vitals_5s SET (timescaledb.materialized_only = false);   -- real-time
