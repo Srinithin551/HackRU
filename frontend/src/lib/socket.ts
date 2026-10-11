@@ -38,7 +38,7 @@ export function createSessionSocket(sessionId: string): SessionSocket {
 }
 
 const SERVER_EVENT_TYPES: ReadonlySet<string> = new Set<ServerEventType>([
-  'state', 'question', 'filler', 'vitals', 'coach_flag', 'sensor', 'session_ended',
+  'state', 'question', 'filler', 'vitals', 'coach_flag', 'integrity_flag', 'sensor', 'session_ended',
 ])
 
 /** Parses one message. Unknown types and malformed JSON return null (ignored, not fatal). */

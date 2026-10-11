@@ -69,7 +69,11 @@ export const DEFAULT_TIMING: EngineTiming = {
 }
 
 /** backend/brain/lines.py CALIBRATION_EXTRA_LINES (the non-presentation variant). */
-const CALIBRATION_EXTRA_LINE = 'What got you interested in this kind of work?'
+/** backend/brain/integrity.py REPEATS and WINDOW_S. */
+const LOOK_AWAY_REPEATS = 3
+const LOOK_AWAY_WINDOW_MS = 60_000
+
+const CALIBRATION_EXTRA_LINE ='What got you interested in this kind of work?'
 
 /** Brain's thresholds (PLAN.md §3). */
 export const HIGH_STRESS = 70
@@ -159,6 +163,9 @@ export class MockSessionEngine {
   private lastFlagAt = Number.NEGATIVE_INFINITY
   /** Flag phrasings already shown, so no interrupt ever repeats itself (see InterruptBox). */
   private readonly usedFlagTexts = new Set<string>()
+  /** Times (ms) of recent look-aways, and every one this session. */
+  private lookAways: number[] = []
+  private lookAwayTotal = 0
   private vitalsTimer: TimerId | null = null
   private watcherTimer: TimerId | null = null
   private lastQuestion: ServerEvent | null = null
@@ -251,7 +258,32 @@ export class MockSessionEngine {
       case 'end_session':
         this.endEarly()
         return
+      case 'look_away':
+        if (!active || active.done || active.record.id !== event.data.question_id) return
+        if (!this.listening || active.record.kind === 'calibration') return
+        this.lookAway()
+        return
     }
+  }
+
+  /** integrity.on_look_away(): only repeated look-aways within a minute are "suspected of cheating". */
+  private lookAway(): void {
+    const now = this.now()
+    this.lookAwayTotal += 1
+    this.lookAways = [...this.lookAways.filter((t) => now - t <= LOOK_AWAY_WINDOW_MS), now]
+    if (this.lookAways.length < LOOK_AWAY_REPEATS) return
+    const n = this.lookAways.length
+    this.lookAways = []
+    const message = `You have looked away from me ${n} times in under a minute (${this.lookAwayTotal} so far). I suspect you of cheating.`
+    this.emit({
+      type: 'integrity_flag',
+      data: {
+        ts: new Date(now).toISOString(),
+        message,
+        command: 'keep your eyes on the screen and answer from memory',
+        look_aways: this.lookAwayTotal,
+      },
+    })
   }
 
   /** Tears down every timer. The engine emits nothing afterwards. */

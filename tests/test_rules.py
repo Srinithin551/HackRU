@@ -139,7 +139,7 @@ def test_flag_cites_the_number_that_triggered_it():
 
 
 def test_flags_never_repeat_while_an_unused_phrasing_remains():
-    """The frontend makes the user acknowledge each interrupt, so a repeated one reads as a bug."""
+    """The frontend drops any interrupt text it has already shown, so a repeated one would vanish."""
     used: set[str] = set()
     w = window()
     seen = [flag_for(w, "rising", used)[0] for _ in range(len(VARIANTS[("hr", "rising")]))]

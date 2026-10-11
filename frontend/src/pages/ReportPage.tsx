@@ -211,6 +211,23 @@ function SessionReport({ sessionId }: { sessionId: string }) {
             <p className="mt-3 text-body text-ink-secondary">{report.summary}</p>
           </section>
 
+          {report.suspected_cheating && (
+            <section
+              role="alert"
+              className="panel shrink-0 border-2 p-panel"
+              style={{ borderColor: color.high, backgroundColor: color.highSubtle }}
+            >
+              <p className="label-caps" style={{ color: color.high }}>Suspected of cheating</p>
+              <p className="mt-2 text-body font-medium">
+                You looked away from the screen {report.look_aways ?? 0} times while answering, repeatedly enough
+                that {INTERVIEWER_NAME} suspects you of reading your answers.
+              </p>
+              {report.integrity_flags?.at(-1) && (
+                <p className="mt-2 text-caption text-ink-secondary">“{report.integrity_flags.at(-1)?.message}”</p>
+              )}
+            </section>
+          )}
+
           <section
             className="panel shrink-0 border-l-4 p-panel"
             style={{ borderLeftColor: color.high, backgroundColor: color.highSubtle }}

@@ -1,7 +1,7 @@
-/** The three rules an interrupt must obey: reset, never repeat, comply first. */
+/** The rules an interrupt must obey: reset, never repeat, go away on its own. */
 import { describe, expect, it } from 'vitest'
-import { coachingInterrupt, nextInterrupt } from './interrupts.ts'
-import type { CoachFlagEvent, QuestionEvent } from '../types.ts'
+import { coachingInterrupt, integrityInterrupt, nextInterrupt, readingMs } from './interrupts.ts'
+import type { CoachFlagEvent, IntegrityFlagEvent, QuestionEvent } from '../types.ts'
 
 const flag = (message: string, over: Partial<CoachFlagEvent> = {}): CoachFlagEvent => ({
   ts: '2026-10-11T12:00:00Z',
@@ -80,5 +80,39 @@ describe('coachingInterrupt', () => {
     const shown = new Set<string>()
     coachingInterrupt(question({ coaching: 'Be specific.' }), shown, 'Judge')
     expect(coachingInterrupt(question({ question_id: 'q2', coaching: 'Be specific.' }), shown, 'Apollo')).toBeNull()
+  })
+
+  it('is narrated when the question has a clip, so it leaves when the narration ends', () => {
+    expect(coachingInterrupt(question({ coaching: 'A.', audio_url: '/audio/x.mp3' }), new Set(), 'Judge')?.narrated).toBe(true)
+    expect(coachingInterrupt(question({ coaching: 'B.' }), new Set(), 'Judge')?.narrated).toBe(false)
+  })
+})
+
+describe('integrityInterrupt', () => {
+  const integrity = (message: string): IntegrityFlagEvent => ({
+    ts: '2026-10-11T12:00:00Z',
+    message,
+    command: 'keep your eyes on the screen',
+    look_aways: 3,
+  })
+
+  it('raises the cheating claim as a silent interrupt', () => {
+    const got = integrityInterrupt([integrity('I suspect you of cheating.')], new Set(), 'Judge')
+    expect(got).toMatchObject({ kind: 'cheating', message: 'I suspect you of cheating.', narrated: false })
+  })
+
+  it('never shows the same claim twice', () => {
+    const shown = new Set<string>()
+    integrityInterrupt([integrity('Suspected.')], shown, 'Judge')
+    expect(integrityInterrupt([integrity('Suspected.')], shown, 'Judge')).toBeNull()
+  })
+})
+
+describe('readingMs', () => {
+  it('gives longer interrupts longer on screen', () => {
+    const short = nextInterrupt([flag('Breathe.')], new Set(), 'Judge')!
+    const long = nextInterrupt([flag('Your pulse climbs twenty percent above your own calm and keeps on climbing.')], new Set(), 'Judge')!
+    expect(readingMs(long)).toBeGreaterThan(readingMs(short))
+    expect(readingMs(short)).toBeGreaterThan(1_500)
   })
 })

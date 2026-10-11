@@ -62,7 +62,11 @@ One interview, end to end:
 3. **Questions.** Gemini planned them during the small talk. After each answer the backend reads your vitals
    for that answer, and Gemini decides the next turn: move on, follow up, ease off, push harder, ask you to
    repeat, or step out of the interview to coach you. Code enforces the rules (one follow-up per question,
-   every planned question gets asked within the turn budget). Coach flags pop up on screen when stress rises.
+   every planned question gets asked within the turn budget). Coach flags pop up on screen when stress rises,
+   and remove themselves once read (coaching, which is spoken, leaves when its narration ends).
+   **Suspected cheating:** while you answer, the page tracks your head and eyes on the camera (MediaPipe face
+   landmarker, in the browser, loaded from a CDN). Looking off screen for 1.5 s is one look-away; 3 within a
+   minute raise "I suspect you of cheating" on screen and in the report ([backend/brain/integrity.py](backend/brain/integrity.py)).
 4. **Report.** The closing line plays while Gemini writes the report; the page then shows the replay chart
    (5-second buckets from a TimescaleDB continuous aggregate) and per-question feedback that cites real numbers.
 
