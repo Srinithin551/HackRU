@@ -5,6 +5,11 @@ import re
 MAX_TURN_WORDS = 70      # prompts ask for < 45; anything far longer is treated as a bad turn
 MAX_COACH_WORDS = 110    # the coaching part alone (prompt asks for < 75)
 
+# Per planned question. Defined here (not in interviewer.py) so the decide_next prompt quotes the same
+# limits the loop enforces: prompts.py can't import interviewer.py without a circular import.
+MAX_FOLLOWUPS = 1        # ease_off / push / follow_up
+MAX_REDIRECTS = 1        # "didn't catch that" re-asks for garbled answers
+
 _SENTENCE = re.compile(r"[^.!?]+[.!?]+[\"')\]]*\s*|[^.!?]+$")
 _STEP_BACK_IN = re.compile(r"\bback (?:in|into|to)\b", re.IGNORECASE)
 
@@ -16,6 +21,7 @@ def spoken(text: str, limit: int = MAX_TURN_WORDS) -> str:
 
 
 def sentences(text: str) -> list[str]:
+    """Split into sentences, keeping closing quotes/brackets with their sentence."""
     return [m.group(0).strip() for m in _SENTENCE.finditer(text or "") if m.group(0).strip()]
 
 

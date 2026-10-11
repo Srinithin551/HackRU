@@ -22,6 +22,13 @@ flowchart LR
 2. Brain asks "how are they right now?" every 3 s (`get_window_stats`, last 10 to 15 s) and "how did they react to that question?" after each answer (`get_question_stats`, the join between a question's answer window and the vitals in it).
 3. TimescaleDB rolls `vitals` into 5-second buckets (`vitals_5s`). The replay page reads those.
 
+### Ingest rules (what gets refused)
+
+- **Only this backend's sessions.** A reading with no `session_id` goes to the active session. An explicit `session_id` must be a session this backend process created (`_mine` in `queries.py`), otherwise the reading is dropped, never stored under a malformed id or filed under someone else's session. `get_active_session` follows the same rule, so a sensor never attaches to a teammate's session on a shared Tiger Data service.
+- **Cleaned before storage** (`backend/sensing/routes.py`): readings stamped more than 5 s in the future are dropped, NaN and impossible heart/breathing rates become null, focus and confidence are clamped to 0-1, and a POST carries at most 120 readings. The live window (`get_window_stats`) also ignores rows ahead of `now()`, as a second line of defence.
+- **Local only.** `GET /api/sessions/active`, `POST /api/vitals` and `POST /api/sensor/status` answer only requests from this machine (`backend/guards.py`; `ALLOW_REMOTE_SENSOR=1` lifts it).
+- **Confidence cutoff.** `DATA_MIN_CONFIDENCE` is a 0-1 fraction; a percentage such as `40` is read as 0.40 and a typo falls back to 0.4 with a warning, instead of crashing the backend at startup.
+
 ## Schema in one minute
 
 | Table | One row per | What matters |
@@ -35,7 +42,7 @@ Every column, unit and gotcha: **[DATA_CONTEXT.md](DATA_CONTEXT.md)**. SQL and q
 
 ## The stress score
 
-Stress is 0 to 100 and always **relative to your own calm baseline**, measured during the 30 to 45 s calibration chat (first 10 s skipped for Presage warm-up). Heart rate counts for half: +25% over baseline maxes its part out. Breathing counts 30% (maxed at +40%), and a focus drop of 0.5 counts 20%. If a signal is missing, the others are re-weighted, and readings with face confidence under the cutoff (`DATA_MIN_CONFIDENCE`, default 0.4: Presage's accuracy standard for heart rate) aren't stored or scored at all (a lost face shows as a gap). So **+25% heart rate alone = 50**, and a full mock spike (HR +25%, breathing +30%, focus 0.5) peaks around **85**. Everyone uses the same thresholds: **under 40 calm, 40 to 70 rising, over 70 high**.
+Stress is 0 to 100 and always **relative to your own calm baseline**, measured during the calibration chat (first 10 s skipped for Presage warm-up). Brain keeps calibration going for at least ~35 s: if the small talk is quick it holds a few seconds more (up to 20 s, `CALIBRATION_MAX_WAIT_S` in `backend/brain/interviewer.py`), because fewer than 10 usable samples means falling back to population averages (75 bpm, 15/min, 0.75). Heart rate counts for half: +25% over baseline maxes its part out. Breathing counts 30% (maxed at +40%), and a focus drop of 0.5 counts 20%. If a signal is missing, the others are re-weighted, and readings with face confidence under the cutoff (`DATA_MIN_CONFIDENCE`, default 0.4: Presage's accuracy standard for heart rate) aren't stored or scored at all (a lost face shows as a gap). So **+25% heart rate alone = 50**, and a full mock spike (HR +25%, breathing +30%, focus 0.5) peaks around **85**. Everyone uses the same thresholds: **under 40 calm, 40 to 70 rising, over 70 high**.
 
 ![Stress score vs heart-rate rise](charts/chart2_stress_response_curve.png)
 
@@ -62,6 +69,8 @@ python scripts/init_db.py --reset      # drop everything and recreate (asks you 
 uvicorn backend.main:app --reload      # Data's routes and the DB pool load automatically
 ```
 
+(`--reload` is fine while developing; never use it for a live demo, a reload drops the running interview.)
+
 **`scripts/mock_vitals.py`**, fake Presage, posts one reading per second to `POST /api/vitals` (no session id, so it lands in the active session):
 
 | Key | What happens |
@@ -81,7 +90,7 @@ uvicorn backend.main:app --reload      # Data's routes and the DB pool load auto
 | `--seed 7`, `--events-out events.csv` | reproducible noise; log when each event fired |
 
 Other tools: `python scripts/export_session.py latest --name mysession` (CSV export to `docs/data/samples/`),
-`python -m pytest backend/data/tests` (Data's tests; the real-DB ones skip without a URL).
+`pytest` from the repo root (runs Data's tests together with Brain's; the real-DB ones skip without a URL, and with a URL they write to that database and delete their own rows).
 Set **`DATA_FAKE=1`** to run the whole backend without a database (in memory, nothing saved). Pytest does this automatically.
 
 ## Queries and how fast they are
@@ -98,7 +107,7 @@ Server execution is what the database spends; round trip is what the caller wait
 | `get_active_session` | which session readings belong to (cached 2 s) | 0.03 ms | 53 ms |
 | `replay endpoint` | the replay page's whole payload | 0.08 ms | 54 ms |
 
-Session and question bookkeeping (`create_session`, `insert_question`, `mark_*`, `save_report`, ...) are single-row primary-key writes at the same round trip.
+Session and question bookkeeping (`create_session`, `insert_question`, `mark_*`, `save_report`, ...) are single-row primary-key writes at the same round trip. `get_session` (additive, not in PLAN.md) is a primary-key read that Brain's `/start` uses to refuse ids that were never created and to rebuild a session's setup after a backend restart.
 
 ![Query latency](charts/chart4_query_latency.png)
 

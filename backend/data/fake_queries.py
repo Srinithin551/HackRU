@@ -3,6 +3,11 @@
 Started as Brain's day-one stub. Same signatures as PLAN.md section 3, and it computes real
 stats from whatever vitals were inserted, so mock vitals produce real stress numbers.
 Nothing persists across restarts. queries.py routes calls here; don't import this directly.
+
+Every session here was created by this process, so all of them count as "this backend's" sessions (the
+`_mine` rule in queries.py). Known differences from the real queries.py, which tests on this file can't
+catch: create_session closes every older open session (queries.py only closes its own), and a mean of
+exactly 0 (e.g. focus 0.0) falls back to the population default in compute_baseline.
 """
 import logging
 import uuid
@@ -69,6 +74,15 @@ async def get_active_session() -> Optional[str]:
     return max(live, key=lambda s: s["started_at"])["id"] if live else None
 
 
+async def get_session(session_id) -> Optional[dict]:
+    """Same shape as queries.get_session."""
+    s = _sessions.get(str(session_id))
+    if s is None:
+        return None
+    return {"id": s["id"], "user_name": s["user_name"] or "", "interview_type": s["interview_type"] or "",
+            "role_title": s["role_title"] or "", "ended": s["ended_at"] is not None}
+
+
 async def end_session(session_id) -> None:
     if session_id in _sessions:
         _sessions[session_id]["ended_at"] = _now()
@@ -77,6 +91,7 @@ async def end_session(session_id) -> None:
 # ---------------------------------------------------------------- vitals
 
 async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
+    """Same rules as queries.insert_vitals: no session_id -> active session; an unknown id is dropped."""
     active = None
     rows = []
     for r in readings:
@@ -128,7 +143,9 @@ async def get_baseline(session_id) -> Optional[Baseline]:
 
 async def get_window_stats(session_id, seconds=15) -> WindowStats:
     cutoff = _now() - timedelta(seconds=seconds)
-    rows = [v for v in _vitals.get(session_id, []) if v["time"] > cutoff and v["confidence"] >= MIN_CONFIDENCE]
+    horizon = _now() + timedelta(seconds=5)   # same upper bound as WINDOW_SQL: ignore future-stamped rows
+    rows = [v for v in _vitals.get(session_id, [])
+            if cutoff < v["time"] <= horizon and v["confidence"] >= MIN_CONFIDENCE]
     b = await get_baseline(session_id)
     hr = _mean(v["heart_rate"] for v in rows)
     br = _mean(v["breathing_rate"] for v in rows)

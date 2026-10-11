@@ -135,7 +135,9 @@ export function SetupPage() {
                 <rect x="4" y="9" width="12" height="8" rx="2" />
                 <path d="M7 9V6.5a3 3 0 0 1 6 0V9" />
               </svg>
-              We&apos;ll measure your heart rate and focus through your webcam. Nothing is recorded.
+              {/* Accurate on purpose: video never leaves the camera, but answers and vitals are stored for the report. */}
+              We&apos;ll read your heart rate and breathing through your webcam. Video is never recorded; your
+              answers and vitals are saved to build your report.
             </p>
 
             {!hasSpeechRecognition() && (

@@ -15,6 +15,7 @@ If anything inside crashes, the session still ends cleanly with a numbers-only r
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -24,7 +25,8 @@ from backend.brain.history import as_baseline, as_question_stats, as_window_stat
 from backend.brain.models import Decision
 from backend.brain.report import fallback_report
 from backend.brain.state import SessionState
-from backend.brain.turns import MAX_COACH_WORDS, MAX_TURN_WORDS, final_coaching, spoken
+from backend.brain.turns import (MAX_COACH_WORDS, MAX_FOLLOWUPS, MAX_REDIRECTS, MAX_TURN_WORDS,
+                                 final_coaching, spoken)
 from backend.brain.watcher import watch_stress
 from backend.data import queries as data
 from backend.ws import broadcast
@@ -33,10 +35,9 @@ log = logging.getLogger("brain.interviewer")
 
 ANSWER_TIMEOUT_S = 120.0     # a dropped tab can't hang the loop
 CALIBRATION_MIN_S = 35.0     # ~10s Presage warm-up + ~25s of usable baseline readings
+CALIBRATION_MAX_WAIT_S = 20.0  # after quick small talk, wait (quietly) at most this long for the minimum
 CLOSING_PAUSE_S = 4.0        # minimum wait after the closing clip starts, before session_ended
 CLOSING_SLACK_S = 1.0        # extra margin on top of the clip's own length
-MAX_FOLLOWUPS = 1            # ease_off / push / follow_up, per planned question
-MAX_REDIRECTS = 1            # "didn't catch that" re-asks for garbled answers, per planned question
 MAX_TRANSCRIPT_CHARS = 4000  # a runaway speech-to-text stream can't flood the prompt or the database
 FOLLOW_UP_ACTIONS = ("follow_up", "ease_off", "push")
 ADVANCING_ACTIONS = ("next", "coach")   # these move on to the next planned question
@@ -51,6 +52,7 @@ def _utcnow() -> datetime:
 
 
 async def set_state(s: SessionState, state: str) -> None:
+    """Change phase and broadcast it. Repeats are swallowed so the frontend never sees a duplicate."""
     if s.phase == state:
         return
     s.phase = state
@@ -133,12 +135,16 @@ async def wait_answer(s: SessionState, qid: str) -> str:
         elif type_ == "answer_done":
             transcript = " ".join(str(d.get("transcript") or "").split())[:MAX_TRANSCRIPT_CHARS]
             await data.mark_answered(qid, _utcnow(), transcript)
+            # A tab that reconnects from now on must not be re-sent this question: it would replay the
+            # audio and reopen the mic for a question that's already answered.
+            ws.clear_replay(s.session_id, "question")
             return transcript
 
 
 # ---------------------------------------------------------------- deciding
 
 def word_limit(action: str) -> int:
+    """Longest usable turn for an action: coaching gets more room than an ordinary turn."""
     return MAX_COACH_WORDS if action == "coach" else MAX_TURN_WORDS
 
 
@@ -166,15 +172,20 @@ def resolve_action(action: str, text: str, followups_on_current: int, redirects_
 
 
 def out_of_budget(s: SessionState) -> bool:
+    """True once the spec's turn or time limit is hit. Checked after each answer, so the question in
+    progress always finishes; a session can overrun max_seconds by up to one answer."""
     return s.turns >= s.spec.max_turns or s.elapsed() > s.spec.max_seconds
 
 
 def record_adaptation(s: SessionState, qid: str, decision: Decision, action: str) -> None:
+    """Keep the resolved action for the report and for the next decide_next prompt."""
     s.actions.append(action)
+    # Coaching is only recorded if Gemini chose "coach" and the rules kept it (it was actually spoken).
+    spoken_coaching = decision.coaching if action == "coach" and decision.action == "coach" else ""
     s.adaptations.append({
         "question_id": qid, "action": action,
         "answer_quality": decision.answer_quality, "rationale": decision.rationale,
-        "coaching": decision.coaching if action == "coach" == decision.action else "",
+        "coaching": spoken_coaching,
     })
     log.info("session %s: decision %s → %s (quality %d) %s", s.session_id, decision.action, action,
              decision.answer_quality, decision.rationale)
@@ -185,7 +196,13 @@ def record_adaptation(s: SessionState, qid: str, decision: Decision, action: str
 async def calibrate(s: SessionState) -> None:
     """Small talk while Presage warms up and Data collects the calm baseline. The opener is pre-recorded
     so the session starts instantly; the second turn (only if the baseline needs more time) is written
-    by Gemini so it reacts to what they said and asks about their major or field."""
+    by Gemini so it reacts to what they said and asks about their major or field.
+
+    If both answers were quick, calibration would end before Presage has a usable baseline (Data then
+    falls back to population averages, so stress is measured against a stranger). So it then waits,
+    still "calibrating", until CALIBRATION_MIN_S, but never more than CALIBRATION_MAX_WAIT_S. The live
+    page's warm-up ring keeps counting down meanwhile.
+    """
     await set_state(s, "calibrating")
     line, fallback = lines.calibration_lines(s.spec.key)
     for turn in range(2):
@@ -196,9 +213,23 @@ async def calibrate(s: SessionState) -> None:
         if turn == 1 or s.elapsed() >= CALIBRATION_MIN_S:
             break
         line = spoken(await gemini.small_talk_follow_up(s) or "") or fallback
+    await _top_up_calibration(s)
+
+
+async def _top_up_calibration(s: SessionState) -> None:
+    """Wait out the rest of CALIBRATION_MIN_S (capped), checking for end_session every 0.25 s."""
+    wait = min(CALIBRATION_MAX_WAIT_S, CALIBRATION_MIN_S - s.elapsed())
+    if wait <= 0:
+        return
+    log.info("session %s: small talk was quick, holding calibration %.0fs more for the baseline", s.session_id, wait)
+    loop = asyncio.get_running_loop()
+    until = loop.time() + wait
+    while loop.time() < until and not s.end_requested:
+        await asyncio.sleep(min(0.25, until - loop.time()))
 
 
 def _next_planned(s: SessionState):
+    """Pop the next planned question and reset the per-question allowances."""
     q = s.queue.pop(0)
     s.current_planned = q
     s.planned_number += 1
@@ -227,9 +258,13 @@ async def interview(s: SessionState) -> None:
         # Both reads at once: on Tiger Cloud each is a ~60 ms network round trip.
         raw_stats, raw_window = await asyncio.gather(
             data.get_question_stats(qid), data.get_window_stats(s.session_id, 15), return_exceptions=True)
+        # A failed stats read must not end the interview: decide without body data for this one turn
+        # (decide_next treats None as "no usable vitals"). The report re-reads the stats at the end.
         if isinstance(raw_stats, BaseException):
-            raise raw_stats
-        stats = as_question_stats(raw_stats)
+            log.error("get_question_stats failed (%s), deciding without body data", raw_stats)
+            stats = None
+        else:
+            stats = as_question_stats(raw_stats)
         if isinstance(raw_window, BaseException):
             log.error("get_window_stats failed (%s), using the watcher's last window", raw_window)
             window = s.live_window
@@ -261,7 +296,8 @@ async def interview(s: SessionState) -> None:
 
 
 async def build_and_save_report(s: SessionState) -> dict:
-    items = normalize_history(await data.get_session_history(s.session_id))
+    """Pull every question + its vitals stats from Data, write the report, save it. Returns the dict."""
+    items =normalize_history(await data.get_session_history(s.session_id))
     report = await gemini.final_report(s, items)
     s.report = report.model_dump()   # kept in memory too: GET /report still works if the save fails
     try:
@@ -277,6 +313,7 @@ async def finish(s: SessionState) -> None:
         await data.end_session(s.session_id)
     except Exception:
         log.exception("end_session failed for %s", s.session_id)
+    s.finished_at = time.monotonic()   # state.prune_finished() frees it a while after this
     await set_state(s, "done")
     await broadcast(s.session_id, "session_ended", {
         "report_url": f"/api/sessions/{s.session_id}/report",
@@ -285,7 +322,16 @@ async def finish(s: SessionState) -> None:
 
 
 async def _run(s: SessionState) -> None:
-    plan_task = asyncio.create_task(gemini.plan_interview(s.spec, s.meta.role))   # plans during calibration
+    """The whole session in order:
+
+    1. Start planning questions with Gemini in the background (it has all of calibration to finish).
+    2. Small talk (calibration), then compute the baseline from those readings.
+    3. Start the stress watcher (coach flags) and run the question loop.
+    4. The closing line plays while the report is written, then finish() sends session_ended.
+
+    end_session at any point skips straight to step 4, without the closing line.
+    """
+    plan_task =asyncio.create_task(gemini.plan_interview(s.spec, s.meta.role))   # plans during calibration
     watcher: Optional[asyncio.Task] = None
     try:
         try:
@@ -326,6 +372,7 @@ async def _run(s: SessionState) -> None:
 
 
 async def run_session(s: SessionState) -> None:
+    """Entry point of the background task routes.start_session creates. Never raises except on cancel."""
     log.info("session %s: starting (%s, role=%r)", s.session_id, s.spec.label, s.meta.role)
     try:
         await _run(s)
@@ -338,6 +385,8 @@ async def run_session(s: SessionState) -> None:
 
 
 async def _emergency_finish(s: SessionState) -> None:
+    """Best-effort cleanup after a crash: numbers-only report, then session_ended. Each step is guarded
+    on its own so one failure (e.g. the database is down) doesn't skip the rest."""
     try:
         items = normalize_history(await data.get_session_history(s.session_id))
     except Exception:

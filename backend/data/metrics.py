@@ -28,7 +28,29 @@ W_HR, W_BR, W_FOCUS = 0.5, 0.3, 0.2
 # Presage-Security/SmartSpectra); the sensing client sends that pulse confidence / 100. Measured with the
 # real sensing client: at 0.7, a Presage signal around 60% confidence lost 100% of readings. Tune on the
 # demo laptop with DATA_MIN_CONFIDENCE in .env, no code change.
-MIN_CONFIDENCE = float(os.getenv("DATA_MIN_CONFIDENCE") or 0.4)
+DEFAULT_MIN_CONFIDENCE = 0.4
+
+
+def _min_confidence(raw: str | None) -> float:
+    """DATA_MIN_CONFIDENCE as a 0-1 fraction. A typo must not crash the backend at import, and "40"
+    (a percentage, Presage's own scale) must not silently drop every reading: it means 0.40."""
+    if not raw or not raw.strip():
+        return DEFAULT_MIN_CONFIDENCE
+    try:
+        value = float(raw)
+    except ValueError:
+        log.warning("DATA_MIN_CONFIDENCE=%r isn't a number; using %.2f", raw, DEFAULT_MIN_CONFIDENCE)
+        return DEFAULT_MIN_CONFIDENCE
+    if 1 < value <= 100:
+        value /= 100   # given as a percentage
+    if not 0 <= value <= 1:
+        log.warning("DATA_MIN_CONFIDENCE=%r is outside 0-1; using %.2f", raw, DEFAULT_MIN_CONFIDENCE)
+        return DEFAULT_MIN_CONFIDENCE
+    return value
+
+
+# Also interpolated into the SQL in queries.py: always a float from _min_confidence, never raw text.
+MIN_CONFIDENCE = _min_confidence(os.getenv("DATA_MIN_CONFIDENCE"))
 
 # Ingestion counts since startup ("stored" / "below_cutoff"), shown in /health, so you can see live
 # whether Presage readings are passing the cutoff.

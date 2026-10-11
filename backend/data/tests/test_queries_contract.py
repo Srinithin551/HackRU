@@ -16,6 +16,7 @@ from backend.data import fake_queries, queries
 CONTRACT = {
     "create_session": [("user_name", None), ("interview_type", None), ("role_title", None)],
     "get_active_session": [],
+    "get_session": [("session_id", None)],          # additive (not in PLAN.md): Brain's /start checks ids
     "end_session": [("session_id", None)],
     "insert_vitals": [("readings", None)],
     "compute_baseline": [("session_id", None)],

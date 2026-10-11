@@ -196,19 +196,42 @@ def test_real_mode_without_keys_falls_back_everywhere(client, monkeypatch):
 
 
 def test_loop_crash_still_ends_session(client, monkeypatch):
+    real_insert = data.insert_question
+    calls = []
+
+    async def boom_after_warmup(*a, **k):   # calibration works, the first real question can't be stored
+        calls.append(a)
+        if len(calls) > 1:
+            raise RuntimeError("database fell over")
+        return await real_insert(*a, **k)
+
+    monkeypatch.setattr(data, "insert_question", boom_after_warmup)
+    sid = create(client)
+    log = []
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        client.post(f"/api/sessions/{sid}/start")
+        answer(ws, recv_until(ws, "question", log))          # calibration
+        recv_until(ws, "session_ended", log)
+
+    assert client.get(f"/api/sessions/{sid}/report").json()["generated_by"] == "fallback"
+
+
+def test_failed_stats_read_does_not_end_the_interview(client, monkeypatch):
     async def boom(*_a, **_k):
-        raise RuntimeError("database fell over")
+        raise RuntimeError("database blip")
 
     monkeypatch.setattr(data, "get_question_stats", boom)
     sid = create(client)
     log = []
     with client.websocket_connect(f"/ws/{sid}") as ws:
         client.post(f"/api/sessions/{sid}/start")
-        answer(ws, recv_until(ws, "question", log))
-        answer(ws, recv_until(ws, "question", log))
+        answer(ws, recv_until(ws, "question", log))          # calibration
+        q1 = recv_until(ws, "question", log)
+        answer(ws, q1)
+        q2 = recv_until(ws, "question", log)                 # the loop kept going without body data
+        assert q2["data"]["question_id"] != q1["data"]["question_id"]
+        ws.send_json({"type": "end_session", "data": {}})
         recv_until(ws, "session_ended", log)
-
-    assert client.get(f"/api/sessions/{sid}/report").json()["generated_by"] == "fallback"
 
 
 def test_late_connect_replays_state_and_question(client):

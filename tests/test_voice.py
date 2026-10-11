@@ -52,6 +52,26 @@ def test_cache_key_depends_on_voice(monkeypatch):
     assert voice.key_for("Hi") != k1
 
 
+def test_cache_key_depends_on_model(monkeypatch):
+    monkeypatch.setattr(config, "BRAIN_FAKE", False)
+    monkeypatch.setattr(config, "ELEVENLABS_MODEL", "m1")
+    k1 = voice.key_for("Hi")
+    monkeypatch.setattr(config, "ELEVENLABS_MODEL", "m2")
+    assert voice.key_for("Hi") != k1
+
+
+def test_prune_cache_removes_only_old_generated_clips(tmp_path):
+    import os
+    import time
+    old, fresh = config.AUDIO_DIR / "old.mp3", config.AUDIO_DIR / "fresh.mp3"
+    old.write_bytes(b"x")
+    fresh.write_bytes(b"x")
+    ancient = time.time() - 30 * 86400
+    os.utime(old, (ancient, ancient))
+    assert voice.prune_cache(14) == 1
+    assert not old.exists() and fresh.exists()
+
+
 def test_clip_seconds_from_file_size(monkeypatch, tmp_path):
     monkeypatch.undo()   # conftest stubs clip_seconds out; test the real one
     monkeypatch.setattr(config, "AUDIO_DIR", tmp_path)

@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -26,8 +27,31 @@ _warned_unconfigured = False
 
 
 def key_for(text: str) -> str:
-    voice = "fake" if config.BRAIN_FAKE else config.ELEVENLABS_VOICE_ID
-    return hashlib.sha1(f"{voice}:{text}".encode()).hexdigest()[:16]
+    """Cache file name for a line: sha1 of voice + model + text, so changing ELEVENLABS_VOICE_ID or
+    ELEVENLABS_MODEL renders fresh clips instead of replaying old ones. Fake mode keys on "fake" + text
+    only, which is how the committed clips in static/fake_audio/ are named."""
+    if config.BRAIN_FAKE:
+        return hashlib.sha1(f"fake:{text}".encode()).hexdigest()[:16]
+    return hashlib.sha1(f"{config.ELEVENLABS_VOICE_ID}:{config.ELEVENLABS_MODEL}:{text}".encode()).hexdigest()[:16]
+
+
+CACHE_MAX_AGE_DAYS = 14   # generated clips unused this long are deleted at startup (static/audio/ only)
+
+
+def prune_cache(max_age_days: float = CACHE_MAX_AGE_DAYS) -> int:
+    """Delete generated clips not touched for `max_age_days`. Every question Gemini writes is a new clip,
+    so without this backend/static/audio/ only grows. Never touches the committed fake-mode clips.
+    Returns how many files were removed."""
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    for path in config.AUDIO_DIR.glob("*.mp3"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 BYTES_PER_SECOND = 128_000 / 8   # OUTPUT_FORMAT is constant-bitrate 128 kbps
@@ -78,6 +102,9 @@ def synthesize_to_file(text: str, path: Path) -> None:
 
 
 async def tts(text: str) -> Optional[str]:
+    """URL of an mp3 for `text`, or None. Checked in order: fake-mode clip, disk cache, then ElevenLabs
+    (shared with any in-flight request for the same text, capped at TTS_TIMEOUT_S). On timeout the
+    request keeps running in its thread, so a later call may find the file cached."""
     global _warned_unconfigured
     text = " ".join((text or "").split())
     if not text:
@@ -92,6 +119,10 @@ async def tts(text: str) -> Optional[str]:
 
     path = config.AUDIO_DIR / f"{key}.mp3"
     if path.exists():
+        try:
+            path.touch()   # mark it as used, so prune_cache keeps clips that still get played
+        except OSError:
+            pass
         return audio_url(path.name)
     if not configured():
         if not _warned_unconfigured:
@@ -121,7 +152,11 @@ def startup_lines() -> list[str]:
 
 
 async def warm_up() -> None:
-    """Pre-generate the fixed lines (calibration, closing) so they play instantly."""
+    """Pre-generate the fixed lines (calibration, closing) so they play instantly. Old generated clips
+    are pruned first (prune_cache)."""
+    removed = prune_cache()
+    if removed:
+        log.info("voice cache: removed %d clip(s) unused for %d+ days", removed, CACHE_MAX_AGE_DAYS)
     texts = startup_lines()
     results = await asyncio.gather(*(tts(t) for t in texts))
     ready = sum(1 for r in results if r)

@@ -29,9 +29,11 @@ def now_iso() -> str:
 
 
 def level_for(stress: Optional[float]) -> Optional[str]:
+    """'high' (> 70), 'rising' (40 to 70), or None for calm (< 40) / no reading. 40 itself is rising:
+    the same boundaries as metrics.stress_level and the frontend's stressLevel()."""
     if stress is None:
         return None
-    return "high" if stress > HIGH else "rising" if stress > RISING else None
+    return "high" if stress > HIGH else "rising" if stress >= RISING else None
 
 
 def flag_message(w: WindowStats, level: str, baseline_focus: float = 0.75) -> str:
@@ -73,6 +75,8 @@ async def check_once(s: SessionState, last_flag_at: float) -> float:
 
 
 async def watch_stress(s: SessionState) -> None:
+    """Runs until interviewer._run cancels it. Only checks while the user is answering ("listening"),
+    so flags never pop up while the interviewer is talking or thinking."""
     last_flag_at = float("-inf")
     while True:
         await asyncio.sleep(INTERVAL_S)

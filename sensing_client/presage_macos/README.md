@@ -24,7 +24,7 @@ Status: validation …              ← Presage's own status, for debugging; the
 
 ## Every time
 ```bash
-.venv/bin/python scripts/run_demo.py --presage --no-preview
+.venv/bin/python scripts/run_demo.py --legacy-presage --no-preview
 ```
 Press **Start** in the SmartSpectra window (the key is pre-filled from `.env`; allow camera access the
 first time). Sit centered, facing a light. The launcher prints `Presage vitals: LIVE (heart rate coming
@@ -36,3 +36,7 @@ through)` once readings flow. `--no-preview` leaves the webcam to SmartSpectra.
 - Presage marks heart rate accurate (±3 bpm) from confidence 40, so Data's cutoff defaults to 0.4
   (`DATA_MIN_CONFIDENCE`).
 - `start_presage.sh` alone launches just the app.
+- `--presage` (without `legacy-`) is an old flag that now does nothing but print a note: the hidden
+  sensor is the default. Only `--legacy-presage` starts this app and `sensing_client/client.py`.
+- `client.py` posts to `/api/vitals` on this machine, which is the only place the backend accepts
+  readings from (set `ALLOW_REMOTE_SENSOR=1` otherwise).

@@ -1,4 +1,11 @@
-"""Prompt text and context builders for the three Gemini calls. Keep contexts compact (< ~1,500 tokens)."""
+"""Prompt text and context builders for the Gemini calls (plan_interview, small_talk, open_interview,
+decide_next, final_report). Keep contexts compact (< ~1,500 tokens).
+
+The answer transcript and the role/topic typed on the setup page are user text pasted into these prompts.
+They are length-capped (interviewer.MAX_TRANSCRIPT_CHARS, TRANSCRIPT_LIMIT, routes.MAX_FIELD_CHARS), and
+whatever Gemini decides is still bounded by interviewer.resolve_action(), so a prompt-injected answer can
+change wording but not break the session.
+"""
 
 from typing import Optional
 
@@ -6,6 +13,7 @@ from backend.brain.history import HistoryItem, num, pct, stats_line
 from backend.brain.models import PlannedQuestion
 from backend.brain.specs import InterviewSpec
 from backend.brain.state import SessionState
+from backend.brain.turns import MAX_FOLLOWUPS, MAX_REDIRECTS
 from backend.contracts import Baseline, QuestionStats, WindowStats
 
 TRANSCRIPT_LIMIT = 600
@@ -65,7 +73,7 @@ Use them to adapt like a perceptive human interviewer would.
 Choose exactly one action, checking in this order:
 - redirect: the answer is empty or garbled, so you can't tell what they meant (answers come from speech-to-text,
   so this is usually a recognition error, not their fault). Say you didn't catch it and ask them to say it again,
-  briefly. Allowed once per planned question. If REDIRECTS USED is 1/1: choose next if the answer is empty again
+  briefly. Allowed once per planned question. If REDIRECTS USED is {MAX_REDIRECTS}/{MAX_REDIRECTS}: choose next if the answer is empty again
   (likely a microphone problem; don't coach silence), or coach if it's garbled nonsense.
 - coach: the answer is wrong, off-topic, rude or inappropriate, dismissive, not a serious attempt, or very weak
   (answer_quality 1 or 2). An answer about something other than what was asked is off-topic even if it's
@@ -90,7 +98,7 @@ Choose exactly one action, checking in this order:
   Ask for one specific example.
 - next: otherwise (a solid answer). Move on to the NEXT PLANNED QUESTION.
 - wrap_up: only when there is no next planned question and no follow-up is warranted.
-ease_off, push, and follow_up share one allowance per planned question: if FOLLOW-UPS USED is 1/1, choose next,
+ease_off, push, and follow_up share one allowance per planned question: if FOLLOW-UPS USED is {MAX_FOLLOWUPS}/{MAX_FOLLOWUPS}, choose next,
 coach, or wrap_up instead.
 
 spoken_text is your whole next turn, said out loud as one natural reply:
@@ -171,6 +179,8 @@ def _planned_line(q: Optional[PlannedQuestion]) -> str:
 
 def decide_context(s: SessionState, kind: str, question: str, transcript: str,
                    stats: Optional[QuestionStats], window: Optional[WindowStats]) -> str:
+    """The decide_next prompt: budget, baseline, the last two exchanges, the question and answer being
+    judged, body data during the answer and right now, the next planned question, and the allowances left."""
     d = s.current_planned.difficulty if s.current_planned else "?"
     if window is not None and window.n_samples:
         now = (f"stress {num(window.stress)}, HR {pct(window.hr_delta_pct)} vs baseline, "
@@ -190,15 +200,16 @@ def decide_context(s: SessionState, kind: str, question: str, transcript: str,
         f"RIGHT NOW (last {window.seconds if window else 0}s): {now}",
         f"NEXT PLANNED QUESTION: {_planned_line(s.queue[0] if s.queue else None)}",
         f"REMAINING PLANNED QUESTIONS (including the next one): {len(s.queue)}",
-        f"FOLLOW-UPS USED ON THIS QUESTION: {s.followups_on_current}/1",
+        f"FOLLOW-UPS USED ON THIS QUESTION: {s.followups_on_current}/{MAX_FOLLOWUPS}",
         f"TURNS LEFT: {max(0, s.spec.max_turns - s.turns)} (a follow-up or redirect is only possible when this is more "
         f"than the remaining planned questions; otherwise choose next, coach, or wrap_up)",
-        f"REDIRECTS USED ON THIS QUESTION: {s.redirects_on_current}/1",
+        f"REDIRECTS USED ON THIS QUESTION: {s.redirects_on_current}/{MAX_REDIRECTS}",
         f"PREVIOUS DECISIONS: {', '.join(s.actions[-3:]) or 'none'}",
     ])
 
 
 def small_talk_context(s: SessionState) -> str:
+    """The second small-talk turn's prompt: what they're interviewing for, plus the small talk so far."""
     subject = "PRESENTATION TOPIC" if s.spec.key == "presentation" else "INTERVIEWING FOR"
     return "\n".join([
         f"{subject}: {s.meta.role}   TYPE: {s.spec.label}",
@@ -208,6 +219,7 @@ def small_talk_context(s: SessionState) -> str:
 
 
 def open_context(s: SessionState, first: PlannedQuestion) -> str:
+    """The bridge turn's prompt: the small talk so far plus the first planned question to lead into."""
     subject = "PRESENTATION TOPIC" if s.spec.key == "presentation" else "ROLE"
     return "\n".join([
         f"{subject}: {s.meta.role}   TYPE: {s.spec.label}",
@@ -244,6 +256,8 @@ Rules:
 
 
 def report_context(s: SessionState, items: list[HistoryItem]) -> str:
+    """The final_report prompt: every non-calibration question (label, id, answer, body stats, the
+    interviewer's reaction), then the coach flags that fired live."""
     adaptations = {a["question_id"]: a for a in s.adaptations}
     lines = [
         f"CANDIDATE: {s.meta.user_name or 'the candidate'}   ROLE: {s.meta.role}   TYPE: {s.spec.label}",

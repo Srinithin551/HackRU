@@ -54,7 +54,11 @@ export function CoachToast({ flag }: { flag: CoachFlagEvent }) {
 }
 
 /** Warm-up banner with a ring that fills over Brain's minimum calibration time. */
-export function CalibrationBanner({ startedAt, now }: { startedAt: number | null; now: number }) {
+/**
+ * `quiet`: the small talk is over but Brain is holding calibration a few more seconds so the baseline has
+ * enough readings (interviewer.CALIBRATION_MIN_S). Then the copy asks the user to sit still, not to chat.
+ */
+export function CalibrationBanner({ startedAt, now, quiet = false }: { startedAt: number | null; now: number; quiet?: boolean }) {
   const elapsed = startedAt === null ? 0 : now - startedAt
   const progress = Math.min(1, elapsed / CALIBRATION_MS)
   const r = 15
@@ -76,7 +80,9 @@ export function CalibrationBanner({ startedAt, now }: { startedAt: number | null
         />
       </svg>
       <div>
-        <p className="text-body font-medium">Getting your baseline. Just chat normally.</p>
+        <p className="text-body font-medium">
+          {quiet ? 'Almost there. Sit comfortably and relax for a few seconds.' : 'Getting your baseline. Just chat normally.'}
+        </p>
         <p className="text-caption text-ink-muted">
           {progress < 1 ? `About ${Math.ceil((CALIBRATION_MS - elapsed) / 1000)} s of warm-up left` : 'Almost ready'}
         </p>

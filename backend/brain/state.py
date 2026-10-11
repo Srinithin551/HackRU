@@ -29,6 +29,8 @@ class SessionMeta:
 
 @dataclass
 class SessionState:
+    """Everything the running loop knows about one session. Mutated only by the loop's own task (and
+    end_requested by routes._on_client_event), so no locking is needed."""
     session_id: str
     meta: SessionMeta
 
@@ -57,6 +59,7 @@ class SessionState:
 
     end_requested: bool = False
     started: float = field(default_factory=time.monotonic)
+    finished_at: Optional[float] = None   # time.monotonic() when session_ended was sent
 
     @property
     def spec(self) -> InterviewSpec:
@@ -66,7 +69,27 @@ class SessionState:
         return time.monotonic() - self.started
 
 
-# session_id -> data
+# session_id -> data. In process memory only: a backend restart forgets the running loops (Data's
+# tables keep the questions, vitals and saved reports, and routes.start_session can rebuild a meta from
+# them). Finished sessions are dropped by prune_finished(), FINISHED_TTL_S after they end.
 metas: dict[str, SessionMeta] = {}
 states: dict[str, SessionState] = {}
 tasks: dict[str, asyncio.Task] = {}
+
+# Long enough to reopen or reload a report (served from memory if the DB save failed), short enough
+# that a backend left running all weekend doesn't keep every session's transcript in RAM.
+FINISHED_TTL_S = 3600.0
+
+
+def prune_finished(now: Optional[float] = None) -> list[str]:
+    """Forget sessions whose loop finished more than FINISHED_TTL_S ago. Returns the pruned ids, so
+    the caller can also clear the WebSocket hub's per-session state."""
+    now = time.monotonic() if now is None else now
+    gone = [sid for sid, s in states.items()
+            if s.finished_at is not None and now - s.finished_at > FINISHED_TTL_S
+            and (sid not in tasks or tasks[sid].done())]
+    for sid in gone:
+        states.pop(sid, None)
+        metas.pop(sid, None)
+        tasks.pop(sid, None)
+    return gone

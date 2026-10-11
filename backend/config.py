@@ -14,6 +14,7 @@ load_dotenv(BACKEND_DIR / ".env")
 
 
 def _bool(name: str, default: bool = False) -> bool:
+    """Unset means `default`. Otherwise 1 / true / yes / on (any case) is True and anything else False."""
     return os.getenv(name, str(int(default))).strip().lower() in ("1", "true", "yes", "on")
 
 
@@ -40,6 +41,14 @@ CORS_ORIGINS = [
     for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
     if o.strip()
 ]
+# Any port on this machine is also allowed (Vite picks another port if 5173 is taken). Used by CORS in
+# main.py and by the WebSocket origin check in ws.py.
+LOCAL_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+
+# The sensor endpoints (/api/vitals, /api/sensor/status, /api/sessions/active) only accept requests from
+# this machine, because the sensor runs next to the backend and those endpoints have no auth. Set
+# ALLOW_REMOTE_SENSOR=1 if the sensor really runs on another machine.
+ALLOW_REMOTE_SENSOR = _bool("ALLOW_REMOTE_SENSOR")
 
 STATIC_DIR = BACKEND_DIR / "static"
 AUDIO_DIR = STATIC_DIR / "audio"            # generated mp3s, served at /audio

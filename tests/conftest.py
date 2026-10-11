@@ -1,3 +1,7 @@
+"""Brain test setup: forces BRAIN_FAKE, strips real API keys, sends audio and logs to a temp dir, and
+shrinks every timer so a full interview runs in well under a second. Data runs in memory because
+db.use_fake() is on under pytest."""
+
 import faulthandler
 import os
 import sys
@@ -27,6 +31,7 @@ def fast_timings(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "AUDIO_DIR", tmp_path / "audio")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path)
     monkeypatch.setattr(interviewer, "CALIBRATION_MIN_S", 0.0)
+    monkeypatch.setattr(interviewer, "CALIBRATION_MAX_WAIT_S", 0.0)   # tests that raise MIN_S don't wait it out
     monkeypatch.setattr(interviewer, "CLOSING_PAUSE_S", 0.0)
     monkeypatch.setattr(interviewer, "CLOSING_SLACK_S", 0.0)
     monkeypatch.setattr(voice, "clip_seconds", lambda url: 0.0)   # don't sit through real closing clips

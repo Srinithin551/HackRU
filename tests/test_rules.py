@@ -115,7 +115,8 @@ def test_fake_texts_cover_everything_spoken():
 
 def test_levels_match_plan_thresholds():
     assert level_for(None) is None
-    assert level_for(40) is None
+    assert level_for(39.9) is None
+    assert level_for(40) == "rising"      # PLAN.md: 40 to 70 is rising, same as metrics.stress_level
     assert level_for(40.1) == "rising"
     assert level_for(70) == "rising"
     assert level_for(70.1) == "high"

@@ -77,8 +77,10 @@ function buildView(report: Report, replay: ReplayResponse, storedFlags: CoachFla
       (best, p) => (Math.abs(p.t - t) < best.d && num(p.stress) ? { d: Math.abs(p.t - t), s: p.stress } : best),
       { d: Infinity, s: null },
     ).s
+  // First source that actually has flags. Brain always sends coach_flags (often []), so `??` alone
+  // would never reach the copies saved in this tab during the live session.
   const rawFlags: { ts: string; level: 'rising' | 'high'; stress?: number }[] =
-    report.coach_flags ?? replay.coach_flags ?? storedFlags
+    [report.coach_flags, replay.coach_flags, storedFlags].find((list) => list && list.length > 0) ?? []
   const flags: FlagView[] = rawFlags
     .map((f) => {
       const t = time(f.ts)
@@ -89,17 +91,35 @@ function buildView(report: Report, replay: ReplayResponse, storedFlags: CoachFla
   return { points, start, end, baselineHr: replay.session.baseline?.heart_rate ?? null, questions, weakestId: weakest?.id ?? null, flags }
 }
 
+/** Stand-in when /replay fails: the report (score, tips, feedback) still shows, the chart is empty. */
+function emptyReplay(sessionId: string): ReplayResponse {
+  return {
+    session: { id: sessionId, user_name: null, started_at: new Date().toISOString(), ended_at: null, baseline: null },
+    series: [],
+    questions: [],
+  }
+}
+
 function SessionReport({ sessionId }: { sessionId: string }) {
   const { search } = useLocation()
-  const [data, setData] = useState<{ report: Report; replay: ReplayResponse } | null>(null)
+  const [data, setData] = useState<{ report: Report; replay: ReplayResponse; replayMissing: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   useEffect(() => {
     const ctrl = new AbortController()
-    Promise.all([waitForReport(sessionId, { signal: ctrl.signal }), getReplay(sessionId)]).then(
-      ([report, replay]) => setData({ report, replay }),
+    // Only a missing report is fatal. If /replay fails (e.g. Tiger Data is unreachable), show the
+    // report without the chart rather than an error screen.
+    const replay = getReplay(sessionId).then(
+      (r) => ({ ok: true as const, r }),
+      (err: unknown) => ({ ok: false as const, err }),
+    )
+    Promise.all([waitForReport(sessionId, { signal: ctrl.signal }), replay]).then(
+      ([report, res]) => {
+        if (!res.ok) console.warn('[report] GET /replay failed; showing the report without the chart', res.err)
+        setData({ report, replay: res.ok ? res.r : emptyReplay(sessionId), replayMissing: !res.ok })
+      },
       (err: unknown) => {
         if (!ctrl.signal.aborted) setError(err instanceof Error ? err.message : String(err))
       },
@@ -197,7 +217,16 @@ function SessionReport({ sessionId }: { sessionId: string }) {
               <p className="label-caps">Replay · click a question band</p>
               <Legend />
             </div>
-            <Timeline view={view} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
+            {data.replayMissing ? (
+              <div className="mt-3 flex flex-1 flex-col items-center justify-center gap-3 text-center">
+                <p className="text-body text-ink-secondary">The replay chart couldn&apos;t load. Your feedback is still here.</p>
+                <Button variant="secondary" onClick={() => setAttempt((n) => n + 1)}>
+                  Load the chart again
+                </Button>
+              </div>
+            ) : (
+              <Timeline view={view} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
+            )}
           </section>
 
           <div className="grid min-h-0 flex-[4] gap-gutter md:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">

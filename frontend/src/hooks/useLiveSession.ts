@@ -16,7 +16,7 @@
  * question we already have is ignored instead of replaying its audio mid-answer.
  */
 import { useCallback, useEffect, useReducer, useRef } from 'react'
-import { startSession } from '../api.ts'
+import { ApiError, startSession } from '../api.ts'
 import { TOAST_MS, VITALS_WINDOW } from '../lib/constants.ts'
 import { saveFlag } from '../lib/flagStore.ts'
 import { playClip } from '../lib/playClip.ts'
@@ -54,6 +54,8 @@ export interface LiveState {
   flags: CoachFlagEvent[]
   toast: CoachFlagEvent | null
   ended: boolean
+  /** POST /start failed (e.g. 404: the session doesn't exist). The page shows it instead of waiting forever. */
+  startError: string | null
 }
 
 const initialState: LiveState = {
@@ -72,6 +74,7 @@ const initialState: LiveState = {
   flags: [],
   toast: null,
   ended: false,
+  startError: null,
 }
 
 type Action =
@@ -80,6 +83,7 @@ type Action =
   | { type: 'speaking'; value: boolean }
   | { type: 'answering'; value: boolean }
   | { type: 'toast-clear'; flag: CoachFlagEvent }
+  | { type: 'start-error'; message: string }
 
 function reducer(state: LiveState, action: Action): LiveState {
   switch (action.type) {
@@ -91,6 +95,8 @@ function reducer(state: LiveState, action: Action): LiveState {
       return { ...state, answering: action.value }
     case 'toast-clear':
       return state.toast === action.flag ? { ...state, toast: null } : state
+    case 'start-error':
+      return { ...state, startError: action.message }
     case 'event':
       return applyEvent(state, action.event, action.at)
   }
@@ -198,7 +204,14 @@ export function useLiveSession(sessionId: string, callbacks: Callbacks = {}) {
       }
     })
 
-    startSession(sessionId).catch((err: unknown) => console.error('[live] POST /start failed', err))
+    startSession(sessionId).catch((err: unknown) => {
+      console.error('[live] POST /start failed', err)
+      const message =
+        err instanceof ApiError && err.status === 404
+          ? "This interview doesn't exist on the backend (it may have restarted without a database). Start a new one."
+          : `Couldn't start the interview: ${err instanceof Error ? err.message : String(err)}`
+      dispatch({ type: 'start-error', message })
+    })
 
     return () => {
       off()

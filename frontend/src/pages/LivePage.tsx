@@ -14,7 +14,7 @@
  * navigates to the report, which is already saved by then.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Navigate, useLocation, useNavigate, useParams } from 'react-router'
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { CoachingChip, CoachingPopup } from '../components/CoachingPopup.tsx'
 import { CalibrationBanner, CoachToast, SensorHint, SimulatedChip, ThinkingDots, Waveform } from '../components/LiveOverlays.tsx'
 import { HrSparkline, StressSparkline } from '../components/Sparklines.tsx'
@@ -127,13 +127,20 @@ function LiveSession({ sessionId }: { sessionId: string }) {
 
           <div className="absolute inset-x-gutter top-gutter flex flex-wrap items-center justify-between gap-2">
             <span className="rounded-full border border-hairline bg-page/60 px-3 py-1 font-mono text-micro uppercase tracking-[0.08em] text-ink-secondary backdrop-blur">
-              Preview only · nothing is recorded
+              Preview only · video isn&apos;t recorded
             </span>
             {presage?.simulated && <SimulatedChip />}
           </div>
 
           <div className="absolute inset-x-0 top-14 flex flex-col items-center gap-3 px-gutter">
-            {calibrating && <CalibrationBanner startedAt={live.calibrationStartedAt} now={now} />}
+            {calibrating && (
+              <CalibrationBanner
+                startedAt={live.calibrationStartedAt}
+                now={now}
+                // Small talk done but the baseline needs a few more seconds: Brain waits quietly.
+                quiet={live.question !== null && !live.speaking && !live.answering}
+              />
+            )}
             {presage && <SensorHint sensor={presage} />}
             {live.toast && <CoachToast key={live.toast.ts + live.toast.message} flag={live.toast} />}
           </div>
@@ -155,6 +162,17 @@ function LiveSession({ sessionId }: { sessionId: string }) {
       </main>
 
       {leaving && <AnalyzingScreen />}
+      {live.startError && (
+        <div className="bg-monitor fixed inset-0 z-50 grid place-items-center p-gutter text-center">
+          <div className="panel max-w-md p-panel">
+            <p className="text-title font-semibold">This interview can&apos;t start</p>
+            <p className="mt-2 text-body text-ink-secondary">{live.startError}</p>
+            <Link to={{ pathname: '/', search }} className="mt-5 inline-block">
+              <Button>New session</Button>
+            </Link>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -118,7 +118,25 @@ async def get_active_session() -> str | None:
 
 
 @_contract
+async def get_session(session_id: str) -> dict | None:
+    """{id, user_name, interview_type, role_title, ended} for an existing session, else None.
+    Not in PLAN.md's original list (additive): Brain's /start uses it to refuse ids that were never
+    created, and to rebuild a session's setup choices after a backend restart."""
+    sid = _uuid(session_id)
+    if sid is None:
+        return None
+    pool = await db.get_pool()
+    row = await pool.fetchrow(
+        "SELECT id, user_name, interview_type, role_title, ended_at FROM sessions WHERE id = $1", sid)
+    if row is None:
+        return None
+    return {"id": str(row["id"]), "user_name": row["user_name"] or "", "interview_type": row["interview_type"] or "",
+            "role_title": row["role_title"] or "", "ended": row["ended_at"] is not None}
+
+
+@_contract
 async def end_session(session_id: str) -> None:
+    """Stamp ended_at (only the first time) and refresh vitals_5s for the session's time range."""
     global _active
     sid = _uuid(session_id)
     if sid is None:
@@ -180,11 +198,21 @@ async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
     Readings without a session_id go to the active session; with no active session they're dropped.
     Readings with confidence < MIN_CONFIDENCE (e.g. face lost) are never stored, but are still
     returned (stress None) so the live chart can show "no face" instead of freezing.
+
+    An explicit session_id must be a session this backend created (_mine), the same rule as
+    get_active_session. A malformed or foreign id is dropped instead of being stored under it (vitals has
+    no foreign key) or filed under the active session (a typo must never land in someone else's data).
+    fake_queries.insert_vitals follows the same rule.
     """
     active, rows, records = None, [], []
+    dropped_foreign = 0
     for r in readings:
-        sid = _uuid(r.session_id) if r.session_id else None
-        if sid is None:
+        if r.session_id:
+            sid = _uuid(r.session_id)
+            if sid is None or str(sid) not in _mine:
+                dropped_foreign += 1
+                continue
+        else:
             active = active or await get_active_session()
             sid = _uuid(active) if active else None
         if sid is None:
@@ -197,8 +225,11 @@ async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
         if r.confidence >= MIN_CONFIDENCE:
             records.append((row["time"], sid, r.heart_rate, r.breathing_rate, r.focus, r.expression,
                             r.confidence, stress))
-    if len(rows) < len(readings):
-        log.debug("insert_vitals: dropped %d reading(s) with no active session", len(readings) - len(rows))
+    if dropped_foreign:
+        log.warning("insert_vitals: dropped %d reading(s) for a session this backend didn't create", dropped_foreign)
+    if len(rows) + dropped_foreign < len(readings):
+        log.debug("insert_vitals: dropped %d reading(s) with no active session",
+                  len(readings) - len(rows) - dropped_foreign)
     count_ingested([row["confidence"] for row in rows])
     if records:
         pool = await db.get_pool()
@@ -225,8 +256,9 @@ WHERE v.session_id = $1 AND v.time = u.time AND v.stress IS NULL
 
 @_contract
 async def compute_baseline(session_id: str) -> Baseline:
-    """Calm baseline from calibration: readings with confidence >= 0.7 from session start (after
-    the first WARMUP_S seconds of readings) until now. Fewer than 10 samples -> population defaults.
+    """Calm baseline from calibration: readings with confidence >= MIN_CONFIDENCE (0.4 unless
+    DATA_MIN_CONFIDENCE says otherwise) from session start (after the first WARMUP_S seconds of
+    readings) until now. Fewer than MIN_BASELINE_SAMPLES (10) -> population defaults.
     Stored on sessions, cached, and stress is backfilled for the rows that came in before it."""
     sid = _uuid(session_id)
     pool = await db.get_pool()
@@ -278,7 +310,9 @@ WINDOW_SQL = f"""
 SELECT count(*) AS n, avg(heart_rate) AS hr, avg(breathing_rate) AS br, avg(focus) AS focus,
        avg(stress) AS stress, mode() WITHIN GROUP (ORDER BY expression) AS expression
 FROM vitals
-WHERE session_id = $1 AND time > now() - make_interval(secs => $2) AND confidence >= {MIN_CONFIDENCE}::real
+WHERE session_id = $1 AND time > now() - make_interval(secs => $2)
+  AND time <= now() + interval '5 seconds'   -- a future-stamped reading must not sit in every window
+  AND confidence >= {MIN_CONFIDENCE}::real
 """
 
 

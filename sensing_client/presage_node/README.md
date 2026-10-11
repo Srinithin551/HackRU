@@ -43,6 +43,14 @@ before, turn it on in System Settings → Privacy & Security → Camera.
   is out of credits or rejected is swapped for the next one in `PRESAGE_BACKUP_API_KEYS`.
   The process never exits on its own, so the launcher keeps running.
 
+## What the backend checks
+`backend/sensing/routes.py` receives the readings. It accepts them only from this machine (the endpoints
+have no login; set `ALLOW_REMOTE_SENSOR=1` in `.env` if the sensor must run elsewhere) and at most 120 per
+POST (the sensor buffers 30 while the backend is down). It drops a reading stamped more than 5 s in the
+future, since that would sit in every live window and drive coach flags. If the log says so, check the
+laptop's clock. NaN or impossible heart / breathing rates become null, and confidence is clamped to 0-1.
+A reading for a session the backend didn't create is dropped.
+
 ## Settings
 | Setting | Where | Meaning |
 |---|---|---|
