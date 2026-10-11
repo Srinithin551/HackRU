@@ -288,11 +288,11 @@ def body(d: dict) -> str:
     ]
     tiles_html = "".join(f'<div class="tile"><div class="label">{a}</div><div class="value">{b}</div><div class="note">{c}</div></div>'
                          for a, b, c in tiles)
-    return f"""<title>StressTest Vitals Dashboard</title>
+    return f"""<title>Greek God Teacher Program Vitals Dashboard</title>
 <style>{CSS}</style>
 <div class="wrap">
 <header>
-  <h1>StressTest vitals on Tiger Data</h1>
+  <h1>Greek God Teacher Program vitals on Tiger Data</h1>
   <p>Webcam vitals stored once a second in a TimescaleDB hypertable, scored against each person's calm baseline,
   joined to interview questions by time range, and rolled into 5-second buckets for the replay. All numbers below are
   measured on our Tiger Data service. The sessions are mock sessions run through the real interview loop.</p>

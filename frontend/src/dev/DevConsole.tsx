@@ -193,7 +193,7 @@ export function DevConsole() {
 
   return (
     <main className="dev">
-      <h1>StressTest · Dev Console</h1>
+      <h1>Greek God Teacher Program · Dev Console</h1>
       <p className="muted">
         Temporary page for testing the wiring. Mode: <b>{IS_MOCK ? 'MOCK (no backend)' : 'REAL backend'}</b> · API
         base: <code>{API_BASE || '(same origin → Vite proxy)'}</code> · WebSocket: <code>{wsUrl('SESSION_ID').replace('SESSION_ID', '{session_id}')}</code>

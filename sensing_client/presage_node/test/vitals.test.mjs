@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import messages from '@smartspectra/node-sdk/messages'
-import { BREATH_HOLD_S, PULSE_HOLD_S, VitalsState, toNumber } from '../vitals.mjs'
+import { BREATH_HOLD_S, PULSE_COAST_S, PULSE_HOLD_S, VitalsState, toNumber } from '../vitals.mjs'
 
 const { Metrics } = messages.presage.smartspectra
 const S = 1000
@@ -46,9 +46,43 @@ test('the last pulse is held at its own confidence (P2), then drops to no-pulse'
     assert.equal(r.heart_rate, 80, `at ${t}s`)
     assert.equal(r.confidence, 0.6, `at ${t}s: no decay`)
   }
-  const gone = v.reading((PULSE_HOLD_S + 1) * S, 'sid')
+  // Past the hold window it coasts rather than going void (see PULSE_COAST_S), and only reads
+  // as "nothing" once the coast is spent.
+  const gone = v.reading((PULSE_HOLD_S + PULSE_COAST_S + 1) * S, 'sid')
   assert.equal(gone.heart_rate, null)
   assert.equal(gone.confidence, 0)
+})
+
+test('a brief dropout coasts on the last pulse instead of reporting nothing', () => {
+  const v = running()
+  v.ingestMetrics(wire(pulse(80, 80)), 0)
+  // Two seconds past the hold window: still reporting, at reduced confidence, and still above the
+  // backend's 0.4 cutoff, so the live chart keeps moving through the blip.
+  const blip = v.reading((PULSE_HOLD_S + 2) * S, 'sid')
+  assert.equal(blip.heart_rate, 80)
+  assert.ok(blip.confidence > 0.4, `confidence ${blip.confidence} should survive a short blip`)
+  assert.ok(blip.confidence < 0.8, 'confidence decays while coasting')
+  assert.equal(v.coasting((PULSE_HOLD_S + 2) * S), true)
+})
+
+test('confidence decays to nothing across the coast, so a real dropout still reads as no signal', () => {
+  const v = running()
+  v.ingestMetrics(wire(pulse(80, 80)), 0)
+  const early = v.reading((PULSE_HOLD_S + 1) * S, 'sid').confidence
+  const late = v.reading((PULSE_HOLD_S + PULSE_COAST_S - 1) * S, 'sid').confidence
+  assert.ok(early > late, `confidence should fall while coasting (${early} → ${late})`)
+  assert.ok(late < 0.4, 'a long dropout drops below the backend cutoff rather than faking a signal')
+  assert.equal(v.coasting((PULSE_HOLD_S + PULSE_COAST_S + 1) * S), false)
+})
+
+test('a lost face never coasts: an empty chair reports nothing, not a stale pulse', () => {
+  const v = running()
+  v.ingestMetrics(wire(pulse(80, 80)), 0)
+  v.ingestValidation(1, 'No face', (PULSE_HOLD_S + 1) * S)   // kNoFaceFound
+  const r = v.reading((PULSE_HOLD_S + 2) * S, 'sid')
+  assert.equal(r.heart_rate, null)
+  assert.equal(r.confidence, 0)
+  assert.equal(v.coasting((PULSE_HOLD_S + 2) * S), false)
 })
 
 test('heart rate is a median of the last few seconds, so one bad value does not spike it', () => {

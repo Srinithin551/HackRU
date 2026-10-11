@@ -1,5 +1,5 @@
 /**
- * Turns Presage SmartSpectra metrics into StressTest VitalsReadings (backend/contracts.py), one per second,
+ * Turns Presage SmartSpectra metrics into VitalsReadings (backend/contracts.py), one per second,
  * plus a one-line status for the live page ("Hold still", "No face found", ...).
  *
  * Pure logic (no SDK, no network), so it's unit-tested (test/vitals.test.mjs) and shared by the simulator.
@@ -17,6 +17,22 @@ export const SMOOTH_S = 5             // rolling median over values this recent
 export const BREATH_MIN_CONFIDENCE = 45   // Presage's "stable" threshold for breathing rate (±1 breath/min)
 export const BREATH_HOLD_S = 15       // breathing rate updates slowly; keep the last stable value this long
 export const PULSE_MIN_CONFIDENCE = 40    // Presage's "stable" threshold for heart rate (±3 bpm)
+
+/**
+ * Coasting window: how long we keep reporting the last pulse after it goes stale.
+ *
+ * Presage goes quiet for a few seconds fairly often (a turn of the head, a hand near the face, a
+ * dark frame). Reporting null the instant PULSE_HOLD_S lapses made the whole chain go void: the
+ * backend drops sub-cutoff readings, so the live chart froze, stress went null and the gods lost
+ * sight of the mortal mid-answer.
+ *
+ * Instead, while the face is STILL IN FRAME, we coast: keep emitting the last known pulse with a
+ * confidence that decays linearly to zero across this window. A blip stays above the backend's
+ * cutoff and the chart keeps moving; a real dropout sinks below it within a few seconds and
+ * honestly reads as "no signal". We never coast when the face is gone — that is a real no-reading,
+ * and inventing a pulse for an empty chair would be a lie.
+ */
+export const PULSE_COAST_S = 12
 
 // Presage's ValidationCode values (@smartspectra/node-sdk ValidationCode), with what to tell the user.
 export const VALIDATION = {
@@ -110,9 +126,16 @@ export class VitalsState {
   }
 
   _prune(nowMs) {
-    const keep = Math.max(PULSE_HOLD_S, BREATH_HOLD_S, SMOOTH_S) * 1000
+    const keep = Math.max(PULSE_HOLD_S + PULSE_COAST_S, BREATH_HOLD_S, SMOOTH_S) * 1000
     while (this.pulse.length && nowMs - this.pulse[0].at > keep) this.pulse.shift()
     while (this.breath.length && nowMs - this.breath[0].at > keep) this.breath.shift()
+  }
+
+  /** True while we're reporting a stale pulse at reduced confidence (see PULSE_COAST_S). */
+  coasting(nowMs) {
+    if (this.faceLost() || !this.pulse.length) return false
+    const age = (nowMs - this.pulse.at(-1).at) / 1000
+    return age > PULSE_HOLD_S && age <= PULSE_HOLD_S + PULSE_COAST_S
   }
 
   /** The VitalsReading for this second. No face or no recent pulse = all nulls, confidence 0. */
@@ -130,7 +153,17 @@ export class VitalsState {
     if (this.faceLost()) return r
 
     const held = this.pulse.filter((p) => nowMs - p.at <= PULSE_HOLD_S * 1000)
-    if (held.length === 0) return r
+    if (held.length === 0) {
+      // Pulse has gone stale. Coast on the last value at a decaying confidence rather than
+      // reporting nothing, so a two-second blip doesn't blank the chart (see PULSE_COAST_S).
+      if (!this.coasting(nowMs)) return r
+      const last = this.pulse.at(-1)
+      const over = (nowMs - last.at) / 1000 - PULSE_HOLD_S
+      const decay = Math.max(0, 1 - over / PULSE_COAST_S)
+      r.heart_rate = round(last.value, 1)
+      r.confidence = round(Math.min(1, Math.max(0, last.confidence * decay)), 2)
+      return r
+    }
     const recent = held.filter((p) => nowMs - p.at <= SMOOTH_S * 1000)
     r.heart_rate = round(median((recent.length ? recent : held.slice(-1)).map((p) => p.value)), 1)
     r.confidence = round(Math.min(1, Math.max(0, held.at(-1).confidence)), 2)
@@ -162,7 +195,11 @@ export class VitalsState {
     }
     this._prune(nowMs)
     const held = this.pulse.filter((p) => nowMs - p.at <= PULSE_HOLD_S * 1000)
-    if (held.length === 0) return { state: 'warming_up', message: 'Reading your pulse… hold still, facing a light.' }
+    if (held.length === 0) {
+      // Coasting on a stale pulse: say so rather than claiming to be measuring or warming up again.
+      if (this.coasting(nowMs)) return { state: 'adjust', message: 'Signal faint. Hold still and face the light.' }
+      return { state: 'warming_up', message: 'Reading your pulse… hold still, facing a light.' }
+    }
     if (held.at(-1).confidence * 100 < PULSE_MIN_CONFIDENCE) {
       return { state: 'adjust', message: 'Weak signal. Face a light and hold still.' }
     }

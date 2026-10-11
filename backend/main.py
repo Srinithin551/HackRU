@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
     db = _optional_module("backend.data.db")
     if db is not None and hasattr(db, "startup"):
         await db.startup()
-    log.info("StressTest backend up. BRAIN_FAKE=%s gemini=%s elevenlabs=%s routers=%s",
+    log.info("Greek God Teacher Program backend up. BRAIN_FAKE=%s gemini=%s elevenlabs=%s routers=%s",
              int(config.BRAIN_FAKE), "on" if config.GEMINI_API_KEY else "off",
              "on" if voice.configured() else "off", mounted)
     warm = asyncio.create_task(voice.warm_up())   # don't block startup on TTS
@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI):
         await db.shutdown()
 
 
-app = FastAPI(title="StressTest", lifespan=lifespan)
+app = FastAPI(title="Greek God Teacher Program", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,

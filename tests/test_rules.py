@@ -10,7 +10,7 @@ from backend.brain.models import QuestionFeedback, ReportDraft
 from backend.brain.report import fallback_report, finalize_draft
 from backend.brain.specs import fallback_questions, get_spec, normalize_type
 from backend.brain.state import SessionMeta, SessionState
-from backend.brain.watcher import flag_message, level_for
+from backend.brain.watcher import VARIANTS, driver_for, flag_for, level_for, pick_variant
 from backend.contracts import Baseline, QuestionStats, WindowStats
 
 
@@ -122,11 +122,35 @@ def test_levels_match_plan_thresholds():
     assert level_for(70.1) == "high"
 
 
-def test_flag_message_names_the_driver():
-    assert "Heart rate up 20%" in flag_message(window(), "rising")
-    assert "Breathing" in flag_message(window(hr_delta_pct=2, br_delta_pct=35), "high")
-    assert "focus" in flag_message(window(hr_delta_pct=0, focus_mean=0.3), "high", baseline_focus=0.8).lower()
-    assert "Stress at 55" in flag_message(window(hr_delta_pct=None, br_delta_pct=None, focus_mean=None), "rising")
+def test_driver_for_names_the_strongest_signal():
+    assert driver_for(window()) == "hr"
+    assert driver_for(window(hr_delta_pct=2, br_delta_pct=35)) == "br"
+    assert driver_for(window(hr_delta_pct=0, focus_mean=0.3), baseline_focus=0.8) == "focus"
+    # Nothing above baseline: no driver, so the generic pool is used.
+    assert driver_for(window(hr_delta_pct=None, br_delta_pct=None, focus_mean=None)) is None
+
+
+def test_flag_cites_the_number_that_triggered_it():
+    message, command = flag_for(window(), "rising", 0.75, set())
+    assert "20%" in message and command
+    message, _ = flag_for(window(hr_delta_pct=2, br_delta_pct=35), "high", 0.75, set())
+    assert "35%" in message
+    message, _ = flag_for(window(hr_delta_pct=None, br_delta_pct=None, focus_mean=None), "rising", 0.75, set())
+    assert "55" in message
+
+
+def test_flags_never_repeat_while_an_unused_phrasing_remains():
+    """The frontend makes the user acknowledge each interrupt, so a repeated one reads as a bug."""
+    used: set[str] = set()
+    w = window()
+    seen = [flag_for(w, "rising", 0.75, used)[0] for _ in range(len(VARIANTS[("hr", "rising")]))]
+    assert len(set(seen)) == len(seen)
+
+
+def test_flag_variants_fall_back_to_the_generic_pool_once_exhausted():
+    used = {m for m, _ in VARIANTS[("hr", "high")]}
+    message, command = pick_variant("hr", "high", used)
+    assert (message, command) in VARIANTS[(None, "high")]
 
 
 # ---------------------------------------------------------------- specs

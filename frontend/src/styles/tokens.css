@@ -1,5 +1,5 @@
 /*
- * StressTest design tokens: the single source of truth for CSS.
+ * Greek God Teacher Program design tokens: the single source of truth for CSS.
  *
  * Tailwind v4 turns every variable in @theme into utilities:
  *   --color-surface-1  → bg-surface-1, text-surface-1, border-surface-1 ...
@@ -11,36 +11,46 @@
  * JS consumers (Recharts, SVG gauges) read the same hex values from tokens.ts;
  * tokens.test.ts fails if the two files drift apart.
  *
- * Palette: "Ward Monitor", validated with the dataviz palette checker. Ink clears
- * 7:1 on every surface (projector washout); the calm/rising/high triad stays
- * distinguishable under protanopia/deuteranopia; the indigo accent can't be
- * mistaken for a stress color.
+ * Palette: "Night Olympus". The hall is black marble, the text is white, and gold is the only
+ * chrome colour — it carries every action, focus ring and divine flourish. White on black clears
+ * 21:1 and gold clears 9:1 (projector washout); the calm/rising/high triad stays distinguishable
+ * under protanopia/deuteranopia by lightness as well as hue.
  */
 @theme {
   --color-*: initial;
 
-  /* Surfaces: elevation by lightness, not by heavy shadows. */
-  --color-page: #0e1217;
-  --color-surface-1: #151a21;
-  --color-surface-2: #1c222b;
-  --color-surface-3: #242b36;
-  --color-hairline: #262e39;
-  --color-border-strong: #3a4554;
+  /* Surfaces: black marble, lifted by lightness rather than by shadow (shadows don't read on black). */
+  --color-page: #000000;
+  --color-surface-1: #0d0d10;
+  --color-surface-2: #16161b;
+  --color-surface-3: #202026;
+  --color-hairline: #2a2a32;
+  --color-border-strong: #44444f;
 
-  /* Ink: text never wears a data color. */
-  --color-ink: #eef2f6;
-  --color-ink-secondary: #aeb8c4;
-  --color-ink-muted: #7e8a97;
-  --color-ink-disabled: #4b5563;
+  /* Ink: white, like lettering cut into dark stone. */
+  --color-ink: #ffffff;
+  --color-ink-secondary: #c9c9d2;
+  --color-ink-muted: #8c8c97;
+  --color-ink-disabled: #55555f;
 
-  /* The one accent: actions, focus, the heart-rate series. */
-  --color-accent: #7c8cff;
-  --color-accent-hover: #96a3ff;
-  --color-accent-pressed: #6475f0;
-  --color-accent-subtle: #1d2242;
-  --color-on-accent: #0b0e1a;
+  /* Gold is the accent: every button, focus ring, active state and the heart-rate line.
+     It replaces the old indigo entirely — there is no second chrome colour. */
+  --color-accent: #d4af37;
+  --color-accent-hover: #e8c662;
+  --color-accent-pressed: #b08f26;
+  --color-accent-subtle: #2a2110;
+  --color-on-accent: #0a0a0a;
 
-  /* Stress status (reserved: never used for anything else, always with icon + label).
+  /* Aliases so the divine flourishes read as gold in the markup, not as "accent". */
+  --color-gold: #d4af37;
+  --color-gold-subtle: #2a2110;
+
+  /* Pale statue stone: the gods themselves and their aura, lit against the black. */
+  --color-pale: #c9ccd4;
+  --color-pale-deep: #8f96a3;
+  --color-pale-subtle: #1a1c22;
+
+  /* Judgement status (reserved: never used for anything else, always with icon + label).
      PLAN.md thresholds: < 40 calm, 40 to 70 rising, > 70 high. */
   --color-calm: #34d399;
   --color-rising: #f5b83d;
@@ -50,11 +60,11 @@
   --color-high-subtle: #331614;
 
   /* Chart chrome + secondary series. */
-  --color-series-hr: #7c8cff;
-  --color-series-breathing: #e58fd2;
-  --color-series-focus: #9fe1f0;
-  --color-chart-grid: #1e252e;
-  --color-chart-axis: #7e8a97;
+  --color-series-hr: #d4af37;
+  --color-series-breathing: #8f96a3;
+  --color-series-focus: #6ea8c0;
+  --color-chart-grid: #1c1c22;
+  --color-chart-axis: #8c8c97;
 
   /* Self-hosted (venue Wi-Fi is a listed risk): @fontsource packages, imported in main.tsx. */
   --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
@@ -90,13 +100,53 @@
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out-quint: cubic-bezier(0.83, 0, 0.17, 1);
 
-  /* Signature motion. The heart-rate beat's duration is set inline to 60 / bpm. */
+  /* ---- Motion -------------------------------------------------------------
+     Everything slow and weighty: the hall is old and in no hurry. The gods' own
+     flourishes (descend, shimmer, smite, halo, kindle) are gold and used sparingly,
+     so each one still means something. All of it is disabled under
+     prefers-reduced-motion by the rule at the bottom of this file. */
   --animate-beat: beat 1s var(--ease-out-expo) infinite;
   --animate-wave: wave 0.9s ease-in-out infinite;
   --animate-toast-in: toast-in 320ms var(--ease-out-expo) both;
   --animate-fade-in: fade-in 500ms ease-out both;
   --animate-thinking: thinking 1.2s ease-in-out infinite;
   --animate-sweep: sweep 2.4s linear infinite;
+  --animate-aura: aura 4.5s ease-in-out infinite;
+  --animate-drift: drift 24s linear infinite;
+  --animate-fall: fall 1900ms cubic-bezier(0.5, 0, 0.9, 0.4) forwards;
+  --animate-rise: rise 700ms var(--ease-out-expo) both;
+
+  /* A god arrives: descends out of the dark and settles. */
+  --animate-descend: descend 900ms var(--ease-out-expo) both;
+  /* Gold light travelling across a surface, like a torch passing a marble face. */
+  --animate-shimmer: shimmer 3.2s ease-in-out infinite;
+  /* The halo around the god who is speaking. */
+  --animate-halo: halo 2.4s ease-in-out infinite;
+  /* Divine displeasure: one sharp flash when a high interrupt lands. */
+  --animate-smite: smite 620ms ease-out both;
+
+  /* ---- Guided transitions -------------------------------------------------
+     Three choreographed moments, each one a deliberate piece of staging rather
+     than a generic fade: moving between chambers of the palace, one god handing
+     the floor to the next, and the doors reopening for another attempt.
+
+     Note: `page-enter` animates opacity ONLY. A transform or filter on a page
+     wrapper would become the containing block for the `fixed` overlays inside it
+     (AnalyzingScreen, the start-error screen), so the movement in a page change is
+     carried by the light sweep instead, which sits outside the wrapper. */
+  --animate-page-enter: page-enter 620ms ease-out both;
+  /* A shaft of gold crossing the hall as you pass between chambers. */
+  --animate-light-sweep: light-sweep 900ms var(--ease-out-expo) both;
+  /* The god taking the floor. The one yielding it simply dims through GodBust's own
+     500ms transition: a fill-forwards fade-out would leave an empty seat on the bench. */
+  --animate-god-arrive: god-arrive 760ms var(--ease-out-expo) both;
+  /* The doors reopening for another attempt: a gold aperture widening to swallow the screen. */
+  --animate-aperture: aperture 1100ms var(--ease-in-out-quint) both;
+  /* The handover banner announces the new god, then gets out of the way on its own. Ending at
+     opacity 0 means no timer has to clear it. */
+  --animate-handover: handover 2200ms var(--ease-out-expo) both;
+  /* A brazier catching: the gold edge of a panel coming alight. */
+  --animate-kindle: kindle 1200ms var(--ease-out-expo) both;
 
   @keyframes beat {
     0% { transform: scale(1); opacity: 1; }
@@ -123,17 +173,108 @@
     from { transform: translateX(-100%); }
     to { transform: translateX(100%); }
   }
+  /* A god at rest: the aura swells and settles. */
+  @keyframes aura {
+    0%, 100% { opacity: 0.25; transform: scale(1); }
+    50% { opacity: 0.55; transform: scale(1.07); }
+  }
+  /* Clouds crossing the palace floor. */
+  @keyframes drift {
+    from { transform: translate3d(0, 0, 0); }
+    to { transform: translate3d(-50%, 0, 0); }
+  }
+  /* Dismissed: the floor opens and the mortal drops out of the palace. */
+  @keyframes fall {
+    0% { transform: translateY(0) rotate(0deg) scale(1); opacity: 1; filter: blur(0); }
+    25% { transform: translateY(6vh) rotate(-2deg) scale(0.98); opacity: 1; }
+    100% { transform: translateY(125vh) rotate(9deg) scale(0.72); opacity: 0; filter: blur(3px); }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(18px); }
+    to { opacity: 1; transform: none; }
+  }
+  /* Descending from Olympus: down, not up, and with a touch of gold bloom on arrival. */
+  @keyframes descend {
+    0% { opacity: 0; transform: translateY(-28px) scale(0.985); filter: brightness(1.8); }
+    60% { opacity: 1; filter: brightness(1.15); }
+    100% { opacity: 1; transform: none; filter: brightness(1); }
+  }
+  /* Torchlight crossing gold text or a gold rule. */
+  @keyframes shimmer {
+    0%, 100% { background-position: -140% 0; }
+    55% { background-position: 240% 0; }
+  }
+  /* The speaking god's halo: a gold ring breathing outward. */
+  @keyframes halo {
+    0%, 100% { box-shadow: 0 0 0 0 rgb(212 175 55 / 0.55), 0 0 18px 0 rgb(212 175 55 / 0.25); }
+    50% { box-shadow: 0 0 0 9px rgb(212 175 55 / 0), 0 0 30px 4px rgb(212 175 55 / 0.4); }
+  }
+  /* One flash of divine displeasure. */
+  @keyframes smite {
+    0% { opacity: 0; transform: scale(0.94); box-shadow: 0 0 0 0 rgb(240 82 74 / 0); }
+    18% { opacity: 1; transform: scale(1.02); box-shadow: 0 0 60px 12px rgb(240 82 74 / 0.6); }
+    40% { box-shadow: 0 0 24px 2px rgb(240 82 74 / 0.3); }
+    100% { opacity: 1; transform: none; box-shadow: 0 0 18px 0 rgb(240 82 74 / 0.18); }
+  }
+  /* Entering a new chamber: the room resolves out of the dark. */
+  @keyframes page-enter {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  /* The shaft of gold that crosses the hall as the chamber changes. */
+  @keyframes light-sweep {
+    0% { opacity: 0; transform: translateX(-60%) skewX(-12deg); }
+    18% { opacity: 1; }
+    80% { opacity: 0.85; }
+    100% { opacity: 0; transform: translateX(160%) skewX(-12deg); }
+  }
+  /* The next god takes it: descends, flares gold, settles. */
+  @keyframes god-arrive {
+    0% { opacity: 0; transform: translateY(-16px) scale(0.94); filter: brightness(2.2); }
+    45% { opacity: 1; filter: brightness(1.5); }
+    100% { opacity: 1; transform: none; filter: brightness(1); }
+  }
+  /* The doors reopening: a gold aperture widening until it takes the whole hall. */
+  @keyframes aperture {
+    0% { opacity: 0; transform: scale(0.05); }
+    25% { opacity: 1; }
+    100% { opacity: 1; transform: scale(14); }
+  }
+  /* "Athena yields. Apollo takes the floor." Announces itself, holds, then clears. */
+  @keyframes handover {
+    0% { opacity: 0; transform: translateY(-10px); }
+    12% { opacity: 1; transform: none; }
+    70% { opacity: 1; transform: none; }
+    100% { opacity: 0; transform: translateY(-6px); }
+  }
+  /* A gold edge catching light as a panel comes alive. */
+  @keyframes kindle {
+    0% { box-shadow: inset 0 0 0 1px rgb(212 175 55 / 0); }
+    50% { box-shadow: inset 0 0 0 1px rgb(212 175 55 / 0.8), 0 0 26px 0 rgb(212 175 55 / 0.25); }
+    100% { box-shadow: inset 0 0 0 1px rgb(212 175 55 / 0.3); }
+  }
 }
 
-/* A standard panel: surface, hairline border, faint top highlight. */
+/* A standard panel: black marble, hairline edge, a whisper of light along the top. */
 @utility panel {
   background-color: var(--color-surface-1);
   border: 1px solid var(--color-hairline);
   border-radius: var(--radius-panel);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
 }
 
-/* Small mono caps channel labels, as on a bedside monitor ("HR · BPM"). */
+/* A panel the gods preside over: the same marble with a gold inlay that catches the light. */
+@utility panel-gold {
+  background-color: var(--color-surface-1);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-panel);
+  box-shadow:
+    inset 0 0 0 1px rgb(212 175 55 / 0.3),
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 0 36px -12px rgb(212 175 55 / 0.3);
+}
+
+/* Small mono caps channel labels, carved-inscription style ("HR · BPM"). */
 @utility label-caps {
   font-family: var(--font-mono);
   font-size: var(--text-micro);
@@ -143,15 +284,67 @@
   color: var(--color-ink-muted);
 }
 
-/* ECG-paper grid behind every page (minor 8px, major 40px: the 5:1 ECG ratio),
-   faded toward the edges. Lines only: no generic gradient-on-black. */
+/* The palace floor: black marble tiles under a shaft of light from the open roof. */
 @utility bg-monitor {
   background-color: var(--color-page);
   background-image:
-    radial-gradient(ellipse 75% 70% at 55% 40%, transparent 0%, var(--color-page) 100%),
-    linear-gradient(to right, rgb(255 255 255 / 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(255 255 255 / 0.035) 1px, transparent 1px),
-    linear-gradient(to right, rgb(255 255 255 / 0.014) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(255 255 255 / 0.014) 1px, transparent 1px);
-  background-size: 100% 100%, 40px 40px, 40px 40px, 8px 8px, 8px 8px;
+    /* the light the gods are lit by */
+    radial-gradient(ellipse 65% 55% at 50% -5%, rgb(212 175 55 / 0.10) 0%, transparent 70%),
+    /* the hall falling away into dark at the edges */
+    radial-gradient(ellipse 85% 80% at 50% 45%, rgb(255 255 255 / 0.035) 0%, transparent 75%),
+    /* marble tile grid, major 96px */
+    linear-gradient(to right, rgb(255 255 255 / 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.045) 1px, transparent 1px),
+    /* fine veining, minor 24px */
+    linear-gradient(to right, rgb(255 255 255 / 0.018) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.018) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 96px 96px, 96px 96px, 24px 24px, 24px 24px;
+}
+
+/* A fluted marble column in the dark, lit from one side. */
+@utility column-flute {
+  background-image:
+    linear-gradient(to right,
+      rgb(0 0 0 / 0.85) 0%,
+      rgb(255 255 255 / 0.18) 20%,
+      rgb(255 255 255 / 0.08) 44%,
+      rgb(0 0 0 / 0.7) 58%,
+      rgb(255 255 255 / 0.13) 82%,
+      rgb(0 0 0 / 0.85) 100%);
+}
+
+/* Gold rule used under section headings, like inlay in black stone. */
+@utility rule-gold {
+  background-image: linear-gradient(to right, var(--color-gold) 0%, rgb(212 175 55 / 0) 100%);
+}
+
+/* Gold text with torchlight moving across it. For short, important words only. */
+@utility text-gilded {
+  background-image: linear-gradient(
+    100deg,
+    var(--color-gold) 0%,
+    #fff3c4 18%,
+    var(--color-gold) 36%,
+    var(--color-gold) 100%);
+  background-size: 260% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: var(--animate-shimmer);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  /* Gilded text has no colour of its own without its animation, so give it one back. */
+  .text-gilded {
+    background-image: none;
+    color: var(--color-gold);
+    -webkit-text-fill-color: var(--color-gold);
+  }
 }

@@ -363,25 +363,82 @@ export function watcherLevel(stress: number | null): CoachLevel | null {
 }
 
 /**
- * brain.md flag_message: a template (not Gemini) citing the signal that
- * contributes most to the stress score right now.
+ * Mirrors backend/brain/watcher.py: the god names the signal driving the stress, cites its number,
+ * and gives one command the mortal must obey before the trial moves on. `used` carries the phrasings
+ * already shown so none repeats (the frontend swallows duplicates, so a repeat would be a dropped flag).
  */
-export function flagMessage(w: WindowStats, baseline: BaselineValues | null, level: CoachLevel): string {
+const FLAG_VARIANTS: Record<string, { message: (n: number) => string; command: string }[]> = {
+  'hr:rising': [
+    { message: (n) => `Your pulse climbs ${n}% above your own calm. The gods have noticed.`,
+      command: 'slow your pace and finish the sentence you started' },
+    { message: (n) => `${n}% over your baseline. Your heart answers faster than your mouth.`,
+      command: 'take one slow breath before your next point' },
+  ],
+  'hr:high': [
+    { message: (n) => `Your heart races ${n}% past your baseline. Steady yourself, mortal.`,
+      command: 'stop, breathe out slowly, then continue' },
+    { message: (n) => `A pulse ${n}% above your calm. This hall has undone steadier guests.`,
+      command: 'pause for two full seconds before you say another word' },
+  ],
+  'br:rising': [
+    { message: (n) => `Your breath shortens, ${n}% quicker than your calm.`,
+      command: 'let one slow breath out before continuing' },
+  ],
+  'br:high': [
+    { message: (n) => `Your breathing runs ${n}% above your calm. You are rushing.`,
+      command: 'stop speaking and take one long breath out' },
+  ],
+  'focus:rising': [
+    { message: () => 'Your gaze wanders from this hall.', command: 'bring your eyes back to the question' },
+  ],
+  'focus:high': [
+    { message: () => 'You have left us, mortal. Your eyes are elsewhere.',
+      command: 'look back at the camera and reset before you continue' },
+  ],
+  'none:rising': [
+    { message: (n) => `Your composure sits at ${n} out of a hundred.`, command: 'slow down and take one steady breath' },
+  ],
+  'none:high': [
+    { message: (n) => `Your composure has broken to ${n} out of a hundred.`,
+      command: 'stop, breathe, and begin that answer again' },
+  ],
+}
+
+export function flagFor(
+  w: WindowStats,
+  baseline: BaselineValues | null,
+  level: CoachLevel,
+  used: Set<string> = new Set(),
+): { message: string; command: string } {
   const hrPart = w.hr_delta_pct === null ? 0 : 0.5 * clamp(w.hr_delta_pct / 25, 0, 1)
   const brPart = w.br_delta_pct === null ? 0 : 0.3 * clamp(w.br_delta_pct / 40, 0, 1)
   const focusPart =
     baseline && w.focus_mean !== null ? 0.2 * clamp((baseline.focus - w.focus_mean) / 0.5, 0, 1) : 0
 
+  let driver = 'none'
+  let value = Math.round(w.stress ?? 0)
   if (baseline && w.focus_mean !== null && focusPart > hrPart && focusPart > brPart) {
-    return `Focus down to ${Math.round(w.focus_mean * 100)}% from ${Math.round(baseline.focus * 100)}%. Look back at the camera and reset.`
+    driver = 'focus'
+  } else if (w.br_delta_pct !== null && brPart > hrPart) {
+    driver = 'br'
+    value = Math.round(w.br_delta_pct)
+  } else if (w.hr_delta_pct !== null && hrPart > 0) {
+    driver = 'hr'
+    value = Math.round(w.hr_delta_pct)
   }
-  if (w.br_delta_pct !== null && brPart > hrPart) {
-    const tail = level === 'high' ? 'Pause and take one slow breath.' : 'Slow your breathing a little.'
-    return `Breathing up ${Math.round(w.br_delta_pct)}% from your baseline. ${tail}`
+
+  const pools = [FLAG_VARIANTS[`${driver}:${level}`] ?? [], FLAG_VARIANTS[`none:${level}`] ?? []]
+  for (const pool of pools) {
+    for (const variant of pool) {
+      const message = variant.message(value)
+      if (!used.has(message)) {
+        used.add(message)
+        return { message, command: variant.command }
+      }
+    }
   }
-  if (w.hr_delta_pct !== null) {
-    const tail = level === 'high' ? 'Slow down.' : 'Take a breath, you have time.'
-    return `Heart rate up ${Math.round(w.hr_delta_pct)}% from your baseline. ${tail}`
-  }
-  return `Stress at ${Math.round(w.stress ?? 0)} out of 100. Slow down and breathe.`
+  const fallback = pools.flat()[0]
+  return fallback
+    ? { message: fallback.message(value), command: fallback.command }
+    : { message: 'The gods are watching you closely.', command: 'take one steady breath' }
 }

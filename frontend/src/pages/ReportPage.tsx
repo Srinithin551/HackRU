@@ -14,12 +14,12 @@
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, Navigate, useLocation, useParams } from 'react-router'
-import { getReplay, waitForReport } from '../api.ts'
+import { getInsights, getReplay, waitForReport } from '../api.ts'
 import { Timeline, type FlagView, type QuestionView, type ReportView } from '../components/Timeline.tsx'
 import { AnalyzingScreen, Brand, Button, StressBadge, StressIcon } from '../components/ui.tsx'
 import { loadFlags } from '../lib/flagStore.ts'
 import { color, stressColor, stressLevel } from '../styles/tokens.ts'
-import type { CoachFlagEvent, ReplayResponse, Report } from '../types.ts'
+import type { ChartNote, CoachFlagEvent, ReplayResponse, Report } from '../types.ts'
 
 export function ReportPage() {
   const { id } = useParams()
@@ -106,6 +106,7 @@ function SessionReport({ sessionId }: { sessionId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [notes, setNotes] = useState<ChartNote[]>([])
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -125,6 +126,18 @@ function SessionReport({ sessionId }: { sessionId: string }) {
       },
     )
     return () => ctrl.abort()
+  }, [sessionId, attempt])
+
+  // Chart notes arrive on their own: the tooltips show plain numbers until they do, and the
+  // report never waits on another Gemini call. getInsights resolves empty rather than rejecting.
+  useEffect(() => {
+    let live = true
+    getInsights(sessionId).then((res) => {
+      if (live) setNotes(res.notes)
+    })
+    return () => {
+      live = false
+    }
   }, [sessionId, attempt])
 
   const view = useMemo(() => (data ? buildView(data.report, data.replay, loadFlags(sessionId)) : null), [data, sessionId])
@@ -162,24 +175,31 @@ function SessionReport({ sessionId }: { sessionId: string }) {
       <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-hairline px-gutter">
         <Brand />
         <p className="hidden text-caption text-ink-secondary md:block">
-          Session report{replay.session.user_name ? ` · ${replay.session.user_name}` : ''}
+          The gods' record{replay.session.user_name ? ` · ${replay.session.user_name}` : ''}
           {report.generated_by === 'fallback' && ' · numbers-only report (Gemini unavailable)'}
         </p>
-        <Link to={{ pathname: '/', search }}>
-          <Button variant="secondary">New session</Button>
+        <Link to={{ pathname: `/session/${sessionId}/verdict`, search }}>
+          <Button>Hear their judgement →</Button>
         </Link>
       </header>
 
       {/* grid-rows-[minmax(0,1fr)] pins the row to the screen height so columns scroll inside instead of overflowing. */}
-      <main className="grid min-h-0 flex-1 gap-gutter p-gutter lg:grid-cols-[minmax(18rem,25rem)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
+      <main className="grid min-h-0 flex-1 gap-gutter p-gutter lg:grid-cols-[minmax(15rem,20rem)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
         {/* Left: the verdict (scrolls on its own if a short screen can't fit it all) */}
         <div className="flex min-h-0 flex-col gap-gutter lg:overflow-y-auto">
-          <section className="panel shrink-0 p-panel">
+          <section className="panel-gold shrink-0 p-panel">
             <div className="flex items-center gap-4">
               <ScoreRing score={report.composure_score} />
               <div>
                 <p className="label-caps">Composure</p>
-                <p className="mt-1 text-title font-semibold">
+                <p
+                  className="mt-1 text-title font-semibold"
+                  style={
+                    report.composure_measured === false
+                      ? undefined
+                      : { color: stressColor(100 - report.composure_score) }
+                  }
+                >
                   {report.composure_measured === false ? 'Not measured' : verdict(report.composure_score)}
                 </p>
                 <p className="text-caption text-ink-muted">
@@ -190,13 +210,16 @@ function SessionReport({ sessionId }: { sessionId: string }) {
             <p className="mt-3 text-body text-ink-secondary">{report.summary}</p>
           </section>
 
-          <section className="panel shrink-0 border-l-4 p-panel" style={{ borderLeftColor: color.high }}>
-            <p className="label-caps">Where you felt it most</p>
+          <section
+            className="panel shrink-0 border-l-4 p-panel"
+            style={{ borderLeftColor: color.high, backgroundColor: color.highSubtle }}
+          >
+            <p className="label-caps" style={{ color: color.high }}>Where the gods saw you break</p>
             <p className="mt-2 text-body font-medium xl:text-lead">{report.hardest_moment}</p>
           </section>
 
-          <section className="panel shrink-0 p-panel">
-            <p className="label-caps">Top tips</p>
+          <section className="panel shrink-0 border-l-4 p-panel" style={{ borderLeftColor: color.calm }}>
+            <p className="label-caps" style={{ color: color.calm }}>What to carry out of the palace</p>
             <ol className="mt-3 flex flex-col gap-3">
               {report.top_tips.map((tip, i) => (
                 <li key={i} className="flex gap-3 text-body">
@@ -225,7 +248,7 @@ function SessionReport({ sessionId }: { sessionId: string }) {
                 </Button>
               </div>
             ) : (
-              <Timeline view={view} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
+              <Timeline view={view} selectedId={selected?.id ?? null} onSelect={setSelectedId} notes={notes} />
             )}
           </section>
 

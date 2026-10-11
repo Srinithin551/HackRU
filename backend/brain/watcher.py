@@ -1,6 +1,14 @@
 """Stress watcher: every few seconds while the user is answering, read Data's live window and raise
-on-screen coach flags. Templates only (no Gemini) so flags appear within a second of the reading.
-Coach flags are on screen only; the interviewer never interrupts with voice.
+on-screen coach flags ("interrupts"). Templates only (no Gemini) so flags appear within a second of
+the reading. Coach flags are on screen only; the interviewer never interrupts with voice.
+
+Each flag carries two parts:
+  message  what the god observed, citing the number that triggered it
+  command  the single thing the mortal must do, rendered by the frontend as "Please <command>."
+
+The frontend makes the mortal acknowledge the command before the trial moves on, so a flag that
+repeated itself word for word would read as a bug. Every (driver, level) therefore has several
+phrasings and `pick_variant` never reuses one while an unused one remains.
 """
 
 import asyncio
@@ -36,27 +44,104 @@ def level_for(stress: Optional[float]) -> Optional[str]:
     return "high" if stress > HIGH else "rising" if stress >= RISING else None
 
 
-def flag_message(w: WindowStats, level: str, baseline_focus: float = 0.75) -> str:
-    """Name whichever signal is driving the stress, using the same scale as the stress formula."""
+def driver_for(w: WindowStats, baseline_focus: float = 0.75) -> Optional[str]:
+    """Which signal is driving the stress, on the same scale as the stress formula."""
     hr = w.hr_delta_pct or 0.0
     br = w.br_delta_pct or 0.0
     focus_drop = (baseline_focus - w.focus_mean) if w.focus_mean is not None else 0.0
     drivers = {"hr": hr / 25, "br": br / 40, "focus": focus_drop / 0.5}
     driver = max(drivers, key=drivers.get)
-    if drivers[driver] <= 0:
-        driver = None
-    high = level == "high"
+    return driver if drivers[driver] > 0 else None
 
-    if driver == "hr":
-        return (f"Heart rate up {hr:.0f}% from your baseline. Pause, breathe, slow down." if high
-                else f"Heart rate up {hr:.0f}% from your baseline. Slow down a little.")
-    if driver == "br":
-        return (f"Breathing {br:.0f}% faster than baseline. Take one slow breath." if high
-                else f"Breathing is picking up ({br:+.0f}%). Exhale slowly.")
-    if driver == "focus":
-        return ("Focus is dropping. Look back at the camera and reset." if high
-                else "Eyes drifting. Bring your focus back to the question.")
-    return f"Stress at {w.stress:.0f}. Slow down and take a breath."
+
+# (message, command) per driver and level. `message` may use {hr}, {br} and {stress} (already
+# rounded). `command` is phrased to follow the word "Please".
+VARIANTS: dict[tuple[Optional[str], str], list[tuple[str, str]]] = {
+    ("hr", "rising"): [
+        ("Your pulse climbs {hr}% above your own calm. The gods have noticed.",
+         "slow your pace and finish the sentence you started"),
+        ("{hr}% over your baseline. Your heart answers faster than your mouth.",
+         "take one slow breath before your next point"),
+        ("The blood quickens, {hr}% beyond where you began.",
+         "unclench your jaw and speak a little more slowly"),
+    ],
+    ("hr", "high"): [
+        ("Your heart races {hr}% past your baseline. Steady yourself, mortal.",
+         "stop, breathe out slowly, then continue"),
+        ("A pulse {hr}% above your calm. This hall has undone steadier guests.",
+         "pause for two full seconds before you say another word"),
+        ("{hr}% over baseline and still climbing. The gods lean forward.",
+         "plant both feet, breathe out, and begin that thought again"),
+    ],
+    ("br", "rising"): [
+        ("Your breath shortens, {br}% quicker than your calm.",
+         "let one slow breath out before continuing"),
+        ("Breathing {br}% faster than when you entered.",
+         "breathe low into your chest, not high in your throat"),
+        ("The air moves {br}% quicker through you than it should.",
+         "finish this sentence, then take one deliberate breath"),
+    ],
+    ("br", "high"): [
+        ("Your breathing runs {br}% above your calm. You are rushing.",
+         "stop speaking and take one long breath out"),
+        ("{br}% faster breath than your baseline. Even the columns can hear it.",
+         "breathe out fully, then answer in shorter sentences"),
+        ("Your breath has outrun your thinking, {br}% above calm.",
+         "pause, exhale, and give us only your strongest point"),
+    ],
+    ("focus", "rising"): [
+        ("Your gaze wanders from this hall.",
+         "bring your eyes back to the question"),
+        ("Your attention drifts toward the door.",
+         "look straight ahead and finish the thought"),
+    ],
+    ("focus", "high"): [
+        ("You have left us, mortal. Your eyes are elsewhere.",
+         "look back at the camera and reset before you continue"),
+        ("Your focus has scattered across the marble.",
+         "fix your eyes forward and answer the question as asked"),
+    ],
+    (None, "rising"): [
+        ("Your composure sits at {stress} out of a hundred.",
+         "slow down and take one steady breath"),
+        ("The gods read {stress} on you. Not yet alarming, but rising.",
+         "settle your shoulders and keep your pace even"),
+    ],
+    (None, "high"): [
+        ("Your composure has broken to {stress} out of a hundred.",
+         "stop, breathe, and begin that answer again"),
+        ("{stress} out of a hundred. The hall has got the better of you.",
+         "take one slow breath and speak more slowly than feels natural"),
+    ],
+}
+
+
+def pick_variant(driver: Optional[str], level: str, used: set[str]) -> tuple[str, str]:
+    """A phrasing for this (driver, level) that hasn't been used yet in this session.
+
+    Falls back to the (None, level) pool, then to the first phrasing, so a long session can repeat
+    only after genuinely exhausting every variant.
+    """
+    pools = [VARIANTS.get((driver, level), []), VARIANTS.get((None, level), [])]
+    for pool in pools:
+        for message, command in pool:
+            if message not in used:
+                return message, command
+    flat = [v for pool in pools for v in pool]
+    return flat[0] if flat else ("The gods are watching you closely.", "take one steady breath")
+
+
+def flag_for(w: WindowStats, level: str, baseline_focus: float, used: set[str]) -> tuple[str, str]:
+    """(message, command) for this reading, with the numbers filled in."""
+    driver = driver_for(w, baseline_focus)
+    template, command = pick_variant(driver, level, used)
+    used.add(template)
+    message = template.format(
+        hr=f"{w.hr_delta_pct:.0f}" if w.hr_delta_pct is not None else "—",
+        br=f"{w.br_delta_pct:.0f}" if w.br_delta_pct is not None else "—",
+        stress=f"{w.stress:.0f}" if w.stress is not None else "—",
+    )
+    return message, command
 
 
 async def check_once(s: SessionState, last_flag_at: float) -> float:
@@ -68,7 +153,8 @@ async def check_once(s: SessionState, last_flag_at: float) -> float:
     level = level_for(w.stress)
     if level is None or w.n_samples < MIN_SAMPLES or time.monotonic() - last_flag_at < COOLDOWN_S:
         return last_flag_at
-    flag = {"ts": now_iso(), "level": level, "message": flag_message(w, level, s.baseline.focus if s.baseline else 0.75)}
+    message, command = flag_for(w, level, s.baseline.focus if s.baseline else 0.75, s.used_flag_texts)
+    flag = {"ts": now_iso(), "level": level, "message": message, "command": command}
     await broadcast(s.session_id, "coach_flag", flag)
     s.flags.append({**flag, "question_id": s.current_qid, "stress": round(w.stress, 1)})
     return time.monotonic()

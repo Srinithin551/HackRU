@@ -60,6 +60,7 @@ class CoachFlag(BaseModel):
     level: Literal["rising", "high"]
     stress: float
     message: str
+    command: str = ""             # the single thing to do, shown as "Please <command>." 
 
 
 class Adaptation(BaseModel):

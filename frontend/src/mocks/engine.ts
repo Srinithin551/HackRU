@@ -22,7 +22,7 @@ import type { Scheduler, TimerId } from './scheduler.ts'
 import {
   computeBaseline,
   createIdGenerator,
-  flagMessage,
+  flagFor,
   isoUtc,
   maxOf,
   MIN_CONFIDENCE,
@@ -158,6 +158,8 @@ export class MockSessionEngine {
   private listening = false
   private baseline: Baseline | null = null
   private lastFlagAt = Number.NEGATIVE_INFINITY
+  /** Flag phrasings already shown, so no interrupt ever repeats itself (see GodInterrupt). */
+  private readonly usedFlagTexts = new Set<string>()
   private vitalsTimer: TimerId | null = null
   private watcherTimer: TimerId | null = null
   private lastQuestion: ServerEvent | null = null
@@ -472,7 +474,8 @@ export class MockSessionEngine {
     if (w.stress === null) return
     const level = watcherLevel(w.stress)
     if (!level || now - this.lastFlagAt <= this.timing.flagCooldownMs) return
-    const flag: CoachFlagEvent = { ts: isoUtc(now), level, message: flagMessage(w, this.baseline, level) }
+    const { message, command } = flagFor(w, this.baseline, level, this.usedFlagTexts)
+    const flag: CoachFlagEvent = { ts: isoUtc(now), level, message, command }
     this.lastFlagAt = now
     this.recording.flags.push({ ...flag, question_id: this.current?.record.id ?? null, stress: round(w.stress, 1) })
     this.emit({ type: 'coach_flag', data: flag })

@@ -43,7 +43,7 @@ export function SetupPage() {
       })
       navigate({ pathname: `/session/${session_id}`, search })
     } catch (err) {
-      setError(`Couldn't start a session: ${err instanceof Error ? err.message : String(err)}. Is the backend running on :8000?`)
+      setError(`The palace doors won't open: ${err instanceof Error ? err.message : String(err)}. Is the backend running on :8000?`)
       setBusy(false)
     }
   }
@@ -56,23 +56,23 @@ export function SetupPage() {
       </header>
 
       <main className="flex flex-1 items-center justify-center p-gutter">
-        <div className="grid w-full max-w-6xl animate-fade-in items-center gap-10 lg:grid-cols-[1.15fr_1fr] lg:gap-16">
+        <div className="grid w-full max-w-6xl animate-descend items-center gap-10 lg:grid-cols-[1.15fr_1fr] lg:gap-16">
           <section>
-            <p className="label-caps">AI interview simulator</p>
+            <p className="label-caps">A trial before the gods</p>
             <h1 className="mt-4 text-[clamp(2.5rem,1.4rem+3.2vw,4.5rem)] leading-[1.02] font-semibold tracking-tight text-balance">
-              Practice the interview. <span className="text-ink-muted">Watch your body answer too.</span>
+              Enter the palace. <span className="text-ink-muted">Watch your body answer too.</span>
             </h1>
             <p className="mt-6 max-w-xl text-lead text-ink-secondary">
-              An AI interviewer asks questions out loud while your webcam reads your heart rate, breathing and focus. When
-              you&apos;re done, a replay shows exactly where your composure slipped and how to fix it.
+              The gods take their seats and question you aloud while your webcam reads your heart rate and breathing.
+              When they have heard enough, a replay shows exactly where your composure slipped and how to hold it.
             </p>
             <dl className="mt-8 grid max-w-xl grid-cols-3 gap-3">
               {[
                 ['Heart rate', 'every second'],
-                ['Stress', 'vs your baseline'],
-                ['Feedback', 'per question'],
+                ['Composure', 'vs your baseline'],
+                ['Judgement', 'per question'],
               ].map(([k, v]) => (
-                <div key={k} className="rounded-control border border-hairline bg-surface-1/60 px-3 py-3">
+                <div key={k} className="rounded-control border border-hairline bg-surface-1 px-3 py-3 shadow-[inset_0_1px_0_rgb(255_255_255/0.05)]">
                   <dt className="text-body font-semibold">{k}</dt>
                   <dd className="text-caption text-ink-muted">{v}</dd>
                 </div>
@@ -80,7 +80,7 @@ export function SetupPage() {
             </dl>
           </section>
 
-          <form onSubmit={onSubmit} className="panel flex flex-col gap-5 p-panel">
+          <form onSubmit={onSubmit} className="panel-gold flex flex-col gap-5 p-panel">
             <label className="flex flex-col gap-2">
               <span className="label-caps">Your name</span>
               <input
@@ -93,7 +93,7 @@ export function SetupPage() {
             </label>
 
             <fieldset className="flex flex-col gap-2">
-              <legend className="label-caps mb-2">Interview type</legend>
+              <legend className="label-caps mb-2">Trial type</legend>
               <div className="grid grid-cols-2 gap-2">
                 {INTERVIEW_TYPES.map((t) => {
                   const active = t.value === interviewType
@@ -141,12 +141,12 @@ export function SetupPage() {
             </p>
 
             {!hasSpeechRecognition() && (
-              <p className="text-caption text-rising">Live speech-to-text needs Chrome. In this browser you can type your answers.</p>
+              <p className="text-caption text-rising">The gods hear you best in Chrome. In this browser you can type your answers instead.</p>
             )}
             {error && <p className="text-caption text-high">{error}</p>}
 
             <Button type="submit" disabled={busy} className="py-3 text-lead">
-              {busy ? 'Starting…' : 'Start interview →'}
+              {busy ? 'The gods are gathering…' : 'Enter the palace →'}
             </Button>
           </form>
         </div>

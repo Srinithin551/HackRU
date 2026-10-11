@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
 from backend import config, ws
-from backend.brain import fake
+from backend.brain import fake, insights
 from backend.brain.interviewer import run_session
 from backend.brain.state import SessionMeta, SessionState, metas, prune_finished, states, tasks
 from backend.data import queries as data
@@ -106,6 +106,20 @@ async def get_report(session_id: str):
     if report is None:
         raise HTTPException(status_code=404, detail="report not ready")
     return report
+
+
+@router.get("/{session_id}/insights")
+async def get_insights(session_id: str):
+    """Chart notes for the replay tooltips: one per (question, variable). Generated on first
+    request and cached, so the verdict never waits on this call."""
+    try:
+        notes = await insights.get_notes(session_id)
+    except Exception:
+        log.exception("insights failed for %s", session_id)
+        raise HTTPException(status_code=503, detail="insights unavailable")
+    if notes is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"notes": notes}
 
 
 @router.get("/{session_id}/status")

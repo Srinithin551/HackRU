@@ -51,6 +51,7 @@ class SessionState:
     baseline: Optional[Baseline] = None
     live_window: Optional[WindowStats] = None   # latest watcher reading, decide_next sees it
     flags: list[dict] = field(default_factory=list)        # CoachFlag dicts
+    used_flag_texts: set[str] = field(default_factory=set)  # flag phrasings already shown, so none repeats
     adaptations: list[dict] = field(default_factory=list)  # Adaptation dicts
     actions: list[str] = field(default_factory=list)       # every resolved action, in order
     exchanges: list[dict] = field(default_factory=list)    # {kind, text, transcript} for every answered turn
