@@ -1,5 +1,13 @@
 """The interview loop: calibration → planned questions with adaptive follow-ups → closing → report.
 
+The interviewer holds a conversation rather than reading a list: Gemini writes every turn after the
+small talk (a short reaction to what the candidate said, then the next question). A wrong, off-topic,
+or inappropriate answer gets immediate coaching, said outside the interview frame (what would happen
+in a real interview, what to say instead), before the next question.
+
+Exactly one clip plays per turn and the next one is only sent after the candidate answers, so the
+interviewer's voice can never overlap itself.
+
 One `run_session` task per session, started by POST /api/sessions/{id}/start. It talks to the
 browser only through ws.broadcast() / ws.inbox and to the database only through data.queries.
 If anything inside crashes, the session still ends cleanly with a numbers-only report.
@@ -16,6 +24,7 @@ from backend.brain.history import as_baseline, as_question_stats, as_window_stat
 from backend.brain.models import Decision
 from backend.brain.report import fallback_report
 from backend.brain.state import SessionState
+from backend.brain.turns import MAX_COACH_WORDS, MAX_TURN_WORDS, final_coaching, spoken
 from backend.brain.watcher import watch_stress
 from backend.data import queries as data
 from backend.ws import broadcast
@@ -24,8 +33,13 @@ log = logging.getLogger("brain.interviewer")
 
 ANSWER_TIMEOUT_S = 120.0     # a dropped tab can't hang the loop
 CALIBRATION_MIN_S = 35.0     # ~10s Presage warm-up + ~25s of usable baseline readings
-CLOSING_PAUSE_S = 4.0        # let the closing line finish before the frontend navigates away
-MAX_FOLLOWUPS = 1            # per planned question
+CLOSING_PAUSE_S = 4.0        # minimum wait after the closing clip starts, before session_ended
+CLOSING_SLACK_S = 1.0        # extra margin on top of the clip's own length
+MAX_FOLLOWUPS = 1            # ease_off / push / follow_up, per planned question
+MAX_REDIRECTS = 1            # "didn't catch that" re-asks for garbled answers, per planned question
+MAX_TRANSCRIPT_CHARS = 4000  # a runaway speech-to-text stream can't flood the prompt or the database
+FOLLOW_UP_ACTIONS = ("follow_up", "ease_off", "push")
+ADVANCING_ACTIONS = ("next", "coach")   # these move on to the next planned question
 
 
 class EndRequested(Exception):
@@ -45,30 +59,35 @@ async def set_state(s: SessionState, state: str) -> None:
 
 # ---------------------------------------------------------------- speaking
 
-async def ask(s: SessionState, qid: str, text: str, kind: str) -> None:
-    """tts → `question` event → listening."""
+async def ask(s: SessionState, qid: str, text: str, kind: str, coaching: str = "") -> None:
+    """tts → `question` event → listening. Coaching on the previous answer, if any, is spoken first in the
+    same clip (one voice, no gap) but sent as its own field so the screen can show the question cleanly."""
     s.current_qid, s.current_text, s.current_kind = qid, text, kind
     calibrating = kind == "calibration"   # calibration stays "calibrating" so the overlay doesn't flicker
     if not calibrating:
         await set_state(s, "asking")
-    audio_url = await voice.tts(text)
+    audio_url = await voice.tts(f"{coaching} {text}" if coaching else text)
     await broadcast(s.session_id, "question", {
         "question_id": qid,
         "index": s.planned_number,       # 0 during calibration, then 1..total (follow-ups keep their parent's number)
         "total": s.total_planned,
         "kind": kind,
-        "text": text,
+        "text": text,                    # the question (with a short lead-in); never the coaching
+        "coaching": coaching or None,    # stepped-out feedback on the previous answer, spoken before the question
         "audio_url": audio_url,
     })
     if not calibrating:
         await set_state(s, "listening")
 
 
-async def say_filler(s: SessionState, text: Optional[str] = None) -> None:
-    """Audio that doesn't change the question on screen: fillers and the closing line."""
-    url = await voice.tts(text or voice.next_filler())
+async def say(s: SessionState, text: str) -> float:
+    """Speech that isn't a question (the closing line), sent as a `filler` event so the question on
+    screen doesn't change. Only sent after the last answer, so it can't overlap a question clip.
+    Returns how long the clip plays, in seconds (0 if there's no audio)."""
+    url = await voice.tts(text)
     if url:
         await broadcast(s.session_id, "filler", {"audio_url": url})
+    return voice.clip_seconds(url)
 
 
 # ---------------------------------------------------------------- listening
@@ -112,23 +131,38 @@ async def wait_answer(s: SessionState, qid: str) -> str:
             await data.mark_answer_started(qid, _utcnow())
             deadline = loop.time() + ANSWER_TIMEOUT_S   # full answer time from when they start talking
         elif type_ == "answer_done":
-            transcript = " ".join(str(d.get("transcript") or "").split())
+            transcript = " ".join(str(d.get("transcript") or "").split())[:MAX_TRANSCRIPT_CHARS]
             await data.mark_answered(qid, _utcnow(), transcript)
             return transcript
 
 
 # ---------------------------------------------------------------- deciding
 
-def resolve_action(action: str, spoken_text: str, followups_on_current: int, queue_len: int) -> str:
-    """Enforce the rules Gemini is asked to follow, so a bad decision can't derail the session."""
-    if action in ("follow_up", "ease_off", "push"):
-        if not spoken_text.strip() or followups_on_current >= MAX_FOLLOWUPS:
-            action = "next"
+def word_limit(action: str) -> int:
+    return MAX_COACH_WORDS if action == "coach" else MAX_TURN_WORDS
+
+
+def resolve_action(action: str, text: str, followups_on_current: int, redirects_on_current: int,
+                   queue_len: int, turns_left: int = 99, answered: bool = True) -> str:
+    """Enforce the rules Gemini is asked to follow, so a bad decision can't derail the session.
+    `text` is what the action needs to say: the coaching for "coach", the spoken turn otherwise.
+    `turns_left`: turns remaining in the budget; a follow-up must leave room for every planned question.
+    `answered`: False when nothing was captured (silence is never coached: it's usually the mic)."""
+    if not answered and action == "coach":
+        action = "next"
+    if not spoken(text, word_limit(action)) and action not in ("next", "wrap_up"):
+        return "next" if queue_len else "wrap_up"   # nothing usable to say: move on with the planned text
+    if action in FOLLOW_UP_ACTIONS and followups_on_current >= MAX_FOLLOWUPS:
+        action = "next"
+    elif action == "redirect" and redirects_on_current >= MAX_REDIRECTS:
+        action = "next"
+    if action in (*FOLLOW_UP_ACTIONS, "redirect") and turns_left <= queue_len:
+        action = "next"   # no room: a follow-up now would cost a planned question later
     if action == "wrap_up" and queue_len > 0:
         action = "next"
     if action == "next" and queue_len == 0:
         action = "wrap_up"
-    return action
+    return action   # "coach" with nothing left to ask stays "coach": its feedback becomes the last turn
 
 
 def out_of_budget(s: SessionState) -> bool:
@@ -140,6 +174,7 @@ def record_adaptation(s: SessionState, qid: str, decision: Decision, action: str
     s.adaptations.append({
         "question_id": qid, "action": action,
         "answer_quality": decision.answer_quality, "rationale": decision.rationale,
+        "coaching": decision.coaching if action == "coach" == decision.action else "",
     })
     log.info("session %s: decision %s → %s (quality %d) %s", s.session_id, decision.action, action,
              decision.answer_quality, decision.rationale)
@@ -148,68 +183,100 @@ def record_adaptation(s: SessionState, qid: str, decision: Decision, action: str
 # ---------------------------------------------------------------- phases
 
 async def calibrate(s: SessionState) -> None:
-    """Small talk while Presage warms up and Data collects the calm baseline."""
+    """Small talk while Presage warms up and Data collects the calm baseline. The opener is pre-recorded
+    so the session starts instantly; the second turn (only if the baseline needs more time) is written
+    by Gemini so it reacts to what they said and asks about their major or field."""
     await set_state(s, "calibrating")
-    for line in (lines.CALIBRATION_LINE, lines.CALIBRATION_EXTRA_LINE):
+    line, fallback = lines.calibration_lines(s.spec.key)
+    for turn in range(2):
         qid = str(await data.insert_question(s.session_id, 0, "calibration", line))
         await ask(s, qid, line, "calibration")
-        await wait_answer(s, qid)
-        if s.elapsed() >= CALIBRATION_MIN_S:
+        transcript = await wait_answer(s, qid)
+        s.exchanges.append({"kind": "calibration", "text": line, "transcript": transcript})
+        if turn == 1 or s.elapsed() >= CALIBRATION_MIN_S:
             break
+        line = spoken(await gemini.small_talk_follow_up(s) or "") or fallback
+
+
+def _next_planned(s: SessionState):
+    q = s.queue.pop(0)
+    s.current_planned = q
+    s.planned_number += 1
+    s.followups_on_current = s.redirects_on_current = 0
+    return q
 
 
 async def interview(s: SessionState) -> None:
     """Main loop. Returns when the plan is exhausted, the budget runs out, or the user ends."""
-    q = s.queue.pop(0)
-    s.current_planned, s.planned_number, s.followups_on_current = q, 1, 0
-    next_text, kind = q.text, "main"
+    q = _next_planned(s)
+    next_text = spoken(await gemini.open_interview(s, q) or "") or q.text   # bridge from the small talk
+    kind, coaching = "main", ""
 
     while True:
         s.idx += 1
         s.turns += 1
         qid = str(await data.insert_question(s.session_id, s.idx, kind, next_text))
-        await ask(s, qid, next_text, kind)
-        if s.queue:
-            voice.prefetch(s.queue[0].text)   # "next" decisions then play instantly
+        await ask(s, qid, next_text, kind, coaching)
 
         transcript = await wait_answer(s, qid)
-        await say_filler(s)                   # instant, masks Gemini latency
-        await set_state(s, "thinking")
+        s.exchanges.append({"kind": kind, "text": next_text, "transcript": transcript})
+        await set_state(s, "thinking")       # no filler clip: one voice at a time, nothing scripted
         if s.end_requested or out_of_budget(s):
             return
 
-        stats = as_question_stats(await data.get_question_stats(qid))
-        try:
-            window = as_window_stats(await data.get_window_stats(s.session_id, 15))
-        except Exception:
-            log.exception("get_window_stats failed, using the watcher's last window")
+        # Both reads at once: on Tiger Cloud each is a ~60 ms network round trip.
+        raw_stats, raw_window = await asyncio.gather(
+            data.get_question_stats(qid), data.get_window_stats(s.session_id, 15), return_exceptions=True)
+        if isinstance(raw_stats, BaseException):
+            raise raw_stats
+        stats = as_question_stats(raw_stats)
+        if isinstance(raw_window, BaseException):
+            log.error("get_window_stats failed (%s), using the watcher's last window", raw_window)
             window = s.live_window
-        decision = await gemini.decide_next(s, kind, next_text, transcript, stats, window)
-        action = resolve_action(decision.action, decision.spoken_text, s.followups_on_current, len(s.queue))
-        record_adaptation(s, qid, decision, action)
-
-        if s.end_requested or action == "wrap_up":
-            return
-        if action == "next":
-            q = s.queue.pop(0)
-            s.current_planned, s.followups_on_current = q, 0
-            s.planned_number += 1
-            next_text, kind = q.text, "main"
         else:
-            s.followups_on_current += 1
-            next_text, kind = decision.spoken_text, "follow_up"
+            window = as_window_stats(raw_window)
+        decision = await gemini.decide_next(s, kind, next_text, transcript, stats, window)
+        needed = decision.coaching if decision.action == "coach" else decision.spoken_text
+        action = resolve_action(decision.action, needed, s.followups_on_current, s.redirects_on_current,
+                                len(s.queue), turns_left=s.spec.max_turns - s.turns, answered=bool(transcript))
+        record_adaptation(s, qid, decision, action)
+        # Gemini's wording only fits if its action survived the rules; otherwise use the planned text.
+        # (Silence turned from coach into next keeps its spoken_text: that's already the next question.)
+        kept = action == decision.action or (decision.action == "coach" and action == "next" and not transcript)
+        turn = spoken(decision.spoken_text) if kept else ""
+        coaching = spoken(decision.coaching, MAX_COACH_WORDS) if kept and action == "coach" else ""
+
+        if s.end_requested or action == "wrap_up" or (action == "coach" and not s.queue):
+            s.parting_words = final_coaching(coaching) if action == "coach" else turn   # said before the closing line
+            return
+        if action in ADVANCING_ACTIONS:
+            q = _next_planned(s)
+            next_text, kind = turn or q.text, "main"
+        else:
+            if action == "redirect":
+                s.redirects_on_current += 1
+            else:
+                s.followups_on_current += 1
+            next_text, kind = turn, "follow_up"
 
 
 async def build_and_save_report(s: SessionState) -> dict:
     items = normalize_history(await data.get_session_history(s.session_id))
     report = await gemini.final_report(s, items)
-    payload = report.model_dump()
-    await data.save_report(s.session_id, payload)
-    return payload
+    s.report = report.model_dump()   # kept in memory too: GET /report still works if the save fails
+    try:
+        await data.save_report(s.session_id, s.report)
+    except Exception:
+        log.exception("save_report failed for %s; serving the report from memory", s.session_id)
+    return s.report
 
 
 async def finish(s: SessionState) -> None:
-    await data.end_session(s.session_id)
+    """End the session. The browser always gets session_ended, even if the database is unreachable."""
+    try:
+        await data.end_session(s.session_id)
+    except Exception:
+        log.exception("end_session failed for %s", s.session_id)
     await set_state(s, "done")
     await broadcast(s.session_id, "session_ended", {
         "report_url": f"/api/sessions/{s.session_id}/report",
@@ -231,6 +298,7 @@ async def _run(s: SessionState) -> None:
             log.exception("compute_baseline failed for %s", s.session_id)
 
         if not s.end_requested:
+            await set_state(s, "thinking")         # while the bridge into the first question is written
             plan = await plan_task
             s.queue = list(plan)
             s.total_planned = len(plan)
@@ -248,8 +316,11 @@ async def _run(s: SessionState) -> None:
     await set_state(s, "thinking")
     report_task = asyncio.create_task(build_and_save_report(s))
     if not s.end_requested:
-        await say_filler(s, lines.CLOSING_LINE)
-        await asyncio.sleep(CLOSING_PAUSE_S)
+        # One clip, so the reaction to the last answer and the closing line can't overlap in the browser.
+        closing = f"{s.parting_words} {lines.CLOSING_LINE}" if s.parting_words else lines.CLOSING_LINE
+        # The frontend leaves the page on session_ended, so wait until the clip has finished playing.
+        seconds = await say(s, closing)
+        await asyncio.sleep(max(CLOSING_PAUSE_S, seconds + CLOSING_SLACK_S) if seconds else CLOSING_PAUSE_S)
     await report_task
     await finish(s)
 
@@ -272,8 +343,10 @@ async def _emergency_finish(s: SessionState) -> None:
     except Exception:
         log.exception("get_session_history failed during emergency finish")
         items = []
+    if s.report is None:
+        s.report = fallback_report(s, items).model_dump()
     try:
-        await data.save_report(s.session_id, fallback_report(s, items).model_dump())
+        await data.save_report(s.session_id, s.report)
     except Exception:
         log.exception("save_report failed during emergency finish")
     try:

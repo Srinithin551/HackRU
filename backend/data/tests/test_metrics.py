@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import pytest
 
 from backend.contracts import Baseline, VitalsReading
-from backend.data.metrics import stress_level, stress_score
+from backend.data.metrics import MIN_CONFIDENCE, stress_level, stress_score
 
 B = Baseline(heart_rate=72.0, breathing_rate=14.0, focus=0.8, n_samples=30)
 TS = datetime(2026, 10, 10, 18, 0, tzinfo=timezone.utc)
@@ -39,8 +39,8 @@ def test_missing_focus_renormalizes():
 
 
 def test_low_confidence_is_none():
-    assert stress_score(reading(confidence=0.69), B) is None      # cutoff is 0.7
-    assert stress_score(reading(confidence=0.7), B) is not None
+    assert stress_score(reading(confidence=MIN_CONFIDENCE - 0.01), B) is None      # below the cutoff
+    assert stress_score(reading(confidence=MIN_CONFIDENCE), B) is not None
 
 
 def test_no_baseline_or_no_inputs_is_none():

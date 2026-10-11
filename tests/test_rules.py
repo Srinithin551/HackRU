@@ -2,9 +2,10 @@
 
 import pytest
 
-from backend.brain import fake, prompts
+from backend.brain import fake, lines, prompts
 from backend.brain.history import normalize_history, stats_line
 from backend.brain.interviewer import resolve_action
+from backend.brain.turns import final_coaching, split_coaching, spoken
 from backend.brain.models import QuestionFeedback, ReportDraft
 from backend.brain.report import fallback_report, finalize_draft
 from backend.brain.specs import fallback_questions, get_spec, normalize_type
@@ -35,19 +36,37 @@ def state(type_="Software Engineering") -> SessionState:
 
 # ---------------------------------------------------------------- resolve_action
 
-@pytest.mark.parametrize("action,text,used,queue,expected", [
-    ("next", "", 0, 2, "next"),
-    ("next", "", 0, 0, "wrap_up"),                  # nothing left to ask
-    ("ease_off", "Let me rephrase.", 0, 2, "ease_off"),
-    ("ease_off", "Let me rephrase.", 1, 2, "next"),  # max one follow-up per planned question
-    ("push", "", 0, 2, "next"),                      # nothing to say → move on
-    ("follow_up", "Example?", 1, 0, "wrap_up"),
-    ("wrap_up", "", 0, 3, "next"),                   # can't wrap up with questions left
-    ("wrap_up", "", 0, 0, "wrap_up"),
-    ("push", "Harder one.", 0, 0, "push"),           # follow-up allowed on the last question
+@pytest.mark.parametrize("action,text,followups,redirects,queue,expected", [
+    ("next", "", 0, 0, 2, "next"),
+    ("next", "", 0, 0, 0, "wrap_up"),                    # nothing left to ask
+    ("ease_off", "Let me rephrase.", 0, 0, 2, "ease_off"),
+    ("ease_off", "Let me rephrase.", 1, 0, 2, "next"),   # max one follow-up per planned question
+    ("push", "", 0, 0, 2, "next"),                       # nothing to say → move on
+    ("follow_up", "Example?", 1, 0, 0, "wrap_up"),
+    ("wrap_up", "", 0, 0, 3, "next"),                    # can't wrap up with questions left
+    ("wrap_up", "", 0, 0, 0, "wrap_up"),
+    ("push", "Harder one.", 0, 0, 0, "push"),            # follow-up allowed on the last question
+    ("redirect", "Back to the question?", 0, 0, 2, "redirect"),
+    ("redirect", "Back to the question?", 1, 0, 2, "redirect"),   # separate allowance from follow-ups
+    ("redirect", "Back to the question?", 0, 1, 2, "next"),       # max one redirect per planned question
+    ("redirect", "Back to the question?", 0, 1, 0, "wrap_up"),
+    ("redirect", "", 0, 0, 2, "next"),
+    ("follow_up", " ".join(["word"] * 80), 0, 0, 2, "next"),     # far too long to be a real turn
+    ("coach", "Stepping out: that would cost you. Say X. Back in: next?", 0, 0, 2, "coach"),
+    ("coach", "Stepping out: that would cost you.", 1, 1, 2, "coach"),   # no allowance: coaching always moves on
+    ("coach", "Stepping out: that would cost you.", 0, 0, 0, "coach"),   # last question: feedback, then closing
+    ("coach", "", 0, 0, 2, "next"),
+    ("coach", "", 0, 0, 0, "wrap_up"),
+    ("coach", " ".join(["word"] * 100), 0, 0, 2, "coach"),      # coaching gets a longer allowance
+    ("coach", " ".join(["word"] * 150), 0, 0, 2, "next"),
 ])
-def test_resolve_action(action, text, used, queue, expected):
-    assert resolve_action(action, text, used, queue) == expected
+def test_resolve_action(action, text, followups, redirects, queue, expected):
+    assert resolve_action(action, text, followups, redirects, queue) == expected
+
+
+def test_spoken_rejects_empty_and_runaway_turns():
+    assert spoken("  Fine.  Next one? ") == "Fine. Next one?"
+    assert spoken("") == "" and spoken(" ".join(["w"] * 71)) == ""
 
 
 # ---------------------------------------------------------------- fake decisions
@@ -63,15 +82,32 @@ def test_fake_decide_pushes_when_calm_and_thorough():
 
 
 def test_fake_decide_follow_up_on_short_answer_and_next_otherwise():
-    assert fake.decide("not sure", qstats(stress_mean=50, stress_peak=60)).action == "follow_up"
+    assert fake.decide("I would use a cache", qstats(stress_mean=50, stress_peak=60)).action == "follow_up"
     assert fake.decide(" ".join(["w"] * 20), qstats(stress_mean=50, stress_peak=60)).action == "next"
     assert fake.decide(" ".join(["w"] * 20), None).action == "next"
+
+
+def test_fake_decide_coaches_wrong_answers_and_reasks_empty_ones():
+    q = "Walk me through how you'd debug an API that suddenly got ten times slower."
+    d = fake.decide("I really like pizza and playing basketball with my friends on weekends.", None, q, "main",
+                    next_question="Next one?")
+    assert d.action == "coach" and d.coaching == fake.FAKE_COACH and d.spoken_text == "Next one?"
+    assert d.coaching.startswith("Let me step out of the interview")
+    assert fake.decide("not sure", None, q, "main").action == "coach"                # very weak
+    assert fake.decide("", None, q, "main").spoken_text == fake.FAKE_LINES["redirect"]
+    assert fake.decide("I would debug the slower endpoints first by checking the traces.", None, q, "main").action == "next"
+    assert not fake.off_topic(q, "pizza")                                              # too short to judge
+    assert fake.decide("I really like pizza and basketball with friends on weekends.", None, q,
+                       "follow_up").action == "next"                                   # follow-ups aren't checked
 
 
 def test_fake_texts_cover_everything_spoken():
     texts = fake.all_texts()
     assert all(q.text in texts for q in fake.FAKE_QUESTIONS)
     assert all(t in texts for t in fake.FAKE_LINES.values())
+    assert all(t in texts for t in lines.fixed_lines())
+    assert all(fake.coach_turn(q.text) in texts for q in fake.FAKE_QUESTIONS[1:])
+    assert f"{final_coaching(fake.FAKE_COACH)} {lines.CLOSING_LINE}" in texts
     assert len(texts) == len(set(texts))
 
 
@@ -119,12 +155,38 @@ def test_decide_context_has_every_section():
     s = state()
     s.current_planned = fallback_questions(s.spec)[1]
     s.turns, s.actions = 2, ["next", "push"]
+    s.queue = fallback_questions(s.spec)[2:3]
+    s.redirects_on_current = 1
+    s.exchanges = [
+        {"kind": "calibration", "text": "Tell me about yourself.", "transcript": "I like distributed systems."},
+        {"kind": "main", "text": "Q1?", "transcript": "An answer about caching."},
+        {"kind": "main", "text": "Why?", "transcript": "x" * 900},          # the answer being judged
+    ]
     ctx = prompts.decide_context(s, "main", "Why?", "x" * 900, qstats(), window())
     for needle in ("ROLE: Backend Engineer", "TURN: 2/7", "BASELINE: HR 72 bpm", "difficulty 3",
                    "HR mean 84 (+17% vs baseline)", "peak 78 at 12s in", "RIGHT NOW (last 10s): stress 55",
-                   "expression frown", "REMAINING PLANNED QUESTIONS: 0", "PREVIOUS DECISIONS: next, push"):
+                   "expression frown", "PREVIOUS DECISIONS: next, push", "REDIRECTS USED ON THIS QUESTION: 1/1",
+                   'CANDIDATE: "I like distributed systems."', 'CANDIDATE: "An answer about caching."',
+                   "REMAINING PLANNED QUESTIONS (including the next one): 1",
+                   f'NEXT PLANNED QUESTION: "{s.queue[0].text}"'):
         assert needle in ctx, needle
     assert "x" * 601 not in ctx   # transcript truncated
+    assert 'INTERVIEWER: "Why?"' not in ctx   # the judged answer isn't repeated in the history block
+
+
+def test_open_context_includes_small_talk_and_first_question():
+    s = state("Class Presentation")
+    s.exchanges = [{"kind": "calibration", "text": "Tell me about yourself.", "transcript": "I study ecology."}]
+    first = fallback_questions(s.spec)[0]
+    ctx = prompts.open_context(s, first)
+    assert "PRESENTATION TOPIC: Backend Engineer" in ctx and 'CANDIDATE: "I study ecology."' in ctx
+    assert f'FIRST QUESTION: "{first.text}"' in ctx
+
+
+def test_next_planned_line_when_queue_empty():
+    s = state()
+    s.current_planned = fallback_questions(s.spec)[4]
+    assert "NEXT PLANNED QUESTION: none" in prompts.decide_context(s, "main", "Q", "A", None, None)
 
 
 def test_stats_line_handles_missing_vitals():
@@ -148,7 +210,7 @@ def history():
 def test_normalize_history_accepts_dicts_and_models():
     items = normalize_history(history())
     assert [it.question_id for it in items] == ["c", "q1", "q2"]   # q1 id recovered from stats
-    assert [it.label for it in items] == ["Calibration", "Q1", "Q2"]
+    assert [it.label for it in items] == ["Warm-up", "Q1", "Q1 follow-up"]   # matches the live screen
 
 
 def test_fallback_report_cites_numbers_and_skips_calibration():
@@ -158,7 +220,7 @@ def test_fallback_report_cites_numbers_and_skips_calibration():
     assert r.composure_score == 55                      # 100 - mean(30, 60)
     assert [f.question_id for f in r.per_question] == ["q1", "q2"]
     assert all(any(ch.isdigit() for ch in f.body_signal) for f in r.per_question)
-    assert "Q2" in r.hardest_moment and "88" in r.hardest_moment
+    assert "Q1 follow-up" in r.hardest_moment and "88" in r.hardest_moment
     assert len(r.top_tips) == 3
     assert r.coach_flags[0].question_id == "q2"
     assert r.generated_by == "fallback"
@@ -199,3 +261,106 @@ def test_finalize_draft_without_vitals_does_not_claim_calm():
                         per_question=[QuestionFeedback(question_id="q1", what_happened="w",
                                                        body_signal="No usable vitals.", advice="a")])
     assert finalize_draft(state(), items, draft).composure_score == 50
+
+
+def test_fallback_report_describes_coached_and_unclear_answers():
+    s = state()
+    s.adaptations = [{"question_id": "q1", "action": "coach", "answer_quality": 1, "rationale": "wrong"},
+                     {"question_id": "q2", "action": "redirect", "answer_quality": 1, "rationale": "garbled"}]
+    r = fallback_report(s, normalize_history(history()))
+    q1, q2 = (next(f for f in r.per_question if f.question_id == q) for q in ("q1", "q2"))
+    assert "missed what the question was asking" in q1.what_happened and q1.advice.startswith("Use the live coaching")
+    assert "didn't come through clearly" in q2.what_happened
+    assert r.top_tips[0].startswith("Use the live coaching")
+
+
+def test_prompts_carry_the_voice_style():
+    for system in (prompts.DECIDE_SYSTEM, prompts.OPEN_SYSTEM):
+        assert '"got it", "I see", "I understand"' in system
+        assert "never \"let us\"" in system
+    assert "step out" in prompts.DECIDE_SYSTEM.lower() and "real interview" in prompts.DECIDE_SYSTEM
+
+
+@pytest.mark.parametrize("raw,want", [
+    # what Gemini actually produced live on the last question: re-asked after the step back in
+    ("Let me step out of the interview for a second. In a real interview, restarting the server is a red flag. "
+     "Instead, you should propose a circuit breaker or tuning the eviction policy. Okay, back in the interview. "
+     "How would you handle that cache thrashing without horizontal scaling?",
+     "Let me step out of the interview for a second. In a real interview, restarting the server is a red flag. "
+     "Instead, you should propose a circuit breaker or tuning the eviction policy."),
+    ("Stepping out: that answer would cost you. Lead with the tradeoff. Back to it.",
+     "Stepping out: that answer would cost you. Lead with the tradeoff."),
+    ("Stepping out: that answer would cost you. Lead with the tradeoff.",
+     "Stepping out: that answer would cost you. Lead with the tradeoff."),
+    ("Why would you say that?", "Why would you say that?"),   # never cut a turn down to nothing
+])
+def test_final_coaching_ends_at_the_model_answer(raw, want):
+    assert final_coaching(raw) == want
+
+
+def test_small_talk_context_names_what_they_are_interviewing_for():
+    s = state()
+    s.exchanges = [{"kind": "calibration", "text": lines.CALIBRATION_LINE, "transcript": "I'm a CS major at Rutgers."}]
+    ctx = prompts.small_talk_context(s)
+    assert "INTERVIEWING FOR: Backend Engineer" in ctx and 'CANDIDATE: "I\'m a CS major at Rutgers."' in ctx
+    assert "PRESENTATION TOPIC:" in prompts.small_talk_context(state("Class Presentation"))
+    assert "major" in prompts.SMALL_TALK_SYSTEM and '"got it"' in prompts.SMALL_TALK_SYSTEM
+
+
+@pytest.mark.parametrize("raw,coaching,question", [
+    ("Let me step out. That would cost you. Okay, back in the interview. How would you shard it?",
+     "Let me step out. That would cost you. Okay, back in the interview.", "How would you shard it?"),
+    ("Let me step out. That would cost you. Say X instead.", "Let me step out. That would cost you. Say X instead.", ""),
+])
+def test_split_coaching(raw, coaching, question):
+    assert split_coaching(raw) == (coaching, question)
+
+
+def test_reports_say_whether_composure_was_measured():
+    measured = fallback_report(state(), normalize_history(history()))
+    assert measured.composure_measured is True
+    no_vitals = normalize_history([{"question_id": "q1", "idx": 1, "kind": "main", "text": "Q", "transcript": "A",
+                                    "stats": qstats(n_samples=0, stress_mean=None, stress_peak=None)}])
+    assert fallback_report(state(), no_vitals).composure_measured is False
+    draft = ReportDraft(composure_score=90, summary="s", hardest_moment="none", top_tips=["a", "b", "c"],
+                        per_question=[])
+    assert finalize_draft(state(), no_vitals, draft).composure_measured is False
+    assert finalize_draft(state(), normalize_history(history()), draft).composure_measured is True
+
+
+def test_pct_never_prints_negative_zero():
+    from backend.brain.history import pct
+    assert [pct(-0.3), pct(0.4), pct(22.4), pct(-7.6), pct(None)] == ["+0%", "+0%", "+22%", "-8%", "n/a"]
+
+
+def test_labels_follow_the_live_numbering():
+    items = normalize_history([
+        {"question_id": "c", "idx": 0, "kind": "calibration", "text": "", "transcript": "", "stats": None},
+        {"question_id": "a", "idx": 1, "kind": "main", "text": "", "transcript": "", "stats": None},
+        {"question_id": "b", "idx": 2, "kind": "follow_up", "text": "", "transcript": "", "stats": None},
+        {"question_id": "d", "idx": 3, "kind": "main", "text": "", "transcript": "", "stats": None},
+        {"question_id": "e", "idx": 4, "kind": "follow_up", "text": "", "transcript": "", "stats": None},
+    ])
+    assert [it.label for it in items] == ["Warm-up", "Q1", "Q1 follow-up", "Q2", "Q2 follow-up"]
+
+
+def test_calm_session_has_no_spike_in_hardest_moment():
+    calm = normalize_history([{"question_id": "q1", "idx": 1, "kind": "main", "text": "Q", "transcript": "A",
+                               "stats": qstats("q1", stress_mean=2, stress_peak=3)}])
+    assert fallback_report(state(), calm).hardest_moment.startswith("No real stress spike")
+    draft = ReportDraft(composure_score=97, summary="s", top_tips=["a", "b", "c"], per_question=[],
+                        hardest_moment="Your single biggest stress spike happened during Q1, stress 3.")
+    assert finalize_draft(state(), calm, draft).hardest_moment.startswith("No real stress spike")
+
+
+@pytest.mark.parametrize("action,turns_left,queue,answered,expected", [
+    ("push", 3, 2, True, "push"),          # room for the follow-up and both planned questions
+    ("push", 2, 2, True, "next"),          # a follow-up now would cost a planned question
+    ("follow_up", 1, 0, True, "follow_up"),
+    ("redirect", 2, 2, True, "next"),
+    ("coach", 1, 2, True, "coach"),        # coaching moves on, so it never costs a question
+    ("coach", 5, 2, False, "next"),        # silence is never coached
+])
+def test_resolve_respects_turn_budget_and_silence(action, turns_left, queue, answered, expected):
+    assert resolve_action(action, "Some words to say here?", 0, 0, queue, turns_left=turns_left,
+                          answered=answered) == expected

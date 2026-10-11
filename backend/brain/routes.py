@@ -5,7 +5,7 @@ import json
 import logging
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from backend import config, ws
 from backend.brain import fake
@@ -14,6 +14,7 @@ from backend.brain.state import SessionMeta, SessionState, metas, states, tasks
 from backend.data import queries as data
 
 log = logging.getLogger("brain.routes")
+MAX_FIELD_CHARS = {"user_name": 60, "interview_type": 40, "role_title": 120}
 router = APIRouter(prefix="/api/sessions", tags=["brain"])
 
 
@@ -21,6 +22,13 @@ class CreateSessionBody(BaseModel):
     user_name: str = ""
     interview_type: str = "Software Engineering"
     role_title: str = ""
+
+    @field_validator("user_name", "interview_type", "role_title", mode="before")
+    @classmethod
+    def _tidy(cls, v, info):
+        """Collapse whitespace and cap length: these go into prompts, the database, and spoken lines."""
+        v = " ".join(str(v or "").split())
+        return v[:MAX_FIELD_CHARS[info.field_name]]
 
 
 @router.post("")
@@ -53,9 +61,15 @@ async def start_session(session_id: str):
 
 @router.get("/{session_id}/report")
 async def get_report(session_id: str):
-    report = await data.get_report(session_id)
+    try:
+        report = await data.get_report(session_id)
+    except Exception:
+        log.exception("get_report failed for %s", session_id)
+        report = None
     if isinstance(report, str):   # asyncpg returns JSONB as text unless a codec is set
         report = json.loads(report)
+    if report is None and session_id in states:
+        report = states[session_id].report   # saved in memory if the database save failed
     if report is None:
         raise HTTPException(status_code=404, detail="report not ready")
     return report

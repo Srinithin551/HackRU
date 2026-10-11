@@ -41,6 +41,7 @@ def fake_gemini(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "GEMINI_FAST_MODEL", "fast-model")
     monkeypatch.setattr(config, "GEMINI_THINKING_LEVEL", "minimal")
     monkeypatch.setattr(gemini, "_no_thinking_level", set())
+    monkeypatch.setattr(gemini, "_resting_until", {})
 
     def install(*replies):
         models = FakeModels(replies)
@@ -65,7 +66,7 @@ def test_plan_cleans_pads_and_pins_difficulty(fake_gemini):
 
 def test_decide_parses_and_clamps(fake_gemini):
     fake_gemini({"action": "push", "spoken_text": "Okay. What breaks first at ten times the load?",
-                 "answer_quality": 9, "rationale": "calm and strong"})
+                 "answer_quality": 9, "rationale": "calm and strong", "coaching": ""})
     d = asyncio.run(gemini.decide_next(state(), "main", "Q", "answer", None, None))
     assert d.action == "push" and d.answer_quality == 5
 
@@ -80,13 +81,13 @@ def test_decide_times_out_to_next(fake_gemini, monkeypatch):
 
 
 def test_bad_json_falls_back(fake_gemini):
-    fake_gemini({"action": "dance", "spoken_text": "", "answer_quality": 3, "rationale": ""})
+    fake_gemini({"action": "dance", "spoken_text": "", "answer_quality": 3, "rationale": "", "coaching": ""})
     assert asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None)).action == "next"
 
 
 def test_thinking_level_rejected_retries_without_it(fake_gemini):
     models = fake_gemini(RuntimeError("400 INVALID_ARGUMENT: thinking_level is not supported for this model"),
-                         {"action": "next", "spoken_text": "", "answer_quality": 3, "rationale": "ok"})
+                         {"action": "next", "spoken_text": "", "answer_quality": 3, "rationale": "ok", "coaching": ""})
     d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
     assert d.rationale == "ok"
     assert models.models == ["fast-model", "fast-model"]   # same model, retried without thinking_level
@@ -97,7 +98,7 @@ def test_thinking_level_rejected_retries_without_it(fake_gemini):
 def test_overloaded_model_fails_over_to_the_other(fake_gemini):
     models = fake_gemini(RuntimeError("503 UNAVAILABLE: model is experiencing high demand"),
                          {"action": "ease_off", "spoken_text": "Let's slow down.", "answer_quality": 2,
-                          "rationale": "stressed"})
+                          "rationale": "stressed", "coaching": ""})
     d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
     assert d.action == "ease_off"
     assert models.models == ["fast-model", "main-model"]   # decide_next tries the fast model first
@@ -126,3 +127,88 @@ def test_final_report_from_gemini(fake_gemini):
                  "top_tips": ["a", "b", "c"]})
     r = asyncio.run(gemini.final_report(state(), items))
     assert r.generated_by == "gemini" and r.composure_score == 61 and r.top_tips == ["a", "b", "c"]
+
+
+@pytest.mark.parametrize("raw,want", [
+    ("Got it. I see. Cutting mismatches that much is a real result. Next?", "Cutting mismatches that much is a real result. Next?"),
+    ("Okay, got it! Let's switch gears.", "Let's switch gears."),
+    ("Makes sense, thanks for sharing. So how would you shard it?", "So how would you shard it?"),
+    ("Alright, I understand \u2014 so what's the tradeoff?", "So what's the tradeoff?"),
+    ("I see what you mean, but that's not the question.", "I see what you mean, but that's not the question."),
+    ("Interestingly, caching helps here.", "Interestingly, caching helps here."),
+    ("Got it.", "Got it."),   # never strip a turn down to nothing
+])
+def test_stock_openers_are_stripped(raw, want):
+    assert gemini.strip_stock_openers(raw) == want
+
+
+def test_decide_turn_has_stock_openers_removed(fake_gemini):
+    fake_gemini({"action": "next", "spoken_text": "Got it, makes sense. Let's switch gears. Why Go?",
+                 "answer_quality": 4, "rationale": "solid", "coaching": ""})
+    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
+    assert d.spoken_text == "Let's switch gears. Why Go?"
+
+
+def test_small_talk_uses_the_fast_model_and_cleans_the_turn(fake_gemini):
+    models = fake_gemini({"spoken_text": "Got it. Turtles are underrated. What made you pick computer science?"})
+    line = asyncio.run(gemini.small_talk_follow_up(state()))
+    assert line == "Turtles are underrated. What made you pick computer science?"
+    assert models.models == ["fast-model"]
+
+
+def test_small_talk_failure_returns_none(fake_gemini):
+    fake_gemini(RuntimeError("503"), RuntimeError("503"))
+    assert asyncio.run(gemini.small_talk_follow_up(state())) is None
+
+
+def test_coach_decision_keeps_coaching_separate_from_the_question(fake_gemini):
+    fake_gemini({"action": "coach", "coaching": "Let me step out for a second. That answer would cost you. Okay, back in.",
+                 "spoken_text": "How would you shard it?", "answer_quality": 1, "rationale": "wrong"})
+    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "pizza", None, None))
+    assert d.coaching == "Let me step out for a second. That answer would cost you. Okay, back in."
+    assert d.spoken_text == "How would you shard it?"
+
+
+def test_coach_blob_in_spoken_text_is_split(fake_gemini):
+    fake_gemini({"action": "coach", "coaching": "",
+                 "spoken_text": "Let me step out for a second. That would cost you. Okay, back in the interview. How would you shard it?",
+                 "answer_quality": 1, "rationale": "wrong"})
+    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "pizza", None, None))
+    assert d.coaching == "Let me step out for a second. That would cost you. Okay, back in the interview."
+    assert d.spoken_text == "How would you shard it?"
+
+
+def test_coaching_is_dropped_for_other_actions(fake_gemini):
+    fake_gemini({"action": "next", "coaching": "stray", "spoken_text": "Why Go?", "answer_quality": 4, "rationale": "ok"})
+    assert asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None)).coaching == ""
+
+
+def test_daily_quota_model_is_skipped_until_it_rests(fake_gemini):
+    daily = RuntimeError("429 RESOURCE_EXHAUSTED quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+    models = fake_gemini(daily, {"questions": []}, {"questions": []})
+    asyncio.run(gemini.plan_interview(get_spec("demo"), "Engineer"))
+    asyncio.run(gemini.plan_interview(get_spec("demo"), "Engineer"))
+    assert models.models == ["main-model", "fast-model", "fast-model"]   # no second wasted call on main-model
+
+
+def test_rest_durations():
+    assert gemini._rest_for(RuntimeError("429 RESOURCE_EXHAUSTED ...PerDay...")) == gemini.DAILY_QUOTA_REST_S
+    assert gemini._rest_for(RuntimeError("429 RESOURCE_EXHAUSTED. Please retry in 11.5s.")) == 12.5
+    assert gemini._rest_for(RuntimeError("503 UNAVAILABLE high demand")) == gemini.OVERLOAD_REST_S
+    assert gemini._rest_for(ValueError("bad json")) is None
+
+
+def test_all_models_resting_falls_back_immediately(fake_gemini, monkeypatch):
+    import time as _time
+    models = fake_gemini()
+    monkeypatch.setattr(gemini, "_resting_until", {"main-model": _time.monotonic() + 99, "fast-model": _time.monotonic() + 99})
+    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
+    assert d.action == "next" and models.models == []                 # no network call at all
+
+
+def test_let_us_becomes_lets(fake_gemini):
+    fake_gemini({"action": "next", "spoken_text": "Let us move to the next topic. Why Go?", "answer_quality": 4,
+                 "rationale": "ok", "coaching": ""})
+    d = asyncio.run(gemini.decide_next(state(), "main", "Q", "a", None, None))
+    assert d.spoken_text == "Let's move to the next topic. Why Go?"
+    assert gemini._LET_US.sub(r"\1et's ", "Please let us know.") == "Please let us know."   # left alone

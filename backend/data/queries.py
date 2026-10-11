@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 from backend.contracts import Baseline, QuestionStats, VitalsReading, WindowStats
 from backend.data import db, fake_queries
-from backend.data.metrics import MIN_CONFIDENCE, delta_pct, stress_score
+from backend.data.metrics import MIN_CONFIDENCE, count_ingested, delta_pct, stress_score
 
 log = logging.getLogger("data.queries")
 
@@ -36,6 +36,10 @@ BASELINE_MISS_TTL_S = 10.0    # before calibration ends, re-check the DB for a b
 _baselines: dict[str, Baseline] = {}            # session_id -> latest baseline (in-memory cache)
 _baseline_misses: dict[str, float] = {}         # session_id -> monotonic time we last found none
 _active: tuple[float, str | None] = (0.0, None)  # (cache expiry, active session id)
+# Sessions created by THIS backend process. Only these can be "active": the sensing client on this laptop
+# must never attach to a teammate's session on a shared Tiger Data service, or to a session left open by
+# a crashed run or an old test.
+_mine: set[str] = set()
 
 
 def _contract(fn):
@@ -72,6 +76,7 @@ def _reset_caches() -> None:
     global _active
     _baselines.clear()
     _baseline_misses.clear()
+    _mine.clear()
     _active = (0.0, None)
 
 
@@ -81,24 +86,32 @@ def _reset_caches() -> None:
 async def create_session(user_name: str, interview_type: str, role_title: str) -> str:
     global _active
     pool = await db.get_pool()
+    if _mine:   # a new interview on this machine closes this machine's older open ones (one sensor, one person)
+        await pool.execute("UPDATE sessions SET ended_at = now() WHERE ended_at IS NULL AND id = ANY($1::uuid[])",
+                           list(_mine))
     sid = str(await pool.fetchval(
         "INSERT INTO sessions (user_name, interview_type, role_title) VALUES ($1, $2, $3) RETURNING id",
         user_name, interview_type, role_title))
+    _mine.add(sid)
     _active = (time.monotonic() + ACTIVE_CACHE_S, sid)     # the newest live session is the active one
     return sid
 
 
 @_contract
 async def get_active_session() -> str | None:
-    """Most recent session with ended_at IS NULL started in the last 30 minutes. Cached 2 s."""
+    """Most recent session created by this backend with ended_at IS NULL, started in the last 30 minutes.
+    Cached 2 s."""
     global _active
     expires, sid = _active
     if time.monotonic() < expires:
         return sid
+    if not _mine:
+        _active = (time.monotonic() + ACTIVE_CACHE_S, None)
+        return None
     pool = await db.get_pool()
     row = await pool.fetchval(
         "SELECT id FROM sessions WHERE ended_at IS NULL AND started_at > now() - interval '30 minutes' "
-        "ORDER BY started_at DESC LIMIT 1")
+        "AND id = ANY($1::uuid[]) ORDER BY started_at DESC LIMIT 1", list(_mine))
     sid = str(row) if row else None
     _active = (time.monotonic() + ACTIVE_CACHE_S, sid)
     return sid
@@ -165,7 +178,7 @@ async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
     """Store readings (stress computed per row) and return them as dicts for broadcasting.
 
     Readings without a session_id go to the active session; with no active session they're dropped.
-    Readings with confidence < MIN_CONFIDENCE (0.7, e.g. face lost) are never stored, but are still
+    Readings with confidence < MIN_CONFIDENCE (e.g. face lost) are never stored, but are still
     returned (stress None) so the live chart can show "no face" instead of freezing.
     """
     active, rows, records = None, [], []
@@ -186,6 +199,7 @@ async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
                             r.confidence, stress))
     if len(rows) < len(readings):
         log.debug("insert_vitals: dropped %d reading(s) with no active session", len(readings) - len(rows))
+    count_ingested([row["confidence"] for row in rows])
     if records:
         pool = await db.get_pool()
         await pool.executemany(INSERT_VITALS, records)

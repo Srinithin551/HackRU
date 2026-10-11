@@ -1,20 +1,21 @@
 {
-  "engine": "say",
+  "engine": "elevenlabs",
   "clips": {
-    "af235023bef77aa6.mp3": "Hey, thanks for coming in. Before we get started, how's HackRU going so far?",
-    "1e17037ef8925f0c.mp3": "Nice. And what have you been working on this weekend?",
+    "7f0fe9b4455af2cd.mp3": "Thanks for joining me today. To start, tell me a little about yourself.",
+    "33d79d05a3e01dc0.mp3": "What got you into your field in the first place?",
+    "af46691389d1f4d4.mp3": "What made you choose this topic?",
     "5cec14b162e49a44.mp3": "That's everything I wanted to cover. Thanks for your time. Give me a moment to put your feedback together.",
-    "c33aef7ece326670.mp3": "Okay.",
-    "258e9b78ea3b2e4c.mp3": "Got it.",
-    "eb9b6d618666fd14.mp3": "Mm, alright.",
-    "3c9be14139efe95f.mp3": "Okay, thanks.",
-    "48e6a8b08400738c.mp3": "Alright, let's keep going.",
     "c8b95f18ef37d979.mp3": "Tell me about a project you built recently and the part you're proudest of.",
     "e39c4436f91fad64.mp3": "Walk me through how you'd debug an API that suddenly got ten times slower.",
     "cbcf05823857c370.mp3": "How would you design a chat app that has to support a million users?",
     "394942d49e8ae023.mp3": "Tell me about your biggest failure, and why I should still hire you.",
+    "903e54b51bf570d3.mp3": "Sorry, I didn't catch that. Could you say it again?",
     "c1fc6675cc24e7f2.mp3": "That's okay, let me put it more simply. Just walk me through the very first step you'd take.",
-    "9a5c2b5d2732b9ae.mp3": "Okay. Let's go one level deeper. What would break first if the load grew ten times?",
-    "24cecf4b7f2320cb.mp3": "Can you give me one specific example of that?"
+    "9b7057123c8ec935.mp3": "Let's go one level deeper. What would break first if the load grew ten times?",
+    "24cecf4b7f2320cb.mp3": "Can you give me one specific example of that?",
+    "713d6aa3d5a00af4.mp3": "Let me step out of the interview for a second. In a real interview, an answer like that would cost you, because it doesn't answer what was asked. A strong answer leads with your main point and backs it with one concrete example. Okay, back in the interview. Walk me through how you'd debug an API that suddenly got ten times slower.",
+    "40a463b73b041dfc.mp3": "Let me step out of the interview for a second. In a real interview, an answer like that would cost you, because it doesn't answer what was asked. A strong answer leads with your main point and backs it with one concrete example. Okay, back in the interview. How would you design a chat app that has to support a million users?",
+    "3d23969a19d7dc0b.mp3": "Let me step out of the interview for a second. In a real interview, an answer like that would cost you, because it doesn't answer what was asked. A strong answer leads with your main point and backs it with one concrete example. Okay, back in the interview. Tell me about your biggest failure, and why I should still hire you.",
+    "0306ee32b4d1a1a4.mp3": "Let me step out of the interview for a second. In a real interview, an answer like that would cost you, because it doesn't answer what was asked. A strong answer leads with your main point and backs it with one concrete example. That's everything I wanted to cover. Thanks for your time. Give me a moment to put your feedback together."
   }
 }

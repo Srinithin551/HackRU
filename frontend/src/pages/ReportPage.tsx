@@ -44,13 +44,20 @@ function buildView(report: Report, replay: ReplayResponse, storedFlags: CoachFla
   const end = Math.max(lastPoint, time(replay.session.ended_at) ?? lastPoint)
 
   const feedback = new Map(report.per_question.map((f) => [f.question_id, f]))
+  // Same numbering as the live screen ("Question 2 of 5") and the report text: planned questions are
+  // Q1..Qn, a follow-up keeps its question's number ("Q2 follow-up"). Data's idx counts every turn.
+  let planned = 0
   const questions: QuestionView[] = [...replay.questions]
     .sort((a, b) => a.idx - b.idx)
     .map((q) => ({
       id: q.id,
       kind: q.kind,
-      // Data's sequential idx (counts follow-ups) labels the bands Q1, Q2... (brain.md).
-      label: q.kind === 'calibration' ? 'Warm-up' : `Q${q.idx}`,
+      label:
+        q.kind === 'calibration'
+          ? 'Warm-up'
+          : q.kind === 'main'
+            ? `Q${++planned}`
+            : `Q${Math.max(planned, 1)} follow-up`,
       text: q.text,
       transcript: q.transcript,
       start: time(q.answer_started_at),
@@ -152,8 +159,12 @@ function SessionReport({ sessionId }: { sessionId: string }) {
               <ScoreRing score={report.composure_score} />
               <div>
                 <p className="label-caps">Composure</p>
-                <p className="mt-1 text-title font-semibold">{verdict(report.composure_score)}</p>
-                <p className="text-caption text-ink-muted">0–100 · higher is calmer</p>
+                <p className="mt-1 text-title font-semibold">
+                  {report.composure_measured === false ? 'Not measured' : verdict(report.composure_score)}
+                </p>
+                <p className="text-caption text-ink-muted">
+                  {report.composure_measured === false ? 'No usable vitals this session' : '0–100 · higher is calmer'}
+                </p>
               </div>
             </div>
             <p className="mt-3 text-body text-ink-secondary">{report.summary}</p>

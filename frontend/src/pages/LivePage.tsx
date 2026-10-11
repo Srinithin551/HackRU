@@ -13,8 +13,9 @@
  * the camera in useCamera. On session_ended this page fades to "Analyzing…" and
  * navigates to the report, which is already saved by then.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router'
+import { CoachingChip, CoachingPopup } from '../components/CoachingPopup.tsx'
 import { CalibrationBanner, CoachToast, ThinkingDots, Waveform } from '../components/LiveOverlays.tsx'
 import { HrSparkline, StressSparkline } from '../components/Sparklines.tsx'
 import { StressGauge } from '../components/StressGauge.tsx'
@@ -205,8 +206,24 @@ function InterviewerPanel({
 }) {
   const q = live.question
   const earlier = live.asked.filter((a) => a.question_id !== q?.question_id)
+  // Coaching pops up while the interviewer is speaking it, then docks under the question for the user's
+  // turn. Keyed by question id so a new coaching turn always pops up again.
+  const [closedFor, setClosedFor] = useState<string | null>(null)
+  const [reopenedFor, setReopenedFor] = useState<string | null>(null)
+  const qid = q?.question_id ?? null
+  const coachingOpen =
+    Boolean(q?.coaching) && ((live.speaking && closedFor !== qid) || (reopenedFor === qid && closedFor !== qid))
+  const closeCoaching = useCallback(() => {
+    setClosedFor(qid)
+    setReopenedFor(null)
+  }, [qid])
+  const openCoaching = () => {
+    setClosedFor(null)
+    setReopenedFor(qid)
+  }
   return (
-    <aside className="panel flex min-h-0 flex-col gap-5 p-panel">
+    <aside className="panel relative flex min-h-0 flex-col gap-5 p-panel">
+      {q?.coaching && coachingOpen && <CoachingPopup text={q.coaching} speaking={live.speaking} onClose={closeCoaching} />}
       {/* Who is talking */}
       <div className="flex items-center gap-3">
         <div className="grid size-11 shrink-0 place-items-center rounded-full bg-accent-subtle text-lead font-semibold text-accent">
@@ -219,8 +236,9 @@ function InterviewerPanel({
         {live.phase === 'thinking' && !live.speaking ? <ThinkingDots /> : <Waveform active={live.speaking} />}
       </div>
 
-      {/* The question */}
-      <div className="border-t border-hairline pt-5">
+      {/* When space is tight, "Asked so far" gives up its space first, then this scrolls. The answer
+          controls below never move off screen. */}
+      <div className="min-h-0 overflow-y-auto border-t border-hairline pt-5">
         <div className="flex items-center justify-between gap-2">
           <span className="label-caps">{counterLabel(q)}</span>
           {q?.kind === 'follow_up' && (
@@ -240,10 +258,12 @@ function InterviewerPanel({
         <p className="mt-3 text-question font-medium tracking-tight text-balance">
           {q ? q.text : 'Connecting to your interviewer…'}
         </p>
+        {/* Docked coaching note (the pop-up shows it in full while it's being spoken) */}
+        {q?.coaching && !coachingOpen && <CoachingChip text={q.coaching} onOpen={openCoaching} />}
       </div>
 
       {/* Answer controls */}
-      <div className="flex flex-col gap-2.5">
+      <div className="flex shrink-0 flex-col gap-2.5">
         {typedMode && (
           <textarea
             value={typed}
@@ -267,7 +287,7 @@ function InterviewerPanel({
 
       {/* Asked so far */}
       {earlier.length > 0 && (
-        <div className="mt-auto min-h-0 overflow-y-auto border-t border-hairline pt-4">
+        <div className="mt-auto min-h-0 shrink-[100] overflow-y-auto border-t border-hairline pt-4">
           <p className="label-caps">Asked so far</p>
           <ol className="mt-2 flex flex-col gap-2">
             {earlier.map((a) => (

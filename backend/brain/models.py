@@ -4,7 +4,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel
 
-Action = Literal["follow_up", "ease_off", "push", "next", "wrap_up"]
+Action = Literal["coach", "redirect", "follow_up", "ease_off", "push", "next", "wrap_up"]
 
 
 # ---------------------------------------------------------------- Gemini call 1: plan_interview
@@ -23,9 +23,18 @@ class InterviewPlan(BaseModel):   # response_schema wrapper (Gemini wants an obj
 
 class Decision(BaseModel):
     action: Action
-    spoken_text: str     # what the interviewer says next (empty if action == "next")
+    spoken_text: str     # the next turn: a short reaction or lead-in, then the question (shown on screen)
     answer_quality: int  # 1 to 5, Gemini's read of the transcript
     rationale: str       # for logs and the report, never spoken
+    coaching: str = ""   # action == "coach" only: the stepped-out feedback, spoken before spoken_text
+
+
+class DecisionReply(Decision):   # what Gemini must return: coaching is required in the schema (may be "")
+    coaching: str
+
+
+class OpeningLine(BaseModel):    # open_interview: the turn from small talk into the first real question
+    spoken_text: str
 
 
 # ---------------------------------------------------------------- Gemini call 3: final_report
@@ -58,10 +67,12 @@ class Adaptation(BaseModel):
     action: Action                # what the interviewer actually did next (after rule enforcement)
     answer_quality: int
     rationale: str
+    coaching: str = ""            # the live coaching that was spoken, when action == "coach"
 
 
 class Report(ReportDraft):
     """Served by GET /api/sessions/{id}/report. The brain.md fields plus additive extras."""
+    composure_measured: bool = True      # False = no usable vitals, so composure_score is a neutral 50, not a verdict
     coach_flags: list[CoachFlag] = []    # for red dots on the replay chart
     adaptations: list[Adaptation] = []   # where the interviewer eased off / pushed / followed up
     generated_by: Literal["gemini", "fallback", "fake"] = "gemini"

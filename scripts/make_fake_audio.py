@@ -32,7 +32,7 @@ def render_say(text: str, out: Path, say_voice: str) -> None:
         cmd = ["say", "-o", str(aiff)] + (["-v", say_voice] if say_voice else []) + [text]
         subprocess.run(cmd, check=True)
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(aiff),
-                        "-codec:a", "libmp3lame", "-b:a", "96k", "-ar", "44100", str(out)], check=True)
+                        "-codec:a", "libmp3lame", "-b:a", "128k", "-ar", "44100", str(out)], check=True)
 
 
 def main() -> None:

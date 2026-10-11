@@ -1,4 +1,4 @@
-"""The three Gemini calls. Each one has a timeout and a fallback, so none of them can stall a live session.
+"""The Gemini calls. Each one has a timeout and a fallback, so none of them can stall a live session.
 
 Every prompt and response is appended to backend/logs/gemini-YYYYMMDD.jsonl for 3 AM debugging.
 """
@@ -6,6 +6,7 @@ Every prompt and response is appended to backend/logs/gemini-YYYYMMDD.jsonl for 
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Optional, TypeVar
@@ -15,16 +16,19 @@ from pydantic import BaseModel
 from backend import config
 from backend.brain import fake, prompts
 from backend.brain.history import HistoryItem
-from backend.brain.models import Decision, InterviewPlan, PlannedQuestion, Report, ReportDraft
+from backend.brain.models import Decision, DecisionReply, InterviewPlan, OpeningLine, PlannedQuestion, Report, ReportDraft
 from backend.brain.report import fallback_report, finalize_draft
 from backend.brain.specs import InterviewSpec, fallback_questions
 from backend.brain.state import SessionState
+from backend.brain.turns import split_coaching
 from backend.contracts import QuestionStats, WindowStats
 
 log = logging.getLogger("brain.gemini")
 
 PLAN_TIMEOUT_S = 20.0     # runs during the ~40s calibration, so it has room
 DECIDE_TIMEOUT_S = 6.0    # brain.md: fall back to "next" past 6s
+OPEN_TIMEOUT_S = 5.0      # the small-talk → first-question bridge; falls back to the planned text
+SMALL_TALK_TIMEOUT_S = 4.0  # the second small-talk turn; falls back to a fixed line
 REPORT_TIMEOUT_S = 45.0
 MIN_ATTEMPT_S = 1.0       # don't start another model attempt with less time than this left
 
@@ -32,6 +36,23 @@ T = TypeVar("T", bound=BaseModel)
 
 _client = None
 _no_thinking_level: set[str] = set()   # models that rejected thinking_level
+_resting_until: dict[str, float] = {}  # model -> monotonic time it may be tried again (quota/overload)
+
+DAILY_QUOTA_REST_S = 3600.0   # a per-day quota is gone for hours; re-check hourly instead of every call
+OVERLOAD_REST_S = 20.0        # 503 "high demand" is usually brief
+
+
+def _rest_for(e: Exception) -> Optional[float]:
+    """How long to skip a model after this error, or None if it's not a quota/overload error."""
+    msg = str(e)
+    if "RESOURCE_EXHAUSTED" in msg or " 429" in f" {msg}":
+        if "PerDay" in msg:
+            return DAILY_QUOTA_REST_S
+        m = re.search(r"retry in ([\d.]+)s", msg)
+        return float(m.group(1)) + 1 if m else 60.0
+    if "UNAVAILABLE" in msg or " 503" in f" {msg}":
+        return OVERLOAD_REST_S
+    return None
 
 
 class GeminiUnavailable(RuntimeError):
@@ -118,7 +139,11 @@ async def generate(call: str, system: str, prompt: str, schema: type[T], tempera
         raise GeminiUnavailable("GEMINI_API_KEY not set")
     deadline = time.monotonic() + timeout
     last: Optional[Exception] = None
-    for model in models or quality_models():
+    candidates = models or quality_models()
+    available = [m for m in candidates if _resting_until.get(m, 0) <= time.monotonic()]
+    if not available:
+        raise GeminiUnavailable(f"every model is resting after quota/overload errors: {', '.join(candidates)}")
+    for model in available:
         while True:   # at most twice per model: once more if it rejected thinking_level
             remaining = deadline - time.monotonic()
             if last is not None and remaining < MIN_ATTEMPT_S:   # the first attempt always runs
@@ -131,6 +156,10 @@ async def generate(call: str, system: str, prompt: str, schema: type[T], tempera
                     log.warning("%s rejected thinking_level, retrying without it", model)
                     _no_thinking_level.add(model)
                     continue
+                rest = _rest_for(e)
+                if rest:
+                    _resting_until[model] = time.monotonic() + rest
+                    log.warning("%s: %s is rate-limited or overloaded, skipping it for %.0fs", call, model, rest)
                 log.warning("%s on %s failed (%s), trying the next model", call, model, _short(e))
                 break
     raise last or GeminiUnavailable("no Gemini model configured")
@@ -146,6 +175,36 @@ def _clean_spoken(text: str) -> str:
     """Strip anything a TTS voice would read out awkwardly."""
     text = " ".join((text or "").replace("*", "").replace("#", "").replace("`", "").split())
     return text.strip().strip('"').strip()
+
+
+# Backstop for the prompt's banned-phrase list: stock acknowledgments at the start of a turn.
+_STOCK_OPENER = re.compile(
+    r"^(?:okay|ok|alright|all right|so|well)?[,\s]*"
+    r"(?:got it|i see|i understand|makes sense|that makes sense|interesting|great answer|great question|"
+    r"excellent|awesome|absolutely|fair enough|thanks for sharing|thank you for sharing|thank you for that|"
+    r"i appreciate that|that's a good point)\s*[.,!:;\u2014-]+\s*",   # only when it stands alone as a clause
+    re.IGNORECASE,
+)
+
+
+def strip_stock_openers(text: str) -> str:
+    """Remove scripted openers like "Got it. I see." so a turn starts with substance."""
+    out = text
+    while True:
+        trimmed = _STOCK_OPENER.sub("", out, count=1).lstrip()
+        if trimmed == out or not trimmed:
+            break
+        out = trimmed
+    return out[:1].upper() + out[1:] if out else text
+
+
+# "Let us move on" → "Let's move on" (the prompt asks for contractions; this catches the slips).
+_LET_US = re.compile(r"\b([Ll])et us (?=(?:move|switch|shift|turn|talk|dig|dive|look|go|get|start|begin|focus|"
+                     r"explore|discuss|circle|pivot|step|try|come|zoom|jump|head|continue|wrap|change|consider)\b)")
+
+
+def _clean_turn(text: str) -> str:
+    return _LET_US.sub(r"\1et's ", strip_stock_openers(_clean_spoken(text)))
 
 
 # ---------------------------------------------------------------- call 1
@@ -182,18 +241,48 @@ async def decide_next(s: SessionState, kind: str, question: str, transcript: str
                       stats: Optional[QuestionStats], window: Optional[WindowStats]) -> Decision:
     """Never raises. Falls back to `next` (with the queued question) on timeout or error."""
     if config.BRAIN_FAKE:
-        return fake.decide(transcript, stats)
+        return fake.decide(transcript, stats, question=question, kind=kind,
+                           next_question=s.queue[0].text if s.queue else None)
     context = prompts.decide_context(s, kind, question, transcript, stats, window)
     try:
-        d = await generate("decide_next", prompts.DECIDE_SYSTEM, context, Decision,
+        d = await generate("decide_next", prompts.DECIDE_SYSTEM, context, DecisionReply,
                            temperature=0.4, timeout=DECIDE_TIMEOUT_S, models=fast_models())
-        return d.model_copy(update={
-            "spoken_text": _clean_spoken(d.spoken_text),
-            "answer_quality": max(1, min(5, d.answer_quality)),
-        })
+        text, coaching = _clean_turn(d.spoken_text), _LET_US.sub(r"\1et's ", _clean_spoken(d.coaching))
+        if d.action == "coach" and not coaching:
+            coaching, text = split_coaching(text)   # it put everything in spoken_text anyway
+        return Decision(action=d.action, spoken_text=text, coaching=coaching if d.action == "coach" else "",
+                        answer_quality=max(1, min(5, d.answer_quality)), rationale=d.rationale)
     except Exception as e:
         log.warning("decide_next fell back to 'next': %s", _short(e))
         return Decision(action="next", spoken_text="", answer_quality=3, rationale=f"fallback: {type(e).__name__}")
+
+
+async def small_talk_follow_up(s: SessionState) -> Optional[str]:
+    """The second small-talk turn: reacts to the first answer, then asks about their major or field.
+    None means "use the fixed fallback line" (fake mode, no key, or Gemini failed). Never raises."""
+    if config.BRAIN_FAKE or not configured():
+        return None
+    try:
+        line = await generate("small_talk", prompts.SMALL_TALK_SYSTEM, prompts.small_talk_context(s), OpeningLine,
+                              temperature=0.7, timeout=SMALL_TALK_TIMEOUT_S, models=fast_models())
+        return _clean_turn(line.spoken_text) or None
+    except Exception as e:
+        log.warning("small_talk_follow_up fell back to the fixed line: %s", _short(e))
+        return None
+
+
+async def open_interview(s: SessionState, first: PlannedQuestion) -> Optional[str]:
+    """The turn that carries the small talk into the first real question. None means "just ask the
+    planned question as written" (fake mode, no key, or Gemini failed). Never raises."""
+    if config.BRAIN_FAKE or not configured():
+        return None
+    try:
+        line = await generate("open_interview", prompts.OPEN_SYSTEM, prompts.open_context(s, first), OpeningLine,
+                              temperature=0.6, timeout=OPEN_TIMEOUT_S, models=fast_models())
+        return _clean_turn(line.spoken_text) or None
+    except Exception as e:
+        log.warning("open_interview fell back to the planned question: %s", _short(e))
+        return None
 
 
 # ---------------------------------------------------------------- call 3

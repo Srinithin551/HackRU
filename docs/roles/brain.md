@@ -232,9 +232,9 @@ Everything above is implemented on the `brain` branch. This section is what the 
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
 cp .env.example .env                                  # fill in keys; BRAIN_FAKE=1 needs none
-BRAIN_FAKE=1 uvicorn backend.main:app --reload        # from the repo root
+BRAIN_FAKE=1 uvicorn backend.main:app --reload        # from the repo root (dev only: never --reload for a demo)
 python scripts/fake_frontend.py                       # terminal stand-in for the browser
-pytest                                                # 51 tests, < 1 second
+pytest                                                # 119 tests, < 2 seconds
 ```
 
 `GET /health` reports fake mode, whether Gemini/ElevenLabs keys are set, and which routers are mounted.
@@ -251,7 +251,7 @@ pytest                                                # 51 tests, < 1 second
 | `backend/brain/interviewer.py` | The loop: calibration, questions, filler, decide, resolve, wrap-up, crash recovery |
 | `backend/brain/watcher.py` | Coach flags every 3s while listening |
 | `backend/brain/gemini.py`, `prompts.py` | The three Gemini calls, each with a timeout and a fallback, logged to `backend/logs/` |
-| `backend/brain/voice.py` | ElevenLabs TTS, sha1 disk cache, request dedupe, prefetch, filler rotation |
+| `backend/brain/voice.py` | ElevenLabs TTS, sha1 disk cache, request dedupe, clip length from file size |
 | `backend/brain/report.py` | Validates Gemini's report, and builds a numbers-only report when Gemini is unavailable |
 | `backend/brain/fake.py` | `BRAIN_FAKE=1` questions, rule-based decisions, list of every fake-mode line |
 | `backend/brain/specs.py`, `lines.py` | Interview types (counts, difficulty curves, limits, fallback questions) and fixed spoken lines |
@@ -266,16 +266,22 @@ pytest                                                # 51 tests, < 1 second
 - **`question.index` / `total`** = the planned question number and the planned count ("Q 2 of 5"). Calibration is `index: 0`. A follow-up keeps its parent's number, so check `kind`. The replay chart's Q1, Q2... come from Data's sequential `idx`, which counts follow-ups too.
 - **State sequence:**
   - `calibrating` covers the whole calibration (one or two small-talk prompts, no `asking`/`listening` during it);
-  - each question then goes `asking` → `listening` → (answer) → `filler` → `thinking`;
-  - at the end: `thinking` (closing line plays as a `filler` while the report is written) → `done` → `session_ended`.
+  - after the last small-talk answer: `thinking` while Gemini writes the bridge into the first question;
+  - each question then goes `asking` → `listening` → (answer) → `thinking`. **No filler clips** ("Okay.", "Got it."): they sounded scripted and overlapped the next question;
+  - at the end: `thinking` → one `filler` clip (reaction or coaching on the last answer, plus the closing line) → `done` → `session_ended`. **`session_ended` is only sent after that clip has finished playing** (its length comes from the file size), so navigating to the report never cuts it off.
+- **One voice at a time.** The server sends at most one clip per turn, and the next one only after `answer_done`. `frontend/src/lib/playClip.ts` is also a single channel: starting any clip stops the previous one (covered by `playClip.test.ts`). Verified in a real browser: 7 clips in a session, never more than 1 playing.
+- **Question `text` is the question** with at most a short lead-in, e.g. "That reconciliation work sounds tricky. Let's switch gears: how would you…". It never contains coaching.
+- **`question.coaching`** (string or null): feedback on the previous answer, said outside the interview frame. It is spoken first, in the same clip as `text`. The Live page shows it as a "Coaching on your last answer" note under the question.
 - **Reconnects:** on connect the hub replays the latest `state`, `question` and `session_ended`. A reload mid-session lands on the right screen.
 - **`POST /start`** is idempotent and returns `status`: `started`, `already_running` or `finished`.
 - **`end_session`** works at any time. There's no closing line in that case.
 - **Timeouts:** an unanswered question times out after 120s, counted from `answer_started`. If no tab is connected at that point, the session ends.
 - **`GET /report`** returns `404 {"detail": "report not ready"}` until it's saved. It's always saved before `session_ended` is sent. On top of the shape above, it has these additive fields:
   - `coach_flags: [{ts, question_id, level, stress, message}]`, for red dots on the replay chart;
-  - `adaptations: [{question_id, action, answer_quality, rationale}]` (the decision made after that question's answer);
-  - `generated_by: "gemini" | "fallback" | "fake"`.
+  - `adaptations: [{question_id, action, answer_quality, rationale}]` (the decision made after that question's answer; `action` can be `coach`, `redirect`, `follow_up`, `ease_off`, `push`, `next`, `wrap_up`);
+  - `generated_by: "gemini" | "fallback" | "fake"`;
+  - `composure_measured: bool`. When false, no usable vitals were captured, so `composure_score` is a neutral 50 and shouldn't be read as a verdict (the Report page shows "Not measured");
+  - `adaptations[].coaching`: the coaching that was spoken, for `coach` actions.
 
 ### For Data
 
@@ -286,6 +292,7 @@ pytest                                                # 51 tests, < 1 second
 - **DB pool hook:** if `backend/data/db.py` defines `async def startup()` / `async def shutdown()`, `main.py` calls them in the app lifespan.
 - **Routes:** `backend/data/routes.py` must expose `router = APIRouter()`. `main.py` mounts it automatically when the file exists. The same goes for `backend/sensing/routes.py`.
 - **Calibration timing:** Brain keeps calibration going until at least 35s after `/start` (it asks a second small-talk prompt if the first answer was short), then calls `compute_baseline`. Calibration rows are `kind="calibration"`, `idx=0`, and there can be two of them.
+- **Question text** stored via `insert_question` is the question as asked (with any short lead-in), never the coaching, so replay and report lists show real questions.
 - **`mock_vitals.py --auto`** can poll `GET /api/sessions/{id}/status` for `phase` and `question.{index,kind}` to know when an answer is in progress.
 
 ### For Sensing
@@ -302,18 +309,58 @@ pytest                                                # 51 tests, < 1 second
 | `DECIDE_TIMEOUT_S` / `PLAN_TIMEOUT_S` / `REPORT_TIMEOUT_S` | 6 / 20 / 45 | `gemini.py` |
 | `INTERVAL_S` / `WINDOW_S` / `COOLDOWN_S` / `MIN_SAMPLES` | 3 / 10 / 12 / 3 | `watcher.py` |
 | Questions, `max_turns`, `max_seconds` per type | SWE/Behavioral/Presentation: 5 (2,3,3,4,5), 7, 480s. Demo: 3 (2,4,5), 5, 240s | `specs.py` |
-| `GEMINI_MODEL` (plan + report), `GEMINI_FAST_MODEL` (decide_next), `GEMINI_THINKING_LEVEL` | `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `minimal` | `.env` |
+| `GEMINI_MODEL` (plan + report), `GEMINI_FAST_MODEL` (decide_next), `GEMINI_THINKING_LEVEL` | `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `minimal` | `.env`. Free tier: `gemini-3.6-flash` allows only **20 requests/day** (seen 2026-10-10); the Brain then rests it and uses flash-lite. Enable billing for the demo |
 | `ELEVENLABS_MODEL`, `ELEVENLABS_VOICE_ID` | `eleven_flash_v2_5`, Eric (`cjVigY5qzO86Huf0OWal`) | `.env` |
+
+### End-to-end flow and what happens when a link fails
+
+| # | Link | Code | If it fails |
+|---|---|---|---|
+| 1 | Webcam → Presage (SmartSpectra C++ app) | Sensing, outside the repo | No log lines: client reports "NO FACE", confidence 0; UI shows "Waiting for sensor"; `/health` `sensor.live=false` |
+| 2 | Presage log → sensing client → `POST /api/vitals` | `sensing_client/client.py`, `backend/sensing/routes.py` | Client buffers 30 readings and retries; never crashes; only posts while a session is active. "Active" = the newest open session **created by this backend**, and a new interview closes this backend's older ones, so readings never go to a teammate's session on a shared Tiger Data service or to a stale one |
+| 3 | Vitals → Tiger Data (stress score, baseline) | `backend/data/queries.py`, `metrics.py` | Readings below `DATA_MIN_CONFIDENCE` (default 0.4, Presage's accuracy standard for heart rate; measured: at 0.7 a 60%-confidence Presage signal lost every reading) are dropped; `/health` `sensor.stored` / `sensor.below_cutoff` show the split live, and the log warns if most are dropped; no baseline yet → stress `null`; < 10 calm samples → population baseline |
+| 4 | Brain reads stats → Gemini | `brain/interviewer.py`, `gemini.py` | Every call has a timeout and a fallback; quota/overload errors rest that model (1 h for a daily quota, 20 s for 503) and fail over to the other |
+| 5 | ElevenLabs voice | `brain/voice.py` | `audio_url: null` → the page shows the text and opens the mic right away |
+| 6 | Browser audio | `frontend/src/lib/playClip.ts` | One voice channel: a new clip always stops the previous one; autoplay/decode errors count as "ended" |
+| 7 | Continuous analysis | `brain/watcher.py` (3 s), vitals broadcast | Watcher errors are logged per tick and never stop the loop |
+| 8 | Dashboard (live + report/replay) | `frontend/src/pages`, Data `/replay`, Brain `/report` | `session_ended` is always sent (even with the DB down); `/report` falls back to the in-memory copy |
+
+Other guards:
+- Silence is never coached: one "didn't catch that", then the interview moves on.
+- Follow-ups only happen when the turn budget still fits every planned question.
+- Setup fields are trimmed and capped (60/40/120 chars), and transcripts are capped at 4,000 chars.
+- No answer within 120s with the tab gone ends the session.
+
+### Coaching pop-up (Live page)
+While the interviewer speaks a coaching turn, `CoachingPopup` overlays the interviewer panel with the full text ("Stepping out of the interview", "Got it", Escape). When it's the user's turn it docks into a `CoachingChip` under the question, and clicking the chip reopens it. Question labels everywhere use the live numbering ("Q2", "Q2 follow-up"; "Q2+" on the chart).
 
 ### Where the build differs from the plan above
 
 - **Two Gemini models with failover.** Measured on 2026-10-10: `gemini-3.8-flash` took 2–6s per decision and returned 503 "high demand" errors, while `3.6-flash` (about 1.3s) and `3.5-flash-lite` (about 0.7s) made the same decisions. Free-tier limits are 5 requests per minute *per model*, so splitting the calls doubles the headroom. If one model returns 503/429 or errors, the other gets the remaining time budget.
-- **Filler line:** "Take your time, let's keep going." became "Alright, let's keep going.", since it plays after the answer ends.
+- **No filler clips**, unlike the plan above (see the state sequence).
 - **Fake-mode decisions are rule-based**, not a fixed `next`. They follow the same thresholds as the Gemini prompt, so pressing `s` in `mock_vitals.py` makes the fake interviewer ease off.
 - **Fake clips are placeholder macOS voices.** Once the ElevenLabs voice is picked, run `python scripts/make_fake_audio.py --force` and commit the result.
-- **Brain enforces Gemini's rules in code** (`resolve_action`): at most one follow-up per planned question, no `wrap_up` while questions remain, and an empty `spoken_text` becomes `next`. Budget checks skip the Gemini call entirely.
+- **Brain enforces Gemini's rules in code** (`resolve_action`): at most one follow-up and one redirect per planned question, no `wrap_up` while questions remain, and an empty or runaway (70+ word) `spoken_text` becomes `next`. If the rules change Gemini's action, the planned question is asked as written. Budget checks skip the Gemini call entirely.
 - **Crash safety:** if the loop throws, the session still ends with a numbers-only report and `session_ended`.
-- **Prefetching** the next question's audio is done. **ElevenLabs speech-to-text is not** (it needs Frontend's agreement first).
+- **A conversation, not a list.** Gemini writes every turn after the small talk:
+  - **`open_interview`** (fast model, 5s budget) bridges from the small-talk answers into the first planned question.
+  - **`decide_next`** returns the whole next turn: a short reaction to the answer, then the next question (the planned one, reworded to flow) or a follow-up.
+  - The planned questions remain the backbone, so the difficulty curve holds. Any failure falls back to the planned text.
+  - Prefetching was removed, since the next question's wording isn't known in advance. Measured live: 1.2–1.7s from `answer_done` to the next `question`, voice included.
+- **`coach` action: immediate feedback on wrong answers.** When an answer is wrong, off-topic (even if technically sound), rude, dismissive or very weak, the interviewer steps outside the interview. In one clip it:
+  - says it's stepping out;
+  - says what would realistically happen with that answer in a real interview;
+  - gives what they should have said, with real substance (e.g. "add the new column, backfill in batches, switch reads, drop the old one");
+  - steps back in and asks the next planned question.
+
+  On the last question it ends after the model answer. Code trims any trailing question or "back in the interview" sentence, which Gemini sometimes adds anyway.
+- **`redirect`** now only means "I didn't catch that" (empty or garbled speech-to-text), once per planned question.
+- **Voice style.** Prompts ban stock acknowledgments ("got it", "I see", "I understand", "makes sense", "great answer", "thanks for sharing"…) and ask for specific, substantive reactions with contractions. A code backstop (`gemini.strip_stock_openers`) removes stock openers that still slip through.
+- **Fake mode** approximates `coach` with a word-overlap check and a fixed coaching line, pre-recorded joined to each next question so it's still one clip.
+- **Adaptive small talk.** The opener is pre-recorded so the session starts instantly ("Thanks for joining me today. To start, tell me a little about yourself.").
+  - The second small-talk turn, asked only when the baseline needs more time, is written live by Gemini (`small_talk_follow_up`, fast model, 4s budget). It reacts to what they said: it plays along with something random, calmly notes something rude, or says it didn't catch an empty answer. Then it asks an easy background question tied to what they're interviewing for: why they chose their major or field, or what drew them to a presentation topic.
+  - The fixed per-type line is the fallback. Measured: about 0.6–1.1s.
+- **ElevenLabs speech-to-text is not done** (it needs Frontend's agreement first).
 
 ---
 

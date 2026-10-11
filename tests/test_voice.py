@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend import config
-from backend.brain import lines, voice
+from backend.brain import voice
 
 
 @pytest.fixture
@@ -52,7 +52,10 @@ def test_cache_key_depends_on_voice(monkeypatch):
     assert voice.key_for("Hi") != k1
 
 
-def test_fillers_never_repeat_back_to_back():
-    picks = [voice.next_filler() for _ in range(50)]
-    assert all(a != b for a, b in zip(picks, picks[1:]))
-    assert set(picks) <= set(lines.FILLERS)
+def test_clip_seconds_from_file_size(monkeypatch, tmp_path):
+    monkeypatch.undo()   # conftest stubs clip_seconds out; test the real one
+    monkeypatch.setattr(config, "AUDIO_DIR", tmp_path)
+    (tmp_path / "abc.mp3").write_bytes(b"x" * 16_000 * 7)       # 7 s at 128 kbps
+    assert voice.clip_seconds("/audio/abc.mp3") == 7.0
+    assert voice.clip_seconds("/audio/missing.mp3") == 0.0
+    assert voice.clip_seconds(None) == 0.0

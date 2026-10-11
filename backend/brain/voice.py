@@ -1,13 +1,12 @@
 """ElevenLabs text-to-speech with a disk cache keyed by voice + text.
 
-`await tts(text)` returns an absolute audio URL, or None if audio isn't available (the frontend still
+`await tts(text)` returns the audio URL, or None if audio isn't available (the frontend still
 shows the text). It never raises, so a TTS outage can't stall the interview.
 """
 
 import asyncio
 import hashlib
 import logging
-import random
 import threading
 from pathlib import Path
 from typing import Optional
@@ -23,14 +22,28 @@ OUTPUT_FORMAT = "mp3_44100_128"
 _client = None
 _concurrency = threading.BoundedSemaphore(3)   # free-tier ElevenLabs allows few parallel requests
 _inflight: dict[str, asyncio.Task] = {}
-_background: set[asyncio.Task] = set()
-_last_filler: Optional[str] = None
 _warned_unconfigured = False
 
 
 def key_for(text: str) -> str:
     voice = "fake" if config.BRAIN_FAKE else config.ELEVENLABS_VOICE_ID
     return hashlib.sha1(f"{voice}:{text}".encode()).hexdigest()[:16]
+
+
+BYTES_PER_SECOND = 128_000 / 8   # OUTPUT_FORMAT is constant-bitrate 128 kbps
+
+
+def clip_seconds(url: Optional[str]) -> float:
+    """How long a clip we served will play, from its file size (exact enough at a constant bitrate).
+    0 if unknown. Used so the session doesn't end while the closing clip is still talking."""
+    if not url:
+        return 0.0
+    name = url.rsplit("/", 1)[-1]
+    for d in (config.AUDIO_DIR, config.FAKE_AUDIO_DIR):
+        path = d / name
+        if path.is_file():
+            return path.stat().st_size / BYTES_PER_SECOND
+    return 0.0
 
 
 def audio_url(filename: str) -> str:
@@ -87,7 +100,7 @@ async def tts(text: str) -> Optional[str]:
         return None
 
     task = _inflight.get(key)
-    if task is None:   # dedupe: prefetch and ask() for the same text share one request
+    if task is None:   # dedupe: concurrent requests for the same text share one ElevenLabs call
         task = asyncio.create_task(asyncio.to_thread(synthesize_to_file, text, path))
         _inflight[key] = task
         task.add_done_callback(lambda _t, k=key: _inflight.pop(k, None))
@@ -101,30 +114,14 @@ async def tts(text: str) -> Optional[str]:
     return None
 
 
-def prefetch(text: str) -> None:
-    """Fire-and-forget: generate audio now so a later tts(text) is instant."""
-    if config.BRAIN_FAKE or not configured() or not text:
-        return
-    t = asyncio.create_task(tts(text))
-    _background.add(t)
-    t.add_done_callback(_background.discard)
-
-
-def next_filler() -> str:
-    global _last_filler
-    choice = random.choice([f for f in lines.FILLERS if f != _last_filler] or lines.FILLERS)
-    _last_filler = choice
-    return choice
-
-
 def startup_lines() -> list[str]:
     if config.BRAIN_FAKE:
         return fake.all_texts()
-    return [lines.CALIBRATION_LINE, lines.CALIBRATION_EXTRA_LINE, lines.CLOSING_LINE, *lines.FILLERS]
+    return lines.fixed_lines()
 
 
 async def warm_up() -> None:
-    """Pre-generate the fixed lines (calibration, closing, fillers) so they play instantly."""
+    """Pre-generate the fixed lines (calibration, closing) so they play instantly."""
     texts = startup_lines()
     results = await asyncio.gather(*(tts(t) for t in texts))
     ready = sum(1 for r in results if r)

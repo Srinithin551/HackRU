@@ -14,10 +14,7 @@ class HistoryItem:
     text: str
     transcript: str
     stats: Optional[QuestionStats]
-
-    @property
-    def label(self) -> str:      # matches the Q1, Q2... labels on the replay chart
-        return "Calibration" if self.kind == "calibration" else f"Q{self.idx}"
+    label: str = ""   # "Warm-up", "Q2", "Q2 follow-up": matches "Question 2 of 5" on the live screen
 
 
 def _coerce(model, raw: Any):
@@ -45,19 +42,26 @@ def as_baseline(raw: Any) -> Optional[Baseline]:
 def normalize_history(history: list) -> list[HistoryItem]:
     """Accepts dicts (or models) shaped like {question_id?, idx, kind, text, transcript, stats}."""
     out = []
+    number = 0   # planned-question number, as shown live ("Question 2 of 5"); follow-ups keep it
     for raw in history or []:
         item = raw if isinstance(raw, dict) else getattr(raw, "model_dump", lambda: {})()
         stats = as_question_stats(item.get("stats"))
         qid = item.get("question_id") or item.get("id") or (stats.question_id if stats else None)
         if not qid:
             continue
+        kind = str(item.get("kind") or "main")
+        if kind == "main":
+            number += 1
+        label = ("Warm-up" if kind == "calibration" else f"Q{max(number, 1)}"
+                 + (" follow-up" if kind == "follow_up" else ""))
         out.append(HistoryItem(
             question_id=str(qid),
             idx=int(item.get("idx") or 0),
-            kind=str(item.get("kind") or "main"),
+            kind=kind,
             text=str(item.get("text") or ""),
             transcript=str(item.get("transcript") or ""),
             stats=stats,
+            label=label,
         ))
     return out
 
@@ -71,7 +75,7 @@ def num(x: Optional[float], digits: int = 0, suffix: str = "") -> str:
 def pct(x: Optional[float]) -> str:
     if x is None:
         return "n/a"
-    return f"{x:+.0f}%"
+    return f"{round(x) or 0:+d}%"   # round first so -0.3 reads "+0%", not "-0%"
 
 
 def stats_line(st: Optional[QuestionStats]) -> str:

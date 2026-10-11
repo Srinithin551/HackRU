@@ -39,7 +39,8 @@ class SessionState:
     total_planned: int = 0
     queue: list[PlannedQuestion] = field(default_factory=list)
     current_planned: Optional[PlannedQuestion] = None
-    followups_on_current: int = 0
+    followups_on_current: int = 0    # ease_off / push / follow_up used on the current planned question
+    redirects_on_current: int = 0    # redirects (off-topic answers) used on the current planned question
 
     current_qid: Optional[str] = None
     current_text: str = ""
@@ -50,6 +51,9 @@ class SessionState:
     flags: list[dict] = field(default_factory=list)        # CoachFlag dicts
     adaptations: list[dict] = field(default_factory=list)  # Adaptation dicts
     actions: list[str] = field(default_factory=list)       # every resolved action, in order
+    exchanges: list[dict] = field(default_factory=list)    # {kind, text, transcript} for every answered turn
+    parting_words: str = ""                                # Gemini's reaction to the last answer, said before the closing line
+    report: Optional[dict] = None                          # the final report, also served from here if the DB save fails
 
     end_requested: bool = False
     started: float = field(default_factory=time.monotonic)

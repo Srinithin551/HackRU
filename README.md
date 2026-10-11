@@ -97,24 +97,48 @@ SELECT create_hypertable('vitals', 'time');
 Copy `.env.example` to `.env` at the repo root and fill in the keys (Gemini, ElevenLabs, Presage, Tiger Data).
 With `BRAIN_FAKE=1` the backend runs end to end with no keys at all.
 
-### Run locally
+### Database (Tiger Data / TimescaleDB)
+
+Tiger Data runs on TimescaleDB. For a Tiger Data cloud service, paste its connection string into
+`TIGER_DATABASE_URL` in `.env`. To run the same engine locally for free (needs Docker Desktop):
 
 ```bash
-# backend (from the repo root)
-python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r backend/requirements.txt
-BRAIN_FAKE=1 uvicorn backend.main:app --reload    # drop BRAIN_FAKE once keys are in .env
+docker run -d --name stresstest-tigerdb --restart unless-stopped -p 127.0.0.1:5433:5432 \
+  -e POSTGRES_PASSWORD=<pick-a-password> -e POSTGRES_DB=stresstest \
+  -v stresstest-tigerdb:/var/lib/postgresql/data timescale/timescaledb:latest-pg17
+# then in .env:  TIGER_DATABASE_URL=postgres://postgres:<pick-a-password>@127.0.0.1:5433/stresstest
+python scripts/init_db.py --columnstore      # hypertable, 5 s continuous aggregate, columnstore
+```
 
-# drive a session from the terminal (no frontend needed)
-python scripts/fake_frontend.py
+Without `TIGER_DATABASE_URL`, Data runs in memory (nothing is saved). `/health` shows which is live
+(`"data_store": "tiger_data"` or `"in_memory"`).
 
-# tests
-pytest
+### Run everything (one command)
 
-# frontend
-cd frontend
-npm install
-npm run dev
+```bash
+python3.12 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt
+(cd frontend && npm install)
+.venv/bin/python scripts/run_demo.py            # backend + Presage sensing client + frontend
+```
+
+For real vitals, set up Presage once (`sensing_client/presage_macos/README.md`) and add `--presage` to launch it:
+press Start in the SmartSpectra window and it writes `~/smartspectra_session.txt`.
+Then open http://localhost:5173 in Chrome. The launcher prints when Presage vitals go live.
+Useful flags: `--fake` (no Gemini/ElevenLabs calls), `--no-preview` (the browser leaves the webcam to
+SmartSpectra), `--no-sensing` (use `scripts/mock_vitals.py` instead of Presage).
+
+### Run pieces by hand
+
+> For a demo, never start the backend with `--reload`: a reload restarts the server and drops the live
+> interview. `scripts/run_demo.py` never uses it.
+
+```bash
+source .venv/bin/activate
+uvicorn backend.main:app                          # backend (BRAIN_FAKE=1 for no API calls)
+python sensing_client/client.py                   # Presage → /api/vitals
+(cd frontend && npm run dev)                      # http://localhost:5173
+python scripts/fake_frontend.py                   # or drive an interview from the terminal
+pytest && pytest backend/data/tests               # Brain + Data tests (Data's DB tests run when the URL is set)
 ```
 
 ---

@@ -9,6 +9,7 @@ import importlib
 import logging
 import re
 import sys
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -77,15 +78,36 @@ for _name in OPTIONAL_ROUTERS:
         mounted.append(_name.split(".")[1])
 
 
+SENSOR_STALE_S = 5.0
+
+
 @app.get("/health")
 async def health():
+    db = sys.modules.get("backend.data.db")
+    since = None if ws.last_vitals_at is None else round(time.monotonic() - ws.last_vitals_at, 1)
+    signal_since = None if ws.last_signal_at is None else round(time.monotonic() - ws.last_signal_at, 1)
     return {
         "ok": True,
         "fake": config.BRAIN_FAKE,
         "gemini": bool(config.GEMINI_API_KEY),
         "elevenlabs": voice.configured(),
         "routers": mounted,
+        # "tiger_data" when TIGER_DATABASE_URL is set and in use, "in_memory" otherwise
+        "data_store": "unknown" if db is None else ("in_memory" if db.use_fake() else "tiger_data"),
+        # Is Presage → sensing client → /api/vitals feeding readings right now, and are they passing the
+        # confidence cutoff? (stored vs. below_cutoff since startup)
+        # live = readings are arriving; signal = they carry a heart rate (a face is in view)
+        "sensor": {"live": since is not None and since < SENSOR_STALE_S, "seconds_since_reading": since,
+                   "signal": signal_since is not None and signal_since < SENSOR_STALE_S, **_ingest_counts()},
     }
+
+
+def _ingest_counts() -> dict:
+    metrics = sys.modules.get("backend.data.metrics")
+    if metrics is None or not hasattr(metrics, "INGEST"):
+        return {}
+    return {"min_confidence": metrics.MIN_CONFIDENCE, "stored": metrics.INGEST["stored"],
+            "below_cutoff": metrics.INGEST["below_cutoff"]}
 
 
 _AUDIO_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}\.mp3$")

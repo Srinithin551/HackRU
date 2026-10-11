@@ -18,7 +18,7 @@ import httpx
 from websockets.asyncio.client import connect
 
 CANNED = [
-    "It's going really well. We've been building an interview coach that reads your heart rate from the webcam.",
+    "Sure. I'm a backend engineer, mostly APIs and data pipelines, and lately I've been building an interview coach that reads heart rate from a webcam.",
     "I built a FastAPI backend for a hackathon project. The part I'm proudest of is the real-time pipeline: "
     "readings come in every second, get scored against a personal baseline, and stream to a live chart over "
     "WebSockets. I learned a lot about keeping latency low.",
