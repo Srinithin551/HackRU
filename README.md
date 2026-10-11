@@ -121,7 +121,8 @@ python3.12 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt
 .venv/bin/python scripts/run_demo.py            # backend + Presage sensing client + frontend
 ```
 
-Start the SmartSpectra app (Presage) and press Start first, so it writes `~/smartspectra_session.txt`.
+For real vitals, set up Presage once (`sensing_client/presage_macos/README.md`) and add `--presage` to launch it:
+press Start in the SmartSpectra window and it writes `~/smartspectra_session.txt`.
 Then open http://localhost:5173 in Chrome. The launcher prints when Presage vitals go live.
 Useful flags: `--fake` (no Gemini/ElevenLabs calls), `--no-preview` (the browser leaves the webcam to
 SmartSpectra), `--no-sensing` (use `scripts/mock_vitals.py` instead of Presage).

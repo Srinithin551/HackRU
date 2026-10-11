@@ -7,9 +7,11 @@
     python scripts/run_demo.py --fake          # BRAIN_FAKE=1: no Gemini/ElevenLabs calls
     python scripts/run_demo.py --no-preview    # don't open the webcam in the browser (SmartSpectra keeps it)
     python scripts/run_demo.py --no-sensing    # skip the Presage client (e.g. with scripts/mock_vitals.py)
+    python scripts/run_demo.py --presage       # also launch the Presage SmartSpectra app (press Start in it)
 
 Before running: start the SmartSpectra app (Presage) and press Start, so it writes to SESSION_FILE
-(default ~/smartspectra_session.txt). Ctrl+C stops everything this script started.
+(default ~/smartspectra_session.txt), or pass --presage to launch it (one-time build:
+sensing_client/presage_macos/setup_presage.sh). Ctrl+C stops everything this script started.
 Standard library only.
 """
 
@@ -84,6 +86,8 @@ def main() -> None:
     ap.add_argument("--no-sensing", action="store_true", help="don't start the Presage sensing client")
     ap.add_argument("--no-frontend", action="store_true", help="don't start the Vite dev server")
     ap.add_argument("--no-preview", action="store_true", help="browser doesn't open the webcam (SmartSpectra owns it)")
+    ap.add_argument("--presage", action="store_true",
+                    help="launch the Presage SmartSpectra app (built by sensing_client/presage_macos/setup_presage.sh)")
     ap.add_argument("--port", type=int, default=8000, help="backend port")
     ap.add_argument("--frontend-port", type=int, default=5173, help="frontend port")
     args = ap.parse_args()
@@ -99,6 +103,13 @@ def main() -> None:
         say("WARNING: no TIGER_DATABASE_URL: Data runs in memory and nothing is saved")
 
     session_file = Path(os.environ.get("SESSION_FILE", "~/smartspectra_session.txt")).expanduser()
+    if args.presage:
+        r = subprocess.run([str(ROOT / "sensing_client" / "presage_macos" / "start_presage.sh")],
+                           capture_output=True, text=True, env={**os.environ, "SESSION_FILE": str(session_file)})
+        for line in (r.stdout + r.stderr).splitlines():
+            print(line, flush=True)
+        if r.returncode != 0:
+            sys.exit("[demo] couldn't launch Presage (see above)")
     if not args.no_sensing and not session_file.exists():
         say(f"NOTE: {session_file} doesn't exist yet: start the SmartSpectra app and press Start")
 

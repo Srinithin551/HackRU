@@ -1,0 +1,65 @@
+--- a/cpp/samples/macos_swiftui_example/swift_ui/SmartSpectraRunner.mm
++++ b/cpp/samples/macos_swiftui_example/swift_ui/SmartSpectraRunner.mm
+@@ -2,6 +2,8 @@
+ 
+ #include "PreviewImage.h"
+ 
++#include <cstdlib>
++#include <fstream>
+ #include <iomanip>
+ #include <atomic>
+ #include <memory>
+@@ -51,6 +53,29 @@
+     const auto& measurement = getter(count - 1);
+     lines.push_back(label + ": " + FormatFloat(measurement.value()) + unit +
+                     " (" + FormatFloat(measurement.confidence(), 0) + "%)");
++}
++
++// StressTest bridge: append each metrics update ("Pulse rate: 72.0 bpm (92%)", "Breathing rate: ...",
++// "EDA Proxy level: ...") to the log that StressTest's sensing_client/client.py follows.
++// Path: $SMARTSPECTRA_LOG_FILE, or ~/smartspectra_session.txt.
++std::mutex g_stresstest_log_mutex;
++
++void AppendLinesToStressTestLog(const std::vector<std::string>& lines) {
++    if (lines.empty()) {
++        return;
++    }
++    static const std::string path = [] {
++        const char* override_path = std::getenv("SMARTSPECTRA_LOG_FILE");
++        if (override_path != nullptr && *override_path != '\0') {
++            return std::string(override_path);
++        }
++        return std::string([NSHomeDirectory() UTF8String]) + "/smartspectra_session.txt";
++    }();
++    std::lock_guard<std::mutex> lock(g_stresstest_log_mutex);
++    std::ofstream out(path, std::ios::app);
++    for (const auto& line : lines) {
++        out << line << '\n';
++    }
+ }
+ 
+ NSArray<NSString *> *NSArrayFromLines(const std::vector<std::string>& lines) {
+@@ -256,6 +281,7 @@
+     __weak SmartSpectraRunner *weakSelf = self;
+ 
+     spectra->SetOnProcessingStatusChanged([weakSelf](ss::ProcessingStatus status) {
++        AppendLinesToStressTestLog({std::string("Status: processing ") + ss::ToString(status)});
+         NSString *processing = [NSString stringWithUTF8String:ss::ToString(status)];
+         dispatch_async(dispatch_get_main_queue(), ^{
+             SmartSpectraRunner *runner = weakSelf;
+@@ -266,6 +292,7 @@
+     spectra->SetOnValidationStatusChanged(
+         [weakSelf](const ss::ValidationStatus& status, int64_t /*timestamp_us*/) {
+             std::string status_text = ss::ToString(status);
++            AppendLinesToStressTestLog({"Status: validation " + status_text});
+ 
+             NSString *validation = [NSString stringWithUTF8String:status_text.c_str()];
+             dispatch_async(dispatch_get_main_queue(), ^{
+@@ -276,6 +303,7 @@
+ 
+     spectra->SetOnMetrics([weakSelf](const ss::Metrics& metrics, int64_t timestamp_us) {
+         std::vector<std::string> metric_lines = BuildMetricLines(metrics);
++        AppendLinesToStressTestLog(metric_lines);
+         NSArray<NSNumber *> *breathing_trace = BreathingTraceFromMetrics(metrics);
+         NSArray<NSNumber *> *arterial_pressure_trace = ArterialPressureTraceFromMetrics(metrics);
+         NSArray<NSNumber *> *eda_trace = EdaTraceFromMetrics(metrics);
