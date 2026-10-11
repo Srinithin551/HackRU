@@ -31,8 +31,10 @@ _last: dict[str, dict[str, dict]] = defaultdict(dict)
 ClientListener = Callable[[str, dict], Awaitable[None]]
 client_listeners: list[ClientListener] = []
 
-# When the last vitals reading was broadcast (from Sensing's /api/vitals), for /health.
+# When the last vitals reading was broadcast (from Sensing's /api/vitals), and when the last one that
+# actually carried a heart rate was (a face in view), for /health.
 last_vitals_at: Optional[float] = None
+last_signal_at: Optional[float] = None
 
 _send_locks: dict[WebSocket, asyncio.Lock] = {}
 SEND_TIMEOUT_S = 2.0
@@ -50,11 +52,13 @@ async def _send(ws: WebSocket, msg: dict) -> bool:
 
 async def broadcast(session_id: str, type_: str, data: dict) -> None:
     """Send an event to every client watching this session. Never raises."""
-    global last_vitals_at
+    global last_vitals_at, last_signal_at
     session_id = str(session_id)
     msg = {"type": type_, "data": data}
     if type_ == "vitals":
         last_vitals_at = time.monotonic()
+        if data.get("heart_rate") is not None:
+            last_signal_at = last_vitals_at
     if type_ in REPLAY_TYPES:
         last = _last[session_id]
         last.pop(type_, None)   # re-insert so replay keeps the original send order

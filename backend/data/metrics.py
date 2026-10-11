@@ -41,12 +41,17 @@ def count_ingested(confidences: list[float]) -> None:
     below = sum(1 for c in confidences if c < MIN_CONFIDENCE)
     INGEST["stored"] += len(confidences) - below
     INGEST["below_cutoff"] += below
+    INGEST["no_face"] += sum(1 for c in confidences if c <= 0)
     total = INGEST["stored"] + INGEST["below_cutoff"]
     if total >= 20 and INGEST["below_cutoff"] / total > 0.5 and time.monotonic() - _last_warning > 30:
         _last_warning = time.monotonic()
-        log.warning("%d of %d vitals readings were below the %.2f confidence cutoff and dropped "
-                    "(no face, or a weak Presage signal). Lower DATA_MIN_CONFIDENCE if the face is in view.",
-                    INGEST["below_cutoff"], total, MIN_CONFIDENCE)
+        if INGEST["no_face"] >= INGEST["below_cutoff"] * 0.9:   # confidence 0: no signal at all
+            log.warning("%d of %d vitals readings had no face / no heart rate: is the Presage (SmartSpectra) "
+                        "app running and writing its log?", INGEST["no_face"], total)
+        else:
+            log.warning("%d of %d vitals readings were below the %.2f confidence cutoff and dropped (weak "
+                        "Presage signal). Lower DATA_MIN_CONFIDENCE in .env if your face is in view.",
+                        INGEST["below_cutoff"], total, MIN_CONFIDENCE)
 
 CALM_BELOW, HIGH_ABOVE = 40.0, 70.0
 

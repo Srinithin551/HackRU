@@ -152,7 +152,7 @@ def main() -> None:
         say(f"open http://localhost:{args.frontend_port} in Chrome (Chrome is needed for speech-to-text)")
 
     # Watch the links that fail silently: Presage feeding vitals, and the backend itself.
-    was_live = None
+    was = None
     while True:
         time.sleep(5)
         for name, p in procs:
@@ -164,10 +164,13 @@ def main() -> None:
         except Exception:
             say("WARNING: backend /health not answering")
             continue
-        if sensor["live"] != was_live:
-            say("Presage vitals: LIVE" if sensor["live"] else
-                "Presage vitals: not arriving (starts once a session is active and SmartSpectra is running)")
-            was_live = sensor["live"]
+        now = ("signal" if sensor.get("signal") else "no-face") if sensor["live"] else "off"
+        if now != was:
+            say({"signal": "Presage vitals: LIVE (heart rate coming through)",
+                 "no-face": "Presage vitals: readings arriving but NO FACE / no heart rate: is the SmartSpectra "
+                            "app running, and is your face in view?",
+                 "off": "Presage vitals: not arriving (starts once a session is active)"}[now])
+            was = now
 
 
 if __name__ == "__main__":

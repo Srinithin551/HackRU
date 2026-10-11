@@ -85,6 +85,7 @@ SENSOR_STALE_S = 5.0
 async def health():
     db = sys.modules.get("backend.data.db")
     since = None if ws.last_vitals_at is None else round(time.monotonic() - ws.last_vitals_at, 1)
+    signal_since = None if ws.last_signal_at is None else round(time.monotonic() - ws.last_signal_at, 1)
     return {
         "ok": True,
         "fake": config.BRAIN_FAKE,
@@ -95,8 +96,9 @@ async def health():
         "data_store": "unknown" if db is None else ("in_memory" if db.use_fake() else "tiger_data"),
         # Is Presage → sensing client → /api/vitals feeding readings right now, and are they passing the
         # confidence cutoff? (stored vs. below_cutoff since startup)
+        # live = readings are arriving; signal = they carry a heart rate (a face is in view)
         "sensor": {"live": since is not None and since < SENSOR_STALE_S, "seconds_since_reading": since,
-                   **_ingest_counts()},
+                   "signal": signal_since is not None and signal_since < SENSOR_STALE_S, **_ingest_counts()},
     }
 
 

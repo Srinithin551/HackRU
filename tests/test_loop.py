@@ -475,9 +475,12 @@ def test_health_reports_data_store_and_sensor(client):
     h = client.get("/health").json()
     assert h["data_store"] in ("in_memory", "tiger_data") and h["sensor"]["live"] is False
     import asyncio as _a
-    client.portal.call(hub.broadcast, "nobody", "vitals", {"ts": "t"})
+    client.portal.call(hub.broadcast, "nobody", "vitals", {"ts": "t", "heart_rate": None})   # no face
     h = client.get("/health").json()
     assert h["sensor"]["live"] is True and h["sensor"]["seconds_since_reading"] < 1
+    assert h["sensor"]["signal"] is False
+    client.portal.call(hub.broadcast, "nobody", "vitals", {"ts": "t", "heart_rate": 72.0})
+    assert client.get("/health").json()["sensor"]["signal"] is True
 
 
 def test_two_interviews_at_once_never_see_each_others_events(client):
