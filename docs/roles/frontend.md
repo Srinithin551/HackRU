@@ -1,5 +1,10 @@
 # Role: Frontend
 
+> **At submission (HackRU 2026):** this is the plan written at the start, when the app was called StressTest.
+> As built: **Osiris** has four pages (Setup with file import, Live with Judge, Report, Verdict) and no focus
+> tile, and the whole app runs locally with `scripts/run_demo.py`. See
+> [frontend/README.md](../../frontend/README.md) and the [README](../../README.md).
+
 **Owner:** Shreyas Sahoo
 **You own:** everything the judges see, plus the domain, deploy, and demo video.
 **Files:** `frontend/*`

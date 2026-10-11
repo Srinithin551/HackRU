@@ -2,7 +2,7 @@
 
 Runs Presage's SmartSpectra SDK ([`@smartspectra/node-sdk`](https://www.npmjs.com/package/@smartspectra/node-sdk),
 the same SDK version, 3.4.0, as the C++ one) in the background on the Mac's webcam, and POSTs one
-`VitalsReading` per second to `/api/vitals` during an interview. Nothing opens on screen: StressTest in
+`VitalsReading` per second to `/api/vitals` during an interview. Nothing opens on screen: Osiris in
 Chrome is the only window.
 
 ```
@@ -28,20 +28,27 @@ The first time, macOS asks whether your terminal app may use the camera: allow i
 before, turn it on in System Settings → Privacy & Security → Camera.
 
 ## How it behaves
-- **Presage runs only during an interview.** It starts when `/api/sessions/active` returns a session and
-  stops when the interview ends, so the camera light is off between interviews and no Presage credits are
-  used. The warm-up chat (35 s or more) covers Presage's 10-20 s lock-on.
+- **Pre-warm, after the page.** Presage starts before any interview, so its 10-20 s lock-on is done by the
+  first question. It waits until the page reports that it has opened the webcam
+  (`GET /api/sensor/page-camera`, at most 25 s): when the page opened the camera second, macOS changed the
+  camera's frame size under Presage and its engine aborted. `--no-prewarm` instead starts Presage only when an
+  interview starts. Readings are only POSTed while an interview is active.
+- **Camera:** the Mac's built-in camera is preferred over an iPhone (Continuity Camera) unless `PRESAGE_CAMERA`
+  says otherwise.
 - **Pulse:** Presage updates it every few seconds, so the last value is held at its own confidence for
-  8 s (`PULSE_HOLD_S`), with a median over the last 5 s. The old client decayed it ×0.7 per second, which
-  pushed most seconds under Data's 0.4 cutoff (doc.md P2).
+  8 s (`PULSE_HOLD_S`), with a median over the last 5 s. A weak newest pulse never replaces a strong one
+  (confidence ≥ 40, Presage's accuracy standard) from that window, so far fewer readings fall under Data's 0.4
+  cutoff. After the hold, the last value coasts for up to 12 s at a fading confidence while the face is in view.
 - **Breathing:** only values at Presage's own "stable" confidence (≥ 45) are used, held for 15 s (doc.md P1).
 - **No face:** Presage's validation status says so directly; the reading is all nulls with confidence 0.
 - **Status:** posted to `/api/sensor/status` on every change and every 3 s. The live page shows the
   hint ("Hold still.", "Too dark. Face a light.", camera or API key errors), and `/health` →
-  `sensor.presage` has it too.
+  `sensor.presage` has it too. A hint shows only once its problem has lasted 2.5 s and then stays at least
+  3 s, so it doesn't flicker; errors show at once.
 - **Failures:** camera or network errors are reported to the page and retried (3, 5, 10, 20 s). A key that
   is out of credits or rejected is swapped for the next one in `PRESAGE_BACKUP_API_KEYS`.
-  The process never exits on its own, so the launcher keeps running.
+  The process never exits on its own. If Presage's native engine crashes anyway (it can abort on a camera
+  change), `scripts/run_demo.py` restarts the sensor after a few seconds and the interview carries on.
 
 ## What the backend checks
 `backend/sensing/routes.py` receives the readings. It accepts them only from this machine (the endpoints
