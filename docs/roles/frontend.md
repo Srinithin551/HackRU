@@ -149,6 +149,14 @@ Show a loading screen ("Analyzing your session...") until `/report` returns. The
 - [ ] Visual polish, projector test
 - [ ] Domain + deploy, backup video, Devpost
 
+
+**Other Accomplishments** 
+- Complete troubleshooting and debugging of project was completed by me
+- Learned APIs, GIT, FAST API, REACT, CSS 
+- Added frontend architecture section detailing zero-latency state sync, tactical UI design, and fault tolerance for live judging.
+- Documented newly unlocked skills covering full-stack debugging, API integration, Git workflows, and FastAPI engineering.
+
+
 ## Done means
 
 A judge watches the HR number move live, sees the interviewer react, and the replay chart makes the stress spike on the hard question obvious in under five seconds of looking.
