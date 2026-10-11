@@ -1,10 +1,12 @@
-"""Start the whole StressTest pipeline with one command, and watch that every link is alive.
+"""Start the whole Greek God Teacher Program pipeline with one command, and watch that every link is alive.
 
     webcam → Presage (hidden sensor, sensing_client/presage_node) → backend (/api/vitals) → Tiger Data
            → Brain (Gemini + ElevenLabs) → Chrome window (audio, live dashboard, report)
 
-The only window you see is StressTest in Chrome, which opens by itself. Presage runs in the background
-with no window, and only during an interview (the camera light is off otherwise).
+The only window you see is the app in Chrome, which opens by itself. Presage runs in the background
+with no window, and starts measuring as soon as this script does (pre-warm), so the pulse is already
+stable when the first question lands. The camera light is therefore on while the app is open; pass
+--no-prewarm to the sensor for the old behaviour (camera on only during an interview).
 
     python scripts/run_demo.py                   # everything, real Gemini + ElevenLabs + Presage
     python scripts/run_demo.py --fake            # BRAIN_FAKE=1: no Gemini/ElevenLabs calls
@@ -112,7 +114,7 @@ def _is_sensing_client(pid: int, cmd: str) -> bool:
 
 
 def free_ports(ports: list[int]) -> None:
-    """Stop leftover StressTest processes (on our ports, plus orphaned sensing clients); refuse to touch
+    """Stop leftover app processes (on our ports, plus orphaned sensing clients); refuse to touch
     anything else."""
     pids = set()
     for port in ports:
@@ -134,7 +136,7 @@ def free_ports(ports: list[int]) -> None:
     for pid in pids:
         args = _cmd_and_cwd(pid)[0].split()
         what = " ".join(a for a in args[1:] if not a.startswith("/"))[:70] or args[0]   # drop interpreter paths
-        say(f"stopping a leftover StressTest process from an earlier run (pid {pid}: {what})")
+        say(f"stopping a leftover app process from an earlier run (pid {pid}: {what})")
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -188,7 +190,7 @@ def wait_for(url: str, proc: subprocess.Popen, timeout: float = 60) -> bool:
 
 
 def open_chrome(url: str) -> None:
-    """StressTest in its own Chrome window (app mode: no tabs or address bar). Chrome is needed for
+    """The app in its own Chrome window (app mode: no tabs or address bar). Chrome is needed for
     speech-to-text; without it, the default browser opens instead."""
     app = next((a for a in CHROME_APPS if a.exists()), None)
     if app is None:
@@ -197,7 +199,7 @@ def open_chrome(url: str) -> None:
         return
     # -n hands the flags to Chrome even when it's already running (it opens a window in the open profile).
     subprocess.run(["open", "-na", str(app), "--args", f"--app={url}", "--window-size=1440,900"])
-    say(f"opened StressTest in a Chrome window ({url})")
+    say(f"opened the app in a Chrome window ({url})")
 
 
 def main() -> None:

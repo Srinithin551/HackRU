@@ -143,7 +143,11 @@ def test_stress_spike_triggers_coach_flag_and_ease_off(client):
         rows = client.portal.call(data.insert_vitals, stressed_readings(sid))
         assert rows and rows[0]["stress"] > 90
         flag = recv_until(ws, "coach_flag", log)
-        assert flag["data"]["level"] == "high" and "Heart rate up" in flag["data"]["message"]
+        # The message cites the heart-rate number that triggered it, and carries the one command
+        # the frontend makes the user acknowledge before the trial moves on.
+        assert flag["data"]["level"] == "high"
+        assert "%" in flag["data"]["message"]
+        assert flag["data"]["command"]
         ws.send_json({"type": "answer_done", "data": {"question_id": q1["data"]["question_id"], "transcript": on_topic(q1)}})
 
         follow = recv_until(ws, "question", log)

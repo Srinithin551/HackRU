@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-StressTest sensing client (Option B: local process on the demo laptop).
+Greek God Teacher Program sensing client (Option B: local process on the demo laptop).
 
 FALLBACK: the hidden Presage sensor (sensing_client/presage_node/sensor.mjs) replaces this client and the
 SmartSpectra app. This one runs with `scripts/run_demo.py --legacy-presage`.

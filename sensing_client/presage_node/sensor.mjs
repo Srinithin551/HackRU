@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 /**
- * StressTest Presage sensor: runs Presage's SmartSpectra SDK headless (no window) on the webcam and
+ * Greek God Teacher Program Presage sensor: runs Presage's SmartSpectra SDK headless (no window) on the webcam and
  * POSTs one VitalsReading per second to /api/vitals during an interview. It also POSTs a status line to
  * /api/sensor/status ("Hold still", "No face found", …), which the live page shows.
  *
- * Presage (and the camera light) is on only while an interview is active: it starts when the backend
- * reports an active session and stops when the interview ends. The warm-up chat covers Presage's
+ * Presage starts measuring as soon as this process does (pre-warm), because SmartSpectra needs
+ * 10-20 s of a still face before its pulse is stable and paying that on the first question left the
+ * gods blind through the opening answers. Readings are only POSTed once the backend reports an
+ * active session, so nothing extra is stored; the trade is that the camera light is on while the
+ * app is open. Pass --no-prewarm for the old behaviour (camera on only during an interview, which
+ * starts when the backend reports an active session). The warm-up chat covers Presage's
  * 10-20 s lock-on time.
  *
  * It replaces the SmartSpectra macOS app, its log file and sensing_client/client.py (kept as a fallback:
@@ -34,6 +38,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const args = new Set(process.argv.slice(2))
 const SIMULATE = args.has('--simulate')
 const DRY_RUN = args.has('--dry-run')
+// Pre-warm by default: start measuring as soon as the program runs, so the pulse is already
+// stable when the first question lands. --no-prewarm waits for an interview instead.
+const PREWARM = !args.has('--no-prewarm')
 const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:8000').replace(/\/+$/, '')
 
 const SESSION_POLL_MS = 2000
@@ -316,8 +323,8 @@ async function main() {
   }
   log(DRY_RUN ? 'dry run: not talking to the backend' : `waiting for an interview (backend ${BACKEND_URL})`)
 
-  // Presage runs only during an interview; flipping it on/off is serialized so a quick end + new
-  // interview can't overlap a stop with a start.
+  // Flipping Presage on/off is serialized so a quick end + new interview can't overlap a stop
+  // with a start.
   let transition = Promise.resolve()
   const setActive = (on) => {
     if (vitals.active === on) return
@@ -341,7 +348,13 @@ async function main() {
   }
 
   let sessionId = DRY_RUN ? 'dry-run' : null
-  if (DRY_RUN) setActive(true)
+  // Pre-warm (the default): Presage measures from the moment the program starts, not from the
+  // moment an interview does. SmartSpectra needs 10-20 s of a still face before the pulse is
+  // stable, and paying that on the first question meant the gods were blind through the opening
+  // answers. Readings are still only POSTed once a session exists, so nothing extra is stored;
+  // the cost is that the camera light is on while the app is open. --no-prewarm restores the old
+  // behaviour (camera off until the interview starts).
+  if (DRY_RUN || PREWARM) setActive(true)
   let buffer = []
   let backendOk = true
   let nextPoll = 0
@@ -366,7 +379,7 @@ async function main() {
         log(next ? `interview started: ${next}` : 'interview ended')
         buffer = []
         sessionId = next
-        setActive(Boolean(next))
+        setActive(PREWARM || Boolean(next))   // pre-warmed sensors keep measuring between interviews
       }
     }
 
