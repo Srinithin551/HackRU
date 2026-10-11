@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from backend import ws
-from backend.brain import gemini, lines, voice
+from backend.brain import gemini, gods, lines, voice
 from backend.brain.history import as_baseline, as_question_stats, as_window_stats, normalize_history
 from backend.brain.models import Decision
 from backend.brain.report import fallback_report
@@ -68,7 +68,8 @@ async def ask(s: SessionState, qid: str, text: str, kind: str, coaching: str = "
     calibrating = kind == "calibration"   # calibration stays "calibrating" so the overlay doesn't flicker
     if not calibrating:
         await set_state(s, "asking")
-    audio_url = await voice.tts(f"{coaching} {text}" if coaching else text)
+    god = gods.god_for_question(s.planned_number)   # the god the page shows asking it, in their own voice
+    audio_url = await voice.tts(f"{coaching} {text}" if coaching else text, god)
     await broadcast(s.session_id, "question", {
         "question_id": qid,
         "index": s.planned_number,       # 0 during calibration, then 1..total (follow-ups keep their parent's number)
@@ -86,7 +87,7 @@ async def say(s: SessionState, text: str) -> float:
     """Speech that isn't a question (the closing line), sent as a `filler` event so the question on
     screen doesn't change. Only sent after the last answer, so it can't overlap a question clip.
     Returns how long the clip plays, in seconds (0 if there's no audio)."""
-    url = await voice.tts(text)
+    url = await voice.tts(text, gods.PRESIDING)   # the presiding god closes the trial
     if url:
         await broadcast(s.session_id, "filler", {"audio_url": url})
     return voice.clip_seconds(url)
