@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from backend import config
 from backend.brain import fake, prompts
 from backend.brain.history import HistoryItem
+from backend.brain.material import Material
 from backend.brain.models import Decision, DecisionReply, InterviewPlan, OpeningLine, PlannedQuestion, Report, ReportDraft
 from backend.brain.report import fallback_report, finalize_draft
 from backend.brain.specs import InterviewSpec, fallback_questions
@@ -26,6 +27,7 @@ from backend.contracts import QuestionStats, WindowStats
 log = logging.getLogger("brain.gemini")
 
 PLAN_TIMEOUT_S = 20.0     # runs during the ~40s calibration, so it has room
+PLAN_WITH_FILE_TIMEOUT_S = 30.0   # a whole PDF to read first
 DECIDE_TIMEOUT_S = 6.0    # brain.md: fall back to "next" past 6s
 OPEN_TIMEOUT_S = 5.0      # the small-talk → first-question bridge; falls back to the planned text
 SMALL_TALK_TIMEOUT_S = 4.0  # the second small-talk turn; falls back to a fixed line
@@ -110,14 +112,16 @@ def _config(model: str, system: str, schema: type[BaseModel], temperature: float
 
 
 async def _attempt(call: str, model: str, system: str, prompt: str, schema: type[T],
-                   temperature: float, timeout: float) -> T:
-    """One request to one model. Raises on timeout, API error, or a response that doesn't fit the schema."""
+                   temperature: float, timeout: float, attachments: Optional[list] = None) -> T:
+    """One request to one model. Raises on timeout, API error, or a response that doesn't fit the schema.
+    `attachments` (e.g. a PDF Part) go in front of the prompt."""
     t0 = time.monotonic()
     text = None
     try:
         resp = await asyncio.wait_for(
             _get_client().aio.models.generate_content(
-                model=model, contents=prompt, config=_config(model, system, schema, temperature)),
+                model=model, contents=[*attachments, prompt] if attachments else prompt,
+                config=_config(model, system, schema, temperature)),
             timeout)
         text = resp.text
         if not text:
@@ -132,7 +136,7 @@ async def _attempt(call: str, model: str, system: str, prompt: str, schema: type
 
 
 async def generate(call: str, system: str, prompt: str, schema: type[T], temperature: float,
-                   timeout: float, models: Optional[list[str]] = None) -> T:
+                   timeout: float, models: Optional[list[str]] = None, attachments: Optional[list] = None) -> T:
     """Structured-output call with failover: if a model is overloaded (503), rate-limited (429), or
     errors, the next model gets whatever time is left. Raises if every attempt fails."""
     if not configured():
@@ -149,7 +153,7 @@ async def generate(call: str, system: str, prompt: str, schema: type[T], tempera
             if last is not None and remaining < MIN_ATTEMPT_S:   # the first attempt always runs
                 raise last
             try:
-                return await _attempt(call, model, system, prompt, schema, temperature, remaining)
+                return await _attempt(call, model, system, prompt, schema, temperature, remaining, attachments)
             except Exception as e:
                 last = e
                 if model not in _no_thinking_level and "thinking" in str(e).lower():
@@ -209,13 +213,20 @@ def _clean_turn(text: str) -> str:
 
 # ---------------------------------------------------------------- call 1
 
-async def plan_interview(spec: InterviewSpec, role: str) -> list[PlannedQuestion]:
-    """Never raises. Falls back to the canned bank for this interview type."""
+async def plan_interview(spec: InterviewSpec, role: str, material: Optional[Material] = None) -> list[PlannedQuestion]:
+    """Never raises. Falls back to the canned bank for this interview type. With `material` (an imported
+    file, or a presentation's spoken description) the questions are drawn from it; a PDF is attached as-is."""
     if config.BRAIN_FAKE:
         return fake.plan(spec)
+    attachments = None
+    if material is not None and material.pdf is not None:
+        from google.genai import types   # imported lazily, like the client
+        attachments = [types.Part.from_bytes(data=material.pdf, mime_type="application/pdf")]
     try:
-        plan = await generate("plan_interview", prompts.PLAN_SYSTEM, prompts.plan_prompt(spec, role),
-                              InterviewPlan, temperature=0.8, timeout=PLAN_TIMEOUT_S)
+        plan = await generate("plan_interview", prompts.PLAN_SYSTEM, prompts.plan_prompt(spec, role, material),
+                              InterviewPlan, temperature=0.8,
+                              timeout=PLAN_WITH_FILE_TIMEOUT_S if attachments else PLAN_TIMEOUT_S,
+                              attachments=attachments)
         questions = []
         for q in plan.questions:
             text = _clean_spoken(q.text)

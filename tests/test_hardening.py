@@ -81,9 +81,9 @@ def test_future_dated_readings_are_dropped():
 
 
 def test_impossible_values_become_null_and_fractions_are_clamped():
-    r = clean(VitalsReading(ts=NOW, heart_rate=math.nan, breathing_rate=500, focus=5, confidence=9), NOW)
+    r = clean(VitalsReading(ts=NOW, heart_rate=math.nan, breathing_rate=500, confidence=9), NOW)
     assert r.heart_rate is None and r.breathing_rate is None
-    assert r.focus == 1.0 and r.confidence == 1.0
+    assert r.confidence == 1.0
     assert clean(VitalsReading(ts=NOW, heart_rate=-10, confidence=-1), NOW).confidence == 0.0
 
 

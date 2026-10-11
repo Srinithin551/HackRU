@@ -27,7 +27,6 @@ export function buildSeries(readings: readonly RecordedReading[]): ReplayPoint[]
       t: isoUtc(bucket),
       hr: roundOrNull(mean(rows.map((r) => r.heart_rate)), 1),
       br: roundOrNull(mean(rows.map((r) => r.breathing_rate)), 1),
-      focus: roundOrNull(mean(rows.map((r) => r.focus)), 2),
       stress: roundOrNull(mean(rows.map((r) => r.stress)), 1),
       stress_peak: roundOrNull(maxOf(rows.map((r) => r.stress)), 1),
     }))
@@ -61,7 +60,6 @@ export function questionStats(
     hr_delta_pct:
       hrMean !== null && baseline ? round(((hrMean - baseline.heart_rate) / baseline.heart_rate) * 100, 1) : null,
     br_mean: roundOrNull(mean(rows.map((r) => r.breathing_rate)), 1),
-    focus_mean: roundOrNull(mean(rows.map((r) => r.focus)), 2),
     stress_mean: roundOrNull(mean(rows.map((r) => r.stress)), 1),
     stress_peak: roundOrNull(stressPeak, 1),
     peak_offset_s: roundOrNull(peakOffset, 1),
@@ -98,7 +96,7 @@ export function buildReplay(recording: SessionRecording, nowMs?: number): Replay
       started_at: isoUtc(session.started_at ?? now),
       ended_at: session.ended_at === null ? null : isoUtc(session.ended_at),
       baseline: baseline
-        ? { heart_rate: baseline.heart_rate, breathing_rate: baseline.breathing_rate, focus: baseline.focus }
+        ? { heart_rate: baseline.heart_rate, breathing_rate: baseline.breathing_rate }
         : null,
     },
     series: buildSeries(readings),

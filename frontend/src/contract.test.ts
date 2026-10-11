@@ -16,7 +16,7 @@ describe("Data's replay_sample.json matches ReplayResponse", () => {
     expect(typeof replay.session.id).toBe('string')
     expect(isIso(replay.session.started_at)).toBe(true)
     expect(replay.session.baseline).not.toBeNull()
-    for (const key of ['heart_rate', 'breathing_rate', 'focus'] as const) {
+    for (const key of ['heart_rate', 'breathing_rate'] as const) {
       expect(typeof replay.session.baseline?.[key]).toBe('number')
     }
   })
@@ -29,7 +29,7 @@ describe("Data's replay_sample.json matches ReplayResponse", () => {
       const t = Date.parse(p.t)
       expect(t).toBeGreaterThan(prev)
       prev = t
-      for (const key of ['hr', 'br', 'focus', 'stress', 'stress_peak'] as const) expect(isNumOrNull(p[key])).toBe(true)
+      for (const key of ['hr', 'br', 'stress', 'stress_peak'] as const) expect(isNumOrNull(p[key])).toBe(true)
     }
   })
 

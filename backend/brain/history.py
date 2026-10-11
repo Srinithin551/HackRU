@@ -85,5 +85,5 @@ def stats_line(st: Optional[QuestionStats]) -> str:
     peak_at = f" at {st.peak_offset_s:.0f}s in" if st.peak_offset_s is not None else ""
     return (f"HR mean {num(st.hr_mean)} ({pct(st.hr_delta_pct)} vs baseline), peak {num(st.hr_peak)}, "
             f"BR mean {num(st.br_mean)}, stress mean {num(st.stress_mean)}, "
-            f"peak {num(st.stress_peak)}{peak_at}, focus {num(st.focus_mean, 2)}, "
+            f"peak {num(st.stress_peak)}{peak_at}, "
             f"answer length {st.duration_s:.0f}s")

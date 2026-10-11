@@ -9,6 +9,11 @@ reads as an interviewer considering the answer.
 # calm baseline. The answer also gives Gemini something to build the first real question on.
 CALIBRATION_LINE = "Thanks for joining me today. To start, tell me a little about yourself."
 
+# A Class Presentation with no imported file opens with this instead: the questions are then planned from
+# what the candidate says the presentation covers (backend/brain/material.py).
+PRESENTATION_MATERIAL_LINE = ("Thanks for joining me today. Before we begin, walk me through your presentation: "
+                              "what is it about, and what material does it cover?")
+
 # The second small-talk turn (asked only if the first answer was too short for a usable baseline) is
 # written live by Gemini so it can react to what they said. These are the fallbacks if Gemini is
 # unavailable (and fake mode). Keyed by interview type (specs.SPECS keys).
@@ -21,11 +26,13 @@ CALIBRATION_EXTRA_LINES = {
 
 CLOSING_LINE = "That's everything I wanted to cover. Thanks for your time. Give me a moment to put your feedback together."
 
-def calibration_lines(spec_key: str) -> tuple[str, str]:
-    return CALIBRATION_LINE, CALIBRATION_EXTRA_LINES.get(spec_key, CALIBRATION_EXTRA_LINES["swe"])
+def calibration_lines(spec_key: str, ask_for_material: bool = False) -> tuple[str, str]:
+    """(opener, fallback second turn). A presentation with no imported file opens by asking about its content."""
+    opener = PRESENTATION_MATERIAL_LINE if ask_for_material else CALIBRATION_LINE
+    return opener, CALIBRATION_EXTRA_LINES.get(spec_key, CALIBRATION_EXTRA_LINES["swe"])
 
 
 def fixed_lines() -> list[str]:
     """Every pre-recorded line, deduplicated, in a stable order."""
-    texts = [CALIBRATION_LINE, *CALIBRATION_EXTRA_LINES.values(), CLOSING_LINE]
+    texts = [CALIBRATION_LINE, PRESENTATION_MATERIAL_LINE, *CALIBRATION_EXTRA_LINES.values(), CLOSING_LINE]
     return list(dict.fromkeys(texts))

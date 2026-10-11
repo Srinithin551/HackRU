@@ -1,6 +1,6 @@
 /**
  * Interrupt selection: the pure rules behind the gold box on the camera (see
- * components/GodInterrupt.tsx for the UI and the full description of the three rules).
+ * components/InterruptBox.tsx for the UI and the full description of the three rules).
  *
  * Kept separate from the component so it can be unit-tested without a renderer, the way the rest
  * of this codebase tests its logic.
@@ -13,8 +13,8 @@ export interface Interrupt {
   /** Unique per appearance, so React remounts (and replays the animation) for a new one. */
   key: string
   kind: InterruptKind
-  /** Which god broke in. */
-  god: string
+  /** Who broke in (the interviewer's name). */
+  speaker: string
   /** What they observed, citing the number that triggered it. */
   message: string
   /** The single thing to do, rendered after the word "Please". */
@@ -36,7 +36,7 @@ const DEFAULT_COMMAND = 'take one slow breath before you continue'
 export function nextInterrupt(
   fresh: readonly CoachFlagEvent[],
   shown: Set<string>,
-  god: string,
+  speaker: string,
 ): Interrupt | null {
   for (const flag of fresh) {
     const message = flag.message?.trim()
@@ -45,7 +45,7 @@ export function nextInterrupt(
     return {
       key: `${flag.ts}:${message}`,
       kind: flag.level,
-      god,
+      speaker,
       message,
       command: flag.command?.trim() || DEFAULT_COMMAND,
     }
@@ -57,10 +57,10 @@ export function nextInterrupt(
 export function coachingInterrupt(
   question: QuestionEvent | null,
   shown: Set<string>,
-  god: string,
+  speaker: string,
 ): Interrupt | null {
   const message = question?.coaching?.trim()
   if (!message || shown.has(message)) return null
   shown.add(message)
-  return { key: `coaching:${question?.question_id ?? ''}`, kind: 'coaching', god, message, command: COACHING_COMMAND }
+  return { key: `coaching:${question?.question_id ?? ''}`, kind: 'coaching', speaker, message, command: COACHING_COMMAND }
 }

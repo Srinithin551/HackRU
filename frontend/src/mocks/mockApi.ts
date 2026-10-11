@@ -36,6 +36,12 @@ export const mockApi: Api = {
     return { session_id: sessionId }
   },
 
+  // Mock mode has no backend to read files: it accepts the file and the canned questions stay as they are.
+  async uploadMaterial(_sessionId, file) {
+    await delay(READ_DELAY_MS)
+    return { name: file.name, kind: file.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'text', chars: 0 }
+  },
+
   async startSession(sessionId) {
     await delay(READ_DELAY_MS)
     const status = mockHub.get(sessionId)?.phase ?? 'idle'

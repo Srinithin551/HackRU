@@ -24,8 +24,6 @@ export interface VitalsReading {
   heart_rate?: number | null
   /** breaths per minute */
   breathing_rate?: number | null
-  /** 0.0 to 1.0 */
-  focus?: number | null
   expression?: Expression | null
   /** 0 to 1, face/signal quality. Data ignores readings under MIN_CONFIDENCE (0.4 by default). */
   confidence: number
@@ -38,7 +36,6 @@ export interface VitalsBatch {
 export interface Baseline {
   heart_rate: number
   breathing_rate: number
-  focus: number
   n_samples: number
 }
 
@@ -51,7 +48,6 @@ export interface WindowStats {
   hr_delta_pct: number | null
   br_mean: number | null
   br_delta_pct: number | null
-  focus_mean: number | null
   dominant_expression: string | null
   /** 0 to 100 */
   stress: number | null
@@ -66,7 +62,6 @@ export interface QuestionStats {
   hr_peak: number | null
   hr_delta_pct: number | null
   br_mean: number | null
-  focus_mean: number | null
   stress_mean: number | null
   stress_peak: number | null
   /** Seconds into the answer when stress peaked. */
@@ -101,6 +96,21 @@ export interface CreateSessionResponse {
   session_id: string
 }
 
+/**
+ * POST /api/sessions/{id}/material: a file imported on the setup page (slides, notes, a résumé…) that Judge
+ * draws its questions from. Sent before /start. `kind` is "pdf" (handed to Gemini as-is) or "text".
+ */
+export interface MaterialUploadResponse {
+  name: string
+  kind: 'pdf' | 'text'
+  /** Characters of text read from the file (0 for a PDF). */
+  chars: number
+}
+
+/** File types the backend can read (backend/brain/material.py). */
+export const MATERIAL_ACCEPT = '.pdf,.pptx,.docx,.txt,.md,.markdown,.csv'
+export const MATERIAL_MAX_BYTES = 10 * 1024 * 1024
+
 /** POST /api/sessions/{id}/start. Brain made it idempotent: repeat calls report the current status. */
 export interface StartSessionResponse {
   session_id: string
@@ -133,7 +143,7 @@ export interface ReplaySession {
   started_at: IsoDateTime
   ended_at: IsoDateTime | null
   /** Null if the baseline was never computed. */
-  baseline: { heart_rate: number; breathing_rate: number; focus: number } | null
+  baseline: { heart_rate: number; breathing_rate: number } | null
 }
 
 /** One 5-second bucket from the `vitals_5s` continuous aggregate. */
@@ -141,7 +151,6 @@ export interface ReplayPoint {
   t: IsoDateTime
   hr: number | null
   br: number | null
-  focus: number | null
   stress: number | null
   stress_peak: number | null
 }
@@ -299,7 +308,6 @@ export interface VitalsEvent {
   ts: IsoDateTime
   heart_rate: number | null
   breathing_rate: number | null
-  focus: number | null
   /** Null until the baseline exists, or when confidence is below the cutoff (0.4 by default). */
   stress: number | null
 }
@@ -309,10 +317,10 @@ export type CoachLevel = 'rising' | 'high'
 export interface CoachFlagEvent {
   ts: IsoDateTime
   level: CoachLevel
-  /** What the god observed, citing the number that triggered it. On screen only, never spoken. */
+  /** What Judge observed, citing the number that triggered it. On screen only, never spoken. */
   message: string
   /**
-   * The single thing to do, shown as "Please <command>." The mortal must acknowledge it before the
+   * The single thing to do, shown as "Please <command>." The candidate must acknowledge it before the
    * trial moves on. Optional so older sessions and fixtures still type-check.
    */
   command?: string

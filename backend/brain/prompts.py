@@ -10,6 +10,7 @@ change wording but not break the session.
 from typing import Optional
 
 from backend.brain.history import HistoryItem, num, pct, stats_line
+from backend.brain.material import Material
 from backend.brain.models import PlannedQuestion
 from backend.brain.specs import InterviewSpec
 from backend.brain.state import SessionState
@@ -52,11 +53,32 @@ greet, welcome, or introduce yourself, and don't open with phrases like "to star
 woven into the live conversation, so write it as a plain question."""
 
 
-def plan_prompt(spec: InterviewSpec, role: str) -> str:
+def _material_section(m: Optional[Material]) -> str:
+    """What the candidate gave the interviewer to question them on (an imported file or, for a presentation,
+    their spoken description). The questions must come from it."""
+    if m is None:
+        return ""
+    if m.spoken:
+        return ("\nThe candidate described their presentation in their own words (speech-to-text, so expect "
+                "recognition errors). Draw every question from what they described: its claims, evidence, "
+                "methods and weak spots. Don't ask about things it doesn't touch.\n"
+                f"THEIR DESCRIPTION:\n<<<\n{m.text}\n>>>\n")
+    if m.pdf is not None:
+        return (f"\nThe candidate imported a file ({m.name}), attached above. Draw every question from its actual "
+                "content: specific claims, data, methods, decisions and weak spots in it. For a résumé or job "
+                "description, ask about the experience and requirements it lists.\n")
+    return (f"\nThe candidate imported a file ({m.name}). Draw every question from its actual content: specific "
+            "claims, data, methods, decisions and weak spots in it. For a résumé or job description, ask about "
+            "the experience and requirements it lists.\n"
+            f"FILE CONTENT:\n<<<\n{m.text}\n>>>\n")
+
+
+def plan_prompt(spec: InterviewSpec, role: str, material: Optional[Material] = None) -> str:
     subject = "Presentation topic" if spec.key == "presentation" else "Role"
     return (
         f"{subject}: {role}\n"
         f"Interview type: {spec.label}. {spec.style}\n"
+        f"{_material_section(material)}"
         f"Write exactly {spec.n_questions} questions in increasing difficulty, with difficulties "
         f"{', '.join(map(str, spec.difficulties))} in that order (1 = warm-up, 5 = very hard).\n"
         f"For each question give: text (the words spoken aloud), topic (2-4 words), difficulty."
@@ -67,7 +89,7 @@ def plan_prompt(spec: InterviewSpec, role: str) -> str:
 
 DECIDE_SYSTEM = f"""You are a live mock interviewer having a real conversation with the candidate, not reading from a list.
 They just finished an answer. Decide what you say next. You also see their body signals measured by webcam
-(heart rate, breathing, focus, and a 0-100 stress score where < 40 is calm, 40 to 70 rising, > 70 high).
+(heart rate, breathing, and a 0-100 stress score where < 40 is calm, 40 to 70 rising, > 70 high).
 Use them to adapt like a perceptive human interviewer would.
 
 Choose exactly one action, checking in this order:
@@ -150,7 +172,7 @@ now moving into the interview itself. Write what you say next as one natural tur
 def _baseline_line(b: Optional[Baseline]) -> str:
     if b is None:
         return "unknown"
-    return f"HR {b.heart_rate:.0f} bpm, BR {b.breathing_rate:.0f}/min, focus {b.focus:.2f}"
+    return f"HR {b.heart_rate:.0f} bpm, BR {b.breathing_rate:.0f}/min"
 
 
 def _clip(t: str, limit: int) -> str:
@@ -232,7 +254,7 @@ def open_context(s: SessionState, first: PlannedQuestion) -> str:
 # ---------------------------------------------------------------- call 3: final_report
 
 REPORT_SYSTEM = """You are an interview performance coach writing a post-session report. You have the transcript of every
-answer plus webcam-measured body signals (heart rate, breathing, focus, and a 0-100 stress score relative to the
+answer plus webcam-measured body signals (heart rate, breathing, and a 0-100 stress score relative to the
 candidate's own calm baseline: < 40 calm, 40 to 70 rising, > 70 high).
 
 Rules:

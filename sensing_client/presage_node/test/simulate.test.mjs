@@ -54,8 +54,10 @@ test('simulated readings look like Presage through the real decode path', () => 
   assert.ok(br.length > 100)
   assert.ok(br.every((x) => x < 30), 'no junk breathing values')
 
-  // Weak pulses (30%) appear now and then, so Data's 0.4 cutoff gets exercised.
-  assert.ok(rows.some((r) => r.heart_rate !== null && r.confidence < 0.4))
+  // Weak pulses (30%) come now and then, but a strong one from the last few seconds covers them, so almost
+  // every reading clears Data's 0.4 cutoff (only coasting through a gap can dip below it).
+  const withPulse = rows.filter((r) => r.heart_rate !== null)
+  assert.ok(withPulse.filter((r) => r.confidence >= 0.4).length >= 0.95 * withPulse.length)
   assert.ok(rows.some((r) => r.status.message === 'Hold still.'))
   assert.ok(at(50 + 60 + 22, 50 + 60 + 26).every((r) => r.heart_rate === null), 'face lost mid-interview')
 })

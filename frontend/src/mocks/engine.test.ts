@@ -114,13 +114,12 @@ describe('MockSessionEngine (demo, auto-answer)', () => {
     for (const f of flags) expect(f.message).toMatch(/\d/)
   })
 
-  it('plays a filler and goes to thinking after every answer, then ends with done → session_ended', async () => {
+  it('goes to thinking after every answer, then ends with the closing line → done → session_ended', async () => {
     const { events } = await runAuto()
     const flow = flowOf(events)
     flow.forEach((event, i) => {
       if (event.type !== 'question' || event.data.kind === 'calibration') return
-      expect(flow[i + 2].type).toBe('filler')
-      expect(flow[i + 3]).toEqual({ type: 'state', data: { state: 'thinking' } })
+      expect(flow[i + 2]).toEqual({ type: 'state', data: { state: 'thinking' } })
     })
     const tail = flow.slice(-3)
     expect(tail[0].type).toBe('filler')
@@ -132,10 +131,9 @@ describe('MockSessionEngine (demo, auto-answer)', () => {
     expect(events[events.length - 1].type).toBe('session_ended')
   })
 
-  it('never plays the same filler twice in a row', async () => {
+  it('plays no filler between turns: the only one is the closing line, like the real backend', async () => {
     const { events } = await runAuto()
-    const fillers = events.flatMap((e) => (e.type === 'filler' ? [e.data.audio_url] : []))
-    for (let i = 1; i < fillers.length; i++) expect(fillers[i]).not.toBe(fillers[i - 1])
+    expect(events.filter((e) => e.type === 'filler')).toHaveLength(1)
   })
 
   it('is deterministic for the same seed', async () => {
@@ -187,10 +185,11 @@ describe('MockSessionEngine (manual client)', () => {
     engine.receive({ type: 'answer_started', data: { question_id: q1.question_id } })
     await scheduler.advance(15_000)
     engine.receive({ type: 'answer_done', data: { question_id: 'not-a-question', transcript: 'x' } })
-    expect(events.filter((e) => e.type === 'filler')).toHaveLength(0)
+    const thinking = () => events.filter((e) => e.type === 'state' && e.data.state === 'thinking')
+    expect(thinking()).toHaveLength(0)
     engine.receive({ type: 'answer_done', data: { question_id: q1.question_id, transcript: 'First answer.' } })
     engine.receive({ type: 'answer_done', data: { question_id: q1.question_id, transcript: 'Duplicate.' } })
-    expect(events.filter((e) => e.type === 'filler')).toHaveLength(1)
+    expect(thinking()).toHaveLength(1)
 
     await scheduler.advance(2_000)
     expect(questionsOf(events)).toHaveLength(3)

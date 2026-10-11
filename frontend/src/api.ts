@@ -18,6 +18,7 @@ import type {
   ActiveSessionResponse,
   CreateSessionRequest,
   CreateSessionResponse,
+  MaterialUploadResponse,
   HealthResponse,
   InsightsResponse,
   ReplayResponse,
@@ -28,6 +29,8 @@ import type {
 /** The REST surface the frontend uses (PLAN.md §3). Implemented over HTTP and by src/mocks/mockApi.ts. */
 export interface Api {
   createSession(body: CreateSessionRequest): Promise<CreateSessionResponse>
+  /** Attach an imported file to a session before it starts. Rejects with the backend's reason. */
+  uploadMaterial(sessionId: string, file: File): Promise<MaterialUploadResponse>
   startSession(sessionId: string): Promise<StartSessionResponse>
   getActiveSession(): Promise<ActiveSessionResponse>
   getReplay(sessionId: string): Promise<ReplayResponse>
@@ -67,8 +70,36 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = DEFA
 
 const sessionPath = (id: string) => `/api/sessions/${encodeURIComponent(id)}`
 
+/** A file as base64, without the data-URL prefix (the backend takes JSON, so no multipart needed). */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const url = String(reader.result)
+      resolve(url.slice(url.indexOf(',') + 1))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('could not read the file'))
+    reader.readAsDataURL(file)
+  })
+}
+
 const httpApi: Api = {
   createSession: (body) => request('/api/sessions', { method: 'POST', body: JSON.stringify(body) }),
+  uploadMaterial: async (id, file) => {
+    const res = await fetch(apiUrl(`${sessionPath(id)}/material`), {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name, data: await fileToBase64(file) }),
+      signal: AbortSignal.timeout(60_000),
+    })
+    const body: unknown = await res.json().catch(() => null)
+    if (!res.ok) {
+      // The backend says why ("that file is over 10 MB", ".key files aren't supported…").
+      const detail = (body as { detail?: unknown } | null)?.detail
+      throw new ApiError(res.status, typeof detail === 'string' ? detail : `upload failed with ${res.status}`)
+    }
+    return body as MaterialUploadResponse
+  },
   startSession: (id) => request(`${sessionPath(id)}/start`, { method: 'POST' }),
   getActiveSession: () => request('/api/sessions/active'),
   getReplay: (id) => request(`${sessionPath(id)}/replay`, {}, 20_000),
@@ -87,6 +118,7 @@ const httpApi: Api = {
 const impl: Api = IS_MOCK ? mockApi : httpApi
 
 export const createSession = (body: CreateSessionRequest) => impl.createSession(body)
+export const uploadMaterial = (sessionId: string, file: File) => impl.uploadMaterial(sessionId, file)
 export const getActiveSession = () => impl.getActiveSession()
 export const getReplay = (sessionId: string) => impl.getReplay(sessionId)
 export const getReport = (sessionId: string) => impl.getReport(sessionId)

@@ -3,6 +3,8 @@
 
     python scripts/init_db.py            # create anything missing (safe to re-run)
     python scripts/init_db.py --reset    # DROP sessions, questions, vitals, vitals_5s and recreate
+    python scripts/init_db.py --fresh --columnstore   # the same with no prompt: scripts/run_demo.py runs this
+                                                      # on every launch, so each run starts with empty tables
     python scripts/init_db.py --check    # only verify: hypertable, continuous aggregate, policy
     python scripts/init_db.py --columnstore   # also enable the columnstore on vitals (columnstore.sql)
 
@@ -96,6 +98,11 @@ CHECKS = [
      "WHERE hypertable_name = 'vitals'"),
     ("index vitals_session_time",
      "SELECT indexdef FROM pg_indexes WHERE tablename = 'vitals' AND indexname = 'vitals_session_time'"),
+    ("index questions_session_idx",
+     "SELECT indexdef FROM pg_indexes WHERE tablename = 'questions' AND indexname = 'questions_session_idx'"),
+    ("no focus column (removed)",
+     "SELECT 'ok' WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' "
+     "AND column_name IN ('focus', 'baseline_focus'))"),
     ("vitals_5s continuous aggregate",
      "SELECT format('materialized_only=%s', materialized_only) FROM timescaledb_information.continuous_aggregates "
      "WHERE view_name = 'vitals_5s'"),
@@ -135,6 +142,8 @@ async def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--reset", action="store_true", help="drop everything and recreate (asks for confirmation)")
+    g.add_argument("--fresh", action="store_true",
+                   help="drop everything and recreate WITHOUT asking (the launcher's wipe on every run)")
     g.add_argument("--check", action="store_true", help="only run the verification checks")
     ap.add_argument("--columnstore", action="store_true",
                     help="also apply columnstore.sql (columnstore on vitals + conversion policy)")
@@ -153,6 +162,7 @@ async def main() -> int:
             if input(f"Type {CONFIRM_WORD} to continue: ").strip() != CONFIRM_WORD:
                 print("aborted, nothing dropped")
                 return 1
+        if args.reset or args.fresh:
             for stmt in RESET_SQL:
                 await conn.execute(stmt)
                 print(f"  dropped  {short(stmt)}")

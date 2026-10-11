@@ -18,6 +18,9 @@ def _bool(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(int(default))).strip().lower() in ("1", "true", "yes", "on")
 
 
+# The product's name, in one place (the frontend's twin is APP_NAME in frontend/src/lib/constants.ts).
+APP_NAME = os.getenv("APP_NAME") or "Osiris"
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Two models, because free-tier rate limits are per model: the main one plans and writes the report,
 # the fast one makes the live decide_next call. Each backs the other up on 503/429 errors.
@@ -29,26 +32,11 @@ ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
 ELEVENLABS_MODEL = os.getenv("ELEVENLABS_MODEL") or "eleven_flash_v2_5"
 
-# One ElevenLabs voice per god, matched to who they are (premade voices every ElevenLabs account has). Which god
-# speaks each line is decided in brain/gods.py, mirroring the frontend. Override one in .env with
-# ELEVENLABS_VOICE_<NAME> (e.g. ELEVENLABS_VOICE_HERA=...). ELEVENLABS_GOD_VOICES=0 puts every god back on
-# ELEVENLABS_VOICE_ID.
-GOD_VOICE_DEFAULTS = {
-    "Osiras": "nPczCjzI2devNBz1zQrb",       # Brian: deep, resonant (presides, judgement)
-    "Athena": "Xb7hH8MSUJpSbSDYk0k2",       # Alice: clear, composed, British (strategy)
-    "Apollo": "JBFqnCBsd6RMkjVDRZzb",       # George: warm, captivating storyteller (clarity)
-    "Hephaestus": "N2lVS1w4EtoT3dr4eOWO",   # Callum: husky, gravelly (craft, the smith)
-    "Hera": "pFZP5JQG7iQjIQuC4Bku",         # Lily: velvety, regal, British (authority)
-    "Hermes": "TX3LPaxmHKxFdv7VOQHJ",       # Liam: young, energetic (quickness, the messenger)
-}
-GOD_VOICES = {god: os.getenv(f"ELEVENLABS_VOICE_{god.upper()}") or default
-              for god, default in GOD_VOICE_DEFAULTS.items()}
 
 PRESAGE_API_KEY = os.getenv("PRESAGE_API_KEY", "")
 TIGER_DATABASE_URL = os.getenv("TIGER_DATABASE_URL", "")
 
 BRAIN_FAKE = _bool("BRAIN_FAKE")
-GOD_VOICES_ON = _bool("ELEVENLABS_GOD_VOICES", True)
 # Prefix for audio URLs. Blank (default) = relative "/audio/x.mp3", which the frontend resolves
 # against its own origin (the Vite dev server proxies /audio to this backend).
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")

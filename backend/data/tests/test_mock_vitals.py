@@ -30,10 +30,9 @@ def test_baseline_ranges():
     rs = run({}, 600)
     hr = [r["heart_rate"] for r in rs]
     br = [r["breathing_rate"] for r in rs]
-    fo = [r["focus"] for r in rs]
     assert all(70 <= v <= 74 for v in hr) and abs(statistics.mean(hr) - 72) < 0.3
     assert all(13 <= v <= 15 for v in br) and abs(statistics.mean(br) - 14) < 0.15
-    assert all(0.75 <= v <= 0.85 for v in fo)
+    assert all("focus" not in r for r in rs)            # there is no focus vital
     assert {r["expression"] for r in rs} == {"neutral"}
     assert {r["confidence"] for r in rs} == {0.95}
     assert all("session_id" not in r for r in rs)       # backend uses the active session
@@ -51,15 +50,7 @@ def test_spike_ramps_6s_then_decays_20s():
     peak = run({10: "s"}, 17)[16]
     assert peak["heart_rate"] == pytest.approx(72 * 1.25, abs=2)
     assert peak["breathing_rate"] == pytest.approx(14 * 1.30, abs=1)
-    assert peak["focus"] == pytest.approx(0.5, abs=0.05)
     assert peak["expression"] == "frown"
-
-
-def test_distraction_drops_focus_for_8s_hr_unchanged():
-    rs = run({10: "d"}, 30)
-    assert all(abs(r["focus"] - 0.3) <= 0.05 for r in rs[10:18])
-    assert all(r["focus"] >= 0.75 for r in rs[18:])
-    assert all(70 <= r["heart_rate"] <= 74 for r in rs)
 
 
 def test_face_lost_is_5s_of_nulls_with_confidence_0():
@@ -67,11 +58,11 @@ def test_face_lost_is_5s_of_nulls_with_confidence_0():
     lost = [i for i, r in enumerate(rs) if r["confidence"] == 0]
     assert lost == [10, 11, 12, 13, 14]
     for i in lost:
-        assert rs[i]["heart_rate"] is rs[i]["breathing_rate"] is rs[i]["focus"] is rs[i]["expression"] is None
+        assert rs[i]["heart_rate"] is rs[i]["breathing_rate"] is rs[i]["expression"] is None
 
 
 def test_parse_events():
-    assert mv.parse_events("20:s,60:d,100:f") == {20: ["s"], 60: ["d"], 100: ["f"]}
+    assert mv.parse_events("20:s,100:f") == {20: ["s"], 100: ["f"]}
     assert mv.parse_events("5:s, 5:f") == {5: ["s", "f"]}
     with pytest.raises(Exception):
         mv.parse_events("20:x")

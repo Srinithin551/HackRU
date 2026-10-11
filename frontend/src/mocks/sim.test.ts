@@ -11,25 +11,24 @@ import {
 } from './sim.ts'
 import type { SimReading } from './sim.ts'
 
-const baseline = { heart_rate: 72, breathing_rate: 14, focus: 0.8 }
-const calm = { heart_rate: 72, breathing_rate: 14, focus: 0.8, confidence: 0.95 }
+const baseline = { heart_rate: 72, breathing_rate: 14 }
+const calm = { heart_rate: 72, breathing_rate: 14, confidence: 0.95 }
 
 describe('stressScore (PLAN.md §3, data.md asserts)', () => {
   it('calm reading is about 0', () => {
     expect(stressScore(calm, baseline)).toBeCloseTo(0, 5)
   })
 
-  it('+25% HR with other inputs at baseline is about 50', () => {
-    expect(stressScore({ ...calm, heart_rate: 90 }, baseline)).toBeCloseTo(50, 5)
+  it('+25% HR with breathing at baseline is 62.5 (heart rate is 0.5 of the 0.8 total weight)', () => {
+    expect(stressScore({ ...calm, heart_rate: 90 }, baseline)).toBeCloseTo(62.5, 5)
   })
 
   it('everything maxed is 100', () => {
-    expect(stressScore({ heart_rate: 120, breathing_rate: 25, focus: 0.1, confidence: 1 }, baseline)).toBeCloseTo(100, 5)
+    expect(stressScore({ heart_rate: 120, breathing_rate: 25, confidence: 1 }, baseline)).toBeCloseTo(100, 5)
   })
 
-  it('missing focus renormalizes the remaining weights', () => {
-    // hr_part 1, br_part 0 → 100 * 0.5 / 0.8
-    expect(stressScore({ ...calm, heart_rate: 90, focus: null }, baseline)).toBeCloseTo(62.5, 5)
+  it('a missing input renormalizes the remaining weights', () => {
+    // breathing missing: heart rate is the whole score
     expect(stressScore({ heart_rate: 90, confidence: 0.9 }, baseline)).toBeCloseTo(100, 5)
   })
 
@@ -86,7 +85,6 @@ describe('computeBaseline (data.md)', () => {
     time: start + s * 1000,
     heart_rate: 70,
     breathing_rate: 13,
-    focus: 0.82,
     expression: 'neutral',
     confidence,
     stress: null,
@@ -103,7 +101,6 @@ describe('computeBaseline (data.md)', () => {
     expect(b.n_samples).toBe(20)
     expect(b.heart_rate).toBe(70)
     expect(b.breathing_rate).toBe(13)
-    expect(b.focus).toBe(0.82)
   })
 
   it('falls back to population defaults with fewer than 10 samples', () => {
@@ -113,6 +110,5 @@ describe('computeBaseline (data.md)', () => {
     expect(b.n_samples).toBe(8)
     expect(b.heart_rate).toBe(POPULATION_BASELINE.heart_rate)
     expect(b.breathing_rate).toBe(POPULATION_BASELINE.breathing_rate)
-    expect(b.focus).toBe(POPULATION_BASELINE.focus)
   })
 })

@@ -35,7 +35,7 @@ describe('buildReplay', () => {
     expect(replay.session.user_name).toBe('Tester')
     expect(replay.session.ended_at).not.toBeNull()
     expect(replay.session.baseline).not.toBeNull()
-    expect(Object.keys(replay.session.baseline ?? {}).sort()).toEqual(['breathing_rate', 'focus', 'heart_rate'])
+    expect(Object.keys(replay.session.baseline ?? {}).sort()).toEqual(['breathing_rate', 'heart_rate'])
   })
 
   it('series is 5 s buckets, aligned to epoch multiples and ordered', () => {

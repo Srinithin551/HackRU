@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Greek God Teacher Program Presage sensor: runs Presage's SmartSpectra SDK headless (no window) on the webcam and
+ * Osiris Presage sensor: runs Presage's SmartSpectra SDK headless (no window) on the webcam and
  * POSTs one VitalsReading per second to /api/vitals during an interview. It also POSTs a status line to
  * /api/sensor/status ("Hold still", "No face found", …), which the live page shows.
  *
  * Presage starts measuring as soon as this process does (pre-warm), because SmartSpectra needs
  * 10-20 s of a still face before its pulse is stable and paying that on the first question left the
- * gods blind through the opening answers. Readings are only POSTed once the backend reports an
+ * interviewer blind through the opening answers. Readings are only POSTed once the backend reports an
  * active session, so nothing extra is stored; the trade is that the camera light is on while the
  * app is open. Pass --no-prewarm for the old behaviour (camera on only during an interview, which
  * starts when the backend reports an active session). The warm-up chat covers Presage's
@@ -44,6 +44,11 @@ const PREWARM = !args.has('--no-prewarm')
 const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:8000').replace(/\/+$/, '')
 
 const SESSION_POLL_MS = 2000
+// Pre-warm waits for the page to open its camera preview first (it reports it to the backend, see
+// frontend/src/lib/cameraStream.ts): when the page opened the camera second, macOS switched the camera's
+// frame size under Presage and its engine aborted. With no page camera after this long, start anyway.
+const PAGE_CAMERA_WAIT_MS = 25000
+const WAIT_FOR_PAGE = PREWARM && !SIMULATE && !DRY_RUN && process.env.PRESAGE_WAIT_FOR_PAGE !== '0'
 const STATUS_EVERY_MS = 3000     // re-send the status at least this often (a page that just opened gets it)
 const MAX_BUFFER = 30            // readings kept while POSTs fail
 const HTTP_TIMEOUT_MS = 2000
@@ -60,6 +65,11 @@ const ERROR_HELP = {
   5: 'Presage needs the internet to check the API key. Check the Wi-Fi.',
   7: 'Presage could not open the camera. Allow camera access for your terminal app (System Settings → Privacy & Security → Camera) and close other apps using the camera.',
 }
+
+// With no PRESAGE_CAMERA set, the Mac's own camera is preferred: macOS can make an iPhone (Continuity Camera)
+// the default, and then Presage would watch a different camera from the one the page shows.
+const BUILT_IN_CAMERA = /macbook|facetime|built-in/i
+const NOT_A_WEBCAM = /iphone|ipad|desk view|continuity/i
 
 const log = (msg) => console.log(`${new Date().toLocaleTimeString('en-GB')}  ${msg}`)
 
@@ -135,12 +145,16 @@ async function realPresage(vitals) {
     log(`couldn't list cameras (${e.message})`)
   }
   let selection = CameraSelection.default
+  let chosen = null
   const wanted = setting('PRESAGE_CAMERA').toLowerCase()
   if (wanted) {
-    const match = cameras.find((c) => (c.name ?? '').toLowerCase().includes(wanted) || c.id === wanted)
-    if (match) selection = CameraSelection.byId(match.id)
-    else log(`PRESAGE_CAMERA="${wanted}" matches no camera; using the default one`)
+    chosen = cameras.find((c) => (c.name ?? '').toLowerCase().includes(wanted) || c.id === wanted) ?? null
+    if (!chosen) log(`PRESAGE_CAMERA="${wanted}" matches no camera; picking one`)
   }
+  chosen ??= cameras.find((c) => BUILT_IN_CAMERA.test(c.name ?? '')) ??
+    cameras.find((c) => !NOT_A_WEBCAM.test(c.name ?? '')) ?? null
+  if (chosen) selection = CameraSelection.byId(chosen.id)
+  log(`Presage camera: ${chosen?.name ?? 'the system default'}`)
 
   const spent = new Set()   // keys Presage refused during this run (out of credits or rejected)
   let key = apiKeys()[0]
@@ -350,11 +364,18 @@ async function main() {
   let sessionId = DRY_RUN ? 'dry-run' : null
   // Pre-warm (the default): Presage measures from the moment the program starts, not from the
   // moment an interview does. SmartSpectra needs 10-20 s of a still face before the pulse is
-  // stable, and paying that on the first question meant the gods were blind through the opening
+  // stable, and paying that on the first question meant the interviewer was blind through the opening
   // answers. Readings are still only POSTed once a session exists, so nothing extra is stored;
   // the cost is that the camera light is on while the app is open. --no-prewarm restores the old
   // behaviour (camera off until the interview starts).
-  if (DRY_RUN || PREWARM) setActive(true)
+  let prewarmed = false    // pre-warm has begun
+  const waitStart = performance.now()
+  if (DRY_RUN || (PREWARM && !WAIT_FOR_PAGE)) {
+    prewarmed = PREWARM
+    setActive(true)
+  } else if (WAIT_FOR_PAGE) {
+    log('pre-warm waits for the page to open the camera first (Presage crashes if the page opens it second)')
+  }
   let buffer = []
   let backendOk = true
   let nextPoll = 0
@@ -379,7 +400,23 @@ async function main() {
         log(next ? `interview started: ${next}` : 'interview ended')
         buffer = []
         sessionId = next
-        setActive(PREWARM || Boolean(next))   // pre-warmed sensors keep measuring between interviews
+        setActive(prewarmed || Boolean(next))   // pre-warmed sensors keep measuring between interviews
+      }
+      if (PREWARM && !prewarmed) {
+        let pageHasCamera = false
+        try {
+          pageHasCamera = (await http('GET', '/api/sensor/page-camera'))?.open === true
+        } catch {
+          // backend not up yet: keep waiting
+        }
+        const waited = now - waitStart
+        if (pageHasCamera || sessionId || waited > PAGE_CAMERA_WAIT_MS) {
+          log(pageHasCamera ? 'the page has the camera: starting Presage'
+            : sessionId ? 'an interview started: starting Presage'
+              : `no page camera after ${Math.round(waited / 1000)} s: starting Presage anyway`)
+          prewarmed = true
+          setActive(true)
+        }
       }
     }
 
@@ -426,6 +463,9 @@ async function main() {
     await Promise.race([done, new Promise((r) => setTimeout(r, 4000))])
     process.exit(0)
   }
+  // A stray promise rejection must not kill the sensor (Node exits on one by default). A native crash
+  // inside Presage's engine can't be caught here: scripts/run_demo.py restarts the sensor for that.
+  process.on('unhandledRejection', (e) => log(`unhandled error: ${e?.message ?? e}; continuing`))
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
   process.on('SIGHUP', shutdown)

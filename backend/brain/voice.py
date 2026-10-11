@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from backend import config
-from backend.brain import fake, gods, lines
+from backend.brain import fake, lines
 
 log = logging.getLogger("brain.voice")
 
@@ -26,22 +26,13 @@ _inflight: dict[str, asyncio.Task] = {}
 _warned_unconfigured = False
 
 
-def voice_for(god: Optional[str] = None) -> str:
-    """The ElevenLabs voice for `god` (config.GOD_VOICES), or ELEVENLABS_VOICE_ID for no god, an unknown one,
-    or ELEVENLABS_GOD_VOICES=0."""
-    if god and config.GOD_VOICES_ON:
-        return config.GOD_VOICES.get(god) or config.ELEVENLABS_VOICE_ID
-    return config.ELEVENLABS_VOICE_ID
-
-
-def key_for(text: str, voice_id: Optional[str] = None) -> str:
-    """Cache file name for a line: sha1 of voice + model + text, so a different voice (or ELEVENLABS_MODEL)
-    renders fresh clips instead of replaying old ones. `voice_id` defaults to ELEVENLABS_VOICE_ID. Fake mode
-    keys on "fake" + text only, which is how the committed clips in static/fake_audio/ are named."""
+def key_for(text: str) -> str:
+    """Cache file name for a line: sha1 of voice + model + text, so changing ELEVENLABS_VOICE_ID or
+    ELEVENLABS_MODEL renders fresh clips instead of replaying old ones. Fake mode keys on "fake" + text
+    only, which is how the committed clips in static/fake_audio/ are named."""
     if config.BRAIN_FAKE:
         return hashlib.sha1(f"fake:{text}".encode()).hexdigest()[:16]
-    voice_id = voice_id or config.ELEVENLABS_VOICE_ID
-    return hashlib.sha1(f"{voice_id}:{config.ELEVENLABS_MODEL}:{text}".encode()).hexdigest()[:16]
+    return hashlib.sha1(f"{config.ELEVENLABS_VOICE_ID}:{config.ELEVENLABS_MODEL}:{text}".encode()).hexdigest()[:16]
 
 
 CACHE_MAX_AGE_DAYS = 14   # generated clips unused this long are deleted at startup (static/audio/ only)
@@ -84,8 +75,7 @@ def audio_url(filename: str) -> str:
 
 
 def configured() -> bool:
-    """An API key and a voice for the presiding god (which is ELEVENLABS_VOICE_ID with god voices off)."""
-    return bool(config.ELEVENLABS_API_KEY and voice_for(gods.PRESIDING))
+    return bool(config.ELEVENLABS_API_KEY and config.ELEVENLABS_VOICE_ID)
 
 
 def _get_client():
@@ -96,12 +86,11 @@ def _get_client():
     return _client
 
 
-def synthesize_to_file(text: str, path: Path, voice_id: Optional[str] = None) -> None:
-    """Blocking ElevenLabs call in `voice_id` (default ELEVENLABS_VOICE_ID). Writes atomically so a
-    half-written mp3 is never served."""
+def synthesize_to_file(text: str, path: Path) -> None:
+    """Blocking ElevenLabs call. Writes atomically so a half-written mp3 is never served."""
     with _concurrency:
         audio = _get_client().text_to_speech.convert(
-            voice_id=voice_id or config.ELEVENLABS_VOICE_ID,
+            voice_id=config.ELEVENLABS_VOICE_ID,
             model_id=config.ELEVENLABS_MODEL,
             text=text,
             output_format=OUTPUT_FORMAT,
@@ -112,17 +101,16 @@ def synthesize_to_file(text: str, path: Path, voice_id: Optional[str] = None) ->
     tmp.replace(path)
 
 
-async def tts(text: str, god: Optional[str] = None) -> Optional[str]:
-    """URL of an mp3 of `god` saying `text` (in their voice, see voice_for), or None. Checked in order:
-    fake-mode clip, disk cache, then ElevenLabs (shared with any in-flight request for the same line,
+async def tts(text: str) -> Optional[str]:
+    """URL of an mp3 for `text` in the interviewer's one voice (ELEVENLABS_VOICE_ID), or None. Checked in
+    order: fake-mode clip, disk cache, then ElevenLabs (shared with any in-flight request for the same text,
     capped at TTS_TIMEOUT_S). On timeout the request keeps running in its thread, so a later call may find
     the file cached."""
     global _warned_unconfigured
     text = " ".join((text or "").split())
     if not text:
         return None
-    voice_id = voice_for(god)
-    key = key_for(text, voice_id)
+    key = key_for(text)
 
     if config.BRAIN_FAKE:
         if (config.FAKE_AUDIO_DIR / f"{key}.mp3").exists():
@@ -145,7 +133,7 @@ async def tts(text: str, god: Optional[str] = None) -> Optional[str]:
 
     task = _inflight.get(key)
     if task is None:   # dedupe: concurrent requests for the same text share one ElevenLabs call
-        task = asyncio.create_task(asyncio.to_thread(synthesize_to_file, text, path, voice_id))
+        task = asyncio.create_task(asyncio.to_thread(synthesize_to_file, text, path))
         _inflight[key] = task
         task.add_done_callback(lambda _t, k=key: _inflight.pop(k, None))
     try:
@@ -165,12 +153,12 @@ def startup_lines() -> list[str]:
 
 
 async def warm_up() -> None:
-    """Pre-generate the fixed lines (calibration, closing) so they play instantly. They're all the
-    presiding god's lines, so they're made in his voice. Old generated clips are pruned first (prune_cache)."""
+    """Pre-generate the fixed lines (calibration, closing) so they play instantly. Old generated clips
+    are pruned first (prune_cache)."""
     removed = prune_cache()
     if removed:
         log.info("voice cache: removed %d clip(s) unused for %d+ days", removed, CACHE_MAX_AGE_DAYS)
     texts = startup_lines()
-    results = await asyncio.gather(*(tts(t, gods.PRESIDING) for t in texts))
+    results = await asyncio.gather(*(tts(t) for t in texts))
     ready = sum(1 for r in results if r)
     log.info("voice warm-up: %d/%d fixed lines ready%s", ready, len(texts), " (fake mode)" if config.BRAIN_FAKE else "")

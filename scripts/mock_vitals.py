@@ -3,19 +3,19 @@
 
 No session_id is sent, so the backend files readings under the active session.
 
-Keys while running:   s = stress spike   d = distraction   f = face lost   q = quit
+Keys while running:   s = stress spike   f = face lost   q = quit
 
     python scripts/mock_vitals.py                                  # post to localhost:8000
     python scripts/mock_vitals.py --auto                           # spike ~10 s into every other question
-    python scripts/mock_vitals.py --events "20:s,60:d,100:f" --duration 180
+    python scripts/mock_vitals.py --events "20:s,100:f" --duration 180
     python scripts/mock_vitals.py --stdout --duration 30           # print NDJSON instead of posting
     python scripts/mock_vitals.py --stdout --fast --duration 600   # 10 min of data instantly
 
 Behavior (docs/roles/data.md):
-    baseline   HR 72 +/- 2, BR 14 +/- 1, focus 0.8 +/- 0.05, neutral, confidence 0.95
-    s          HR ramps to +25% over 6 s (BR +30%, focus -> 0.5, frown), decays back over 20 s
-    d          focus drops to 0.3 for 8 s, HR unchanged
+    baseline   HR 72 +/- 2, BR 14 +/- 1, neutral, confidence 0.95
+    s          HR ramps to +25% over 6 s (BR +30%, frown), decays back over 20 s
     f          5 s of nulls with confidence 0
+(There is no focus vital any more, so the old "d = distraction", which only lowered focus, is gone.)
 
 Standard library only, so anyone can run it without installing anything.
 """
@@ -32,13 +32,12 @@ import urllib.request
 from collections import deque
 from datetime import datetime, timedelta, timezone
 
-BASE_HR, BASE_BR, BASE_FOCUS, CONFIDENCE = 72.0, 14.0, 0.8, 0.95
-NOISE_HR, NOISE_BR, NOISE_FOCUS = 2.0, 1.0, 0.05
+BASE_HR, BASE_BR, CONFIDENCE = 72.0, 14.0, 0.95
+NOISE_HR, NOISE_BR = 2.0, 1.0
 SPIKE_RAMP_S, SPIKE_DECAY_S = 6, 20
-SPIKE_HR, SPIKE_BR, SPIKE_FOCUS = 0.25, 0.30, 0.5     # +25% HR, +30% BR, focus -> 0.5
-DISTRACT_S, DISTRACT_FOCUS = 8, 0.3
+SPIKE_HR, SPIKE_BR = 0.25, 0.30     # +25% HR, +30% BR
 FACE_LOST_S = 5
-EVENTS = {"s": "SPIKE", "d": "DISTRACTION", "f": "FACE LOST"}
+EVENTS = {"s": "SPIKE", "f": "FACE LOST"}
 
 AUTO_POLL_S = 2          # how often --auto checks /api/sessions/active
 AUTO_SPIKE_DELAY_S = 10  # spike this long after a question is asked
@@ -51,14 +50,11 @@ class VitalsSimulator:
     def __init__(self, rng: random.Random | None = None):
         self.rng = rng or random.Random()
         self.spikes: list[int] = []        # tick each spike started
-        self.distract_until = -1
         self.face_lost_until = -1
 
     def trigger(self, event: str, tick: int) -> None:
         if event == "s":
             self.spikes.append(tick)
-        elif event == "d":
-            self.distract_until = tick + DISTRACT_S
         elif event == "f":
             self.face_lost_until = tick + FACE_LOST_S
 
@@ -80,36 +76,29 @@ class VitalsSimulator:
     def reading(self, tick: int, ts: datetime) -> dict:
         r = {"ts": ts.isoformat().replace("+00:00", "Z")}
         if tick < self.face_lost_until:
-            return r | {"heart_rate": None, "breathing_rate": None, "focus": None,
-                        "expression": None, "confidence": 0.0}
+            return r | {"heart_rate": None, "breathing_rate": None, "expression": None, "confidence": 0.0}
         e = self.spike_level(tick)
         hr = BASE_HR * (1 + SPIKE_HR * e) + self._noise(NOISE_HR)
         br = BASE_BR * (1 + SPIKE_BR * e) + self._noise(NOISE_BR)
-        focus = BASE_FOCUS - (BASE_FOCUS - SPIKE_FOCUS) * e + self._noise(NOISE_FOCUS)
-        if tick < self.distract_until:
-            focus = DISTRACT_FOCUS + self._noise(NOISE_FOCUS)
         return r | {"heart_rate": round(hr, 1), "breathing_rate": round(br, 1),
-                    "focus": round(min(1.0, max(0.0, focus)), 3),
                     "expression": "frown" if e > 0.25 else "neutral", "confidence": CONFIDENCE}
 
     def label(self, tick: int) -> str:
         tags = []
         if tick < self.face_lost_until:
             tags.append("FACE LOST")
-        if tick < self.distract_until:
-            tags.append("DISTRACTED")
         if any(0 <= tick - s < SPIKE_RAMP_S + SPIKE_DECAY_S for s in self.spikes):
             tags.append("SPIKE")
         return " ".join(f"[{t}]" for t in tags)
 
 
 def parse_events(spec: str) -> dict[int, list[str]]:
-    """'20:s,60:d,100:f' -> {20: ['s'], 60: ['d'], 100: ['f']}"""
+    """'20:s,100:f' -> {20: ['s'], 100: ['f']}"""
     events: dict[int, list[str]] = {}
     for part in filter(None, (p.strip() for p in spec.split(","))):
         sec, _, key = part.partition(":")
         if not sec.strip().isdigit() or key.strip() not in EVENTS:
-            raise argparse.ArgumentTypeError(f"bad event {part!r}: use SECONDS:KEY with KEY in s, d, f")
+            raise argparse.ArgumentTypeError(f"bad event {part!r}: use SECONDS:KEY with KEY in s, f")
         events.setdefault(int(sec), []).append(key.strip())
     return events
 
@@ -294,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     pending_keys: list[str] = []
 
     if not args.stdout:
-        log(f"mock_vitals -> {args.url}/api/vitals   keys: s spike, d distraction, f face lost, q quit")
+        log(f"mock_vitals -> {args.url}/api/vitals   keys: s spike, f face lost, q quit")
     t0_wall = datetime.now(timezone.utc)
     t0 = time.monotonic()
     tick = 0
@@ -339,8 +328,7 @@ def main(argv: list[str] | None = None) -> int:
                 if status is not None:
                     hr = "  -- " if r["heart_rate"] is None else f"{r['heart_rate']:5.1f}"
                     br = " -- " if r["breathing_rate"] is None else f"{r['breathing_rate']:4.1f}"
-                    fo = " -- " if r["focus"] is None else f"{r['focus']:.2f}"
-                    log(f"t={tick:4d}s  HR {hr}  BR {br}  focus {fo}  {r['expression'] or '-':8s}"
+                    log(f"t={tick:4d}s  HR {hr}  BR {br}  {r['expression'] or '-':8s}"
                         f"conf {r['confidence']:.2f}  {sim.label(tick):14s} {status}")
                 tick += 1
     except KeyboardInterrupt:

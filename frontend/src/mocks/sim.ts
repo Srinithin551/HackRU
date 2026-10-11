@@ -118,13 +118,11 @@ export const MIN_CONFIDENCE = 0.5
 export interface BaselineValues {
   heart_rate: number
   breathing_rate: number
-  focus: number
 }
 
 export interface StressInput {
   heart_rate?: number | null
   breathing_rate?: number | null
-  focus?: number | null
   confidence: number
 }
 
@@ -135,7 +133,7 @@ export interface StressInput {
 export function stressScore(reading: StressInput, baseline: BaselineValues | null): number | null {
   if (!baseline || reading.confidence < MIN_CONFIDENCE) return null
   const parts: { weight: number; value: number }[] = []
-  const { heart_rate: hr, breathing_rate: br, focus } = reading
+  const { heart_rate: hr, breathing_rate: br } = reading
   if (hr !== null && hr !== undefined && baseline.heart_rate > 0) {
     const deltaPct = ((hr - baseline.heart_rate) / baseline.heart_rate) * 100
     parts.push({ weight: 0.5, value: clamp(deltaPct / 25, 0, 1) })
@@ -143,9 +141,6 @@ export function stressScore(reading: StressInput, baseline: BaselineValues | nul
   if (br !== null && br !== undefined && baseline.breathing_rate > 0) {
     const deltaPct = ((br - baseline.breathing_rate) / baseline.breathing_rate) * 100
     parts.push({ weight: 0.3, value: clamp(deltaPct / 40, 0, 1) })
-  }
-  if (focus !== null && focus !== undefined) {
-    parts.push({ weight: 0.2, value: clamp((baseline.focus - focus) / 0.5, 0, 1) })
   }
   if (parts.length === 0) return null
   const totalWeight = parts.reduce((sum, p) => sum + p.weight, 0)
@@ -157,7 +152,6 @@ export interface SimReading {
   time: number
   heart_rate: number | null
   breathing_rate: number | null
-  focus: number | null
   expression: Expression | null
   confidence: number
   stress: number | null
@@ -165,7 +159,7 @@ export interface SimReading {
 
 export const BASELINE_WARMUP_MS = 10_000
 export const BASELINE_MIN_SAMPLES = 10
-export const POPULATION_BASELINE: BaselineValues = { heart_rate: 75, breathing_rate: 15, focus: 0.75 }
+export const POPULATION_BASELINE: BaselineValues = { heart_rate: 75, breathing_rate: 15 }
 
 export interface BaselineResult {
   baseline: Baseline
@@ -191,15 +185,13 @@ export function computeBaseline(
   }
   const hr = mean(usable.map((r) => r.heart_rate))
   const br = mean(usable.map((r) => r.breathing_rate))
-  const focus = mean(usable.map((r) => r.focus))
   return {
     baseline: {
       heart_rate: round(hr ?? POPULATION_BASELINE.heart_rate, 1),
       breathing_rate: round(br ?? POPULATION_BASELINE.breathing_rate, 1),
-      focus: round(focus ?? POPULATION_BASELINE.focus, 2),
       n_samples: usable.length,
     },
-    fallback: hr === null || br === null || focus === null,
+    fallback: hr === null || br === null,
   }
 }
 
@@ -216,16 +208,14 @@ interface OverlaySpec {
   /** Fractional increase at full strength. */
   hr: number
   br: number
-  /** Focus value at full strength. */
-  focus: number
   expression: Expression | null
 }
 
 const OVERLAYS: Record<Exclude<OverlayKind, 'face_lost'>, OverlaySpec> = {
   // holdMs is 10 s on purpose: Brain's watcher flags 'high' on a 10 s *mean* above 70, so a
   // shorter peak (stress ~85 for 4 s) never turns the toast red in the demo.
-  spike: { rampMs: 6_000, holdMs: 10_000, decayMs: 20_000, hr: 0.28, br: 0.3, focus: 0.5, expression: 'frown' },
-  mild: { rampMs: 4_000, holdMs: 3_000, decayMs: 15_000, hr: 0.12, br: 0.15, focus: 0.7, expression: null },
+  spike: { rampMs: 6_000, holdMs: 10_000, decayMs: 20_000, hr: 0.28, br: 0.3, expression: 'frown' },
+  mild: { rampMs: 4_000, holdMs: 3_000, decayMs: 15_000, hr: 0.12, br: 0.15, expression: null },
 }
 
 export const FACE_LOST_MS = 4_000
@@ -244,7 +234,6 @@ function envelope(spec: OverlaySpec, dt: number): number {
 export interface VitalsSample {
   heart_rate: number | null
   breathing_rate: number | null
-  focus: number | null
   expression: Expression | null
   confidence: number
 }
@@ -261,18 +250,16 @@ const WALK_SCALE = Math.sqrt(1 - WALK_DECAY * WALK_DECAY)
 export class VitalsModel {
   readonly baseHeartRate: number
   readonly baseBreathingRate: number
-  readonly baseFocus: number
   private readonly rng: Rng
   private hrNoise = 0
   private brNoise = 0
-  private focusNoise = 0
   private readonly overlays: { kind: OverlayKind; startMs: number }[] = []
 
   constructor(rng: Rng) {
     this.rng = rng
     this.baseHeartRate = 72 + (rng() - 0.5) * 4
     this.baseBreathingRate = 14 + (rng() - 0.5) * 1.2
-    this.baseFocus = 0.8 + (rng() - 0.5) * 0.04
+    rng() // the retired focus vital's draw: kept so seeded mock streams (and the fixtures) stay identical
   }
 
   addOverlay(kind: OverlayKind, startMs: number): void {
@@ -284,14 +271,12 @@ export class VitalsModel {
     // Always advance the walks (even while the face is lost) so the stream stays deterministic.
     this.hrNoise = WALK_DECAY * this.hrNoise + 1.5 * WALK_SCALE * gaussian(rng)
     this.brNoise = WALK_DECAY * this.brNoise + 0.6 * WALK_SCALE * gaussian(rng)
-    this.focusNoise = WALK_DECAY * this.focusNoise + 0.04 * WALK_SCALE * gaussian(rng)
+    gaussian(rng) // the retired focus walk's draw, kept for the same reason as in the constructor
     const confidence = 0.93 + rng() * 0.04
 
     let lost = false
     let hrBoost = 0
     let brBoost = 0
-    let focusTarget = 0
-    let focusWeight = 0
     let expression: Expression = 'neutral'
     for (const overlay of this.overlays) {
       const dt = timeMs - overlay.startMs
@@ -304,20 +289,14 @@ export class VitalsModel {
       if (e <= 0) continue
       hrBoost += e * spec.hr
       brBoost += e * spec.br
-      if (e > focusWeight) {
-        focusWeight = e
-        focusTarget = spec.focus
-      }
       if (spec.expression && e > 0.4) expression = spec.expression
     }
 
-    if (lost) return { heart_rate: null, breathing_rate: null, focus: null, expression: null, confidence: 0 }
+    if (lost) return { heart_rate: null, breathing_rate: null, expression: null, confidence: 0 }
 
-    const calmFocus = clamp(this.baseFocus + this.focusNoise, 0, 1)
     return {
       heart_rate: (this.baseHeartRate + this.hrNoise) * (1 + hrBoost),
       breathing_rate: Math.max(4, (this.baseBreathingRate + this.brNoise) * (1 + brBoost)),
-      focus: clamp(calmFocus * (1 - focusWeight) + focusTarget * focusWeight, 0, 1),
       expression,
       confidence,
     }
@@ -350,7 +329,6 @@ export function windowStats(
     hr_delta_pct: hr !== null && baseline ? ((hr - baseline.heart_rate) / baseline.heart_rate) * 100 : null,
     br_mean: br,
     br_delta_pct: br !== null && baseline ? ((br - baseline.breathing_rate) / baseline.breathing_rate) * 100 : null,
-    focus_mean: mean(rows.map((r) => r.focus)),
     dominant_expression: dominant,
     stress: mean(rows.map((r) => r.stress)),
   }
@@ -363,21 +341,21 @@ export function watcherLevel(stress: number | null): CoachLevel | null {
 }
 
 /**
- * Mirrors backend/brain/watcher.py: the god names the signal driving the stress, cites its number,
- * and gives one command the mortal must obey before the trial moves on. `used` carries the phrasings
+ * Mirrors backend/brain/watcher.py: Judge names the signal driving the stress, cites its number,
+ * and gives one command the candidate must obey before the interview moves on. `used` carries the phrasings
  * already shown so none repeats (the frontend swallows duplicates, so a repeat would be a dropped flag).
  */
 const FLAG_VARIANTS: Record<string, { message: (n: number) => string; command: string }[]> = {
   'hr:rising': [
-    { message: (n) => `Your pulse climbs ${n}% above your own calm. The gods have noticed.`,
+    { message: (n) => `Your pulse climbs ${n}% above your own calm. I have noticed.`,
       command: 'slow your pace and finish the sentence you started' },
     { message: (n) => `${n}% over your baseline. Your heart answers faster than your mouth.`,
       command: 'take one slow breath before your next point' },
   ],
   'hr:high': [
-    { message: (n) => `Your heart races ${n}% past your baseline. Steady yourself, mortal.`,
+    { message: (n) => `Your heart races ${n}% past your baseline. Steady yourself before the court.`,
       command: 'stop, breathe out slowly, then continue' },
-    { message: (n) => `A pulse ${n}% above your calm. This hall has undone steadier guests.`,
+    { message: (n) => `A pulse ${n}% above your calm. This stand has rattled steadier witnesses.`,
       command: 'pause for two full seconds before you say another word' },
   ],
   'br:rising': [
@@ -387,13 +365,6 @@ const FLAG_VARIANTS: Record<string, { message: (n: number) => string; command: s
   'br:high': [
     { message: (n) => `Your breathing runs ${n}% above your calm. You are rushing.`,
       command: 'stop speaking and take one long breath out' },
-  ],
-  'focus:rising': [
-    { message: () => 'Your gaze wanders from this hall.', command: 'bring your eyes back to the question' },
-  ],
-  'focus:high': [
-    { message: () => 'You have left us, mortal. Your eyes are elsewhere.',
-      command: 'look back at the camera and reset before you continue' },
   ],
   'none:rising': [
     { message: (n) => `Your composure sits at ${n} out of a hundred.`, command: 'slow down and take one steady breath' },
@@ -406,20 +377,15 @@ const FLAG_VARIANTS: Record<string, { message: (n: number) => string; command: s
 
 export function flagFor(
   w: WindowStats,
-  baseline: BaselineValues | null,
   level: CoachLevel,
   used: Set<string> = new Set(),
 ): { message: string; command: string } {
   const hrPart = w.hr_delta_pct === null ? 0 : 0.5 * clamp(w.hr_delta_pct / 25, 0, 1)
   const brPart = w.br_delta_pct === null ? 0 : 0.3 * clamp(w.br_delta_pct / 40, 0, 1)
-  const focusPart =
-    baseline && w.focus_mean !== null ? 0.2 * clamp((baseline.focus - w.focus_mean) / 0.5, 0, 1) : 0
 
   let driver = 'none'
   let value = Math.round(w.stress ?? 0)
-  if (baseline && w.focus_mean !== null && focusPart > hrPart && focusPart > brPart) {
-    driver = 'focus'
-  } else if (w.br_delta_pct !== null && brPart > hrPart) {
+  if (w.br_delta_pct !== null && brPart > hrPart) {
     driver = 'br'
     value = Math.round(w.br_delta_pct)
   } else if (w.hr_delta_pct !== null && hrPart > 0) {
@@ -440,5 +406,5 @@ export function flagFor(
   const fallback = pools.flat()[0]
   return fallback
     ? { message: fallback.message(value), command: fallback.command }
-    : { message: 'The gods are watching you closely.', command: 'take one steady breath' }
+    : { message: 'I am watching you closely.', command: 'take one steady breath' }
 }

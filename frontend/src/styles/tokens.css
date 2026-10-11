@@ -1,5 +1,5 @@
 /*
- * Greek God Teacher Program design tokens: the single source of truth for CSS.
+ * Osiris design tokens: the single source of truth for CSS.
  *
  * Tailwind v4 turns every variable in @theme into utilities:
  *   --color-surface-1  → bg-surface-1, text-surface-1, border-surface-1 ...
@@ -11,7 +11,7 @@
  * JS consumers (Recharts, SVG gauges) read the same hex values from tokens.ts;
  * tokens.test.ts fails if the two files drift apart.
  *
- * Palette: "Night Olympus". The hall is black marble, the text is white, and gold is the only
+ * Palette: "Night court". The courtroom is black marble, the text is white, and gold is the only
  * chrome colour — it carries every action, focus ring and divine flourish. White on black clears
  * 21:1 and gold clears 9:1 (projector washout); the calm/rising/high triad stays distinguishable
  * under protanopia/deuteranopia by lightness as well as hue.
@@ -45,7 +45,7 @@
   --color-gold: #d4af37;
   --color-gold-subtle: #2a2110;
 
-  /* Pale statue stone: the gods themselves and their aura, lit against the black. */
+  /* Pale statue stone: Judge's portrait and its aura, lit against the black. */
   --color-pale: #c9ccd4;
   --color-pale-deep: #8f96a3;
   --color-pale-subtle: #1a1c22;
@@ -62,7 +62,6 @@
   /* Chart chrome + secondary series. */
   --color-series-hr: #d4af37;
   --color-series-breathing: #8f96a3;
-  --color-series-focus: #6ea8c0;
   --color-chart-grid: #1c1c22;
   --color-chart-axis: #8c8c97;
 
@@ -101,7 +100,7 @@
   --ease-in-out-quint: cubic-bezier(0.83, 0, 0.17, 1);
 
   /* ---- Motion -------------------------------------------------------------
-     Everything slow and weighty: the hall is old and in no hurry. The gods' own
+     Everything slow and weighty: the hall is old and in no hurry. Judge's own
      flourishes (descend, shimmer, halo, kindle) are gold and used sparingly,
      so each one still means something. All of it is disabled under
      prefers-reduced-motion by the rule at the bottom of this file. */
@@ -113,26 +112,28 @@
   --animate-sweep: sweep 2.4s linear infinite;
   --animate-aura: aura 4.5s ease-in-out infinite;
   --animate-drift: drift 24s linear infinite;
-  --animate-fall: fall 1900ms cubic-bezier(0.5, 0, 0.9, 0.4) forwards;
   --animate-rise: rise 700ms var(--ease-out-expo) both;
 
-  /* A god arrives: descends out of the dark and settles. */
+  /* Something arrives: descends out of the dark and settles. */
   --animate-descend: descend 900ms var(--ease-out-expo) both;
   /* Gold light travelling across a surface, like a torch passing a marble face. */
   --animate-shimmer: shimmer 3.2s ease-in-out infinite;
-  /* The halo around the god who is speaking. */
+  /* The halo around Judge while it speaks. */
   --animate-halo: halo 2.4s ease-in-out infinite;
 
   /* ---- Guided transitions -------------------------------------------------
-     Two choreographed moments, each one a deliberate piece of staging rather
-     than a generic fade: one god handing the floor to the next, and the doors
-     reopening for another attempt. Page changes are instant. */
-  /* The god taking the floor. The one yielding it simply dims through GodBust's own
-     500ms transition: a fill-forwards fade-out would leave an empty seat on the bench. */
-  --animate-god-arrive: god-arrive 760ms var(--ease-out-expo) both;
-  /* The doors reopening for another attempt: a gold aperture widening to swallow the screen. */
-  --animate-aperture: aperture 1100ms var(--ease-in-out-quint) both;
-  /* The handover banner announces the new god, then gets out of the way on its own. Ending at
+     Deliberate pieces of staging rather than generic fades: each new question
+     (Judge's portrait flares, a banner names the question), and the verdict's two
+     exits (light opening for another attempt, the screen dimming on leaving).
+     Page changes are instant. */
+  /* Judge's portrait on a new question: descends, flares gold, settles. */
+  --animate-arrive: arrive 760ms var(--ease-out-expo) both;
+  /* Trying again: gold light opening out from the centre until it fills the screen. */
+  --animate-iris-open: iris-open 950ms var(--ease-in-out-quint) both;
+  /* Leaving: the verdict sinks and fades while the screen dims behind it. */
+  --animate-recede: recede 900ms var(--ease-out-expo) forwards;
+  --animate-dim: dim 900ms ease-in forwards;
+  /* The new-question banner names the question, then gets out of the way on its own. Ending at
      opacity 0 means no timer has to clear it. */
   --animate-handover: handover 2200ms var(--ease-out-expo) both;
   /* A brazier catching: the gold edge of a panel coming alight. */
@@ -163,7 +164,7 @@
     from { transform: translateX(-100%); }
     to { transform: translateX(100%); }
   }
-  /* A god at rest: the aura swells and settles. */
+  /* Judge at rest: the aura swells and settles. */
   @keyframes aura {
     0%, 100% { opacity: 0.25; transform: scale(1); }
     50% { opacity: 0.55; transform: scale(1.07); }
@@ -172,12 +173,6 @@
   @keyframes drift {
     from { transform: translate3d(0, 0, 0); }
     to { transform: translate3d(-50%, 0, 0); }
-  }
-  /* Dismissed: the floor opens and the mortal drops out of the palace. */
-  @keyframes fall {
-    0% { transform: translateY(0) rotate(0deg) scale(1); opacity: 1; filter: blur(0); }
-    25% { transform: translateY(6vh) rotate(-2deg) scale(0.98); opacity: 1; }
-    100% { transform: translateY(125vh) rotate(9deg) scale(0.72); opacity: 0; filter: blur(3px); }
   }
   @keyframes rise {
     from { opacity: 0; transform: translateY(18px); }
@@ -194,24 +189,33 @@
     0%, 100% { background-position: -140% 0; }
     55% { background-position: 240% 0; }
   }
-  /* The speaking god's halo: a gold ring breathing outward. */
+  /* The halo around Judge while it speaks: a gold ring breathing outward. */
   @keyframes halo {
     0%, 100% { box-shadow: 0 0 0 0 rgb(212 175 55 / 0.55), 0 0 18px 0 rgb(212 175 55 / 0.25); }
     50% { box-shadow: 0 0 0 9px rgb(212 175 55 / 0), 0 0 30px 4px rgb(212 175 55 / 0.4); }
   }
-  /* The next god takes it: descends, flares gold, settles. */
-  @keyframes god-arrive {
+  /* A new question: Judge's portrait descends, flares gold, settles. */
+  @keyframes arrive {
     0% { opacity: 0; transform: translateY(-16px) scale(0.94); filter: brightness(2.2); }
     45% { opacity: 1; filter: brightness(1.5); }
     100% { opacity: 1; transform: none; filter: brightness(1); }
   }
-  /* The doors reopening: a gold aperture widening until it takes the whole hall. */
-  @keyframes aperture {
-    0% { opacity: 0; transform: scale(0.05); }
-    25% { opacity: 1; }
-    100% { opacity: 1; transform: scale(14); }
+  /* Trying again: a circle of light opening from the centre. clip-path keeps the edge crisp at any size
+     (scaling up a small shape blurs and blocks). Ends past the corners, so the screen is fully covered. */
+  @keyframes iris-open {
+    from { clip-path: circle(0% at 50% 45%); }
+    to { clip-path: circle(150% at 50% 45%); }
   }
-  /* "Athena yields. Apollo takes the floor." Announces itself, holds, then clears. */
+  /* Leaving: the content sinks a little and fades out of focus. */
+  @keyframes recede {
+    to { opacity: 0; transform: translateY(22px) scale(0.98); filter: blur(2px); }
+  }
+  /* Leaving: the screen dims to the page colour behind it. */
+  @keyframes dim {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  /* "Question 2 of 5". Announces itself, holds, then clears. */
   @keyframes handover {
     0% { opacity: 0; transform: translateY(-10px); }
     12% { opacity: 1; transform: none; }
@@ -234,7 +238,7 @@
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
 }
 
-/* A panel the gods preside over: the same marble with a gold inlay that catches the light. */
+/* A panel Judge presides over: the same marble with a gold inlay that catches the light. */
 @utility panel-gold {
   background-color: var(--color-surface-1);
   border: 1px solid var(--color-hairline);
@@ -255,11 +259,11 @@
   color: var(--color-ink-muted);
 }
 
-/* The palace floor: black marble tiles under a shaft of light from the open roof. */
+/* The courtroom floor: black marble tiles under a shaft of light from above. */
 @utility bg-monitor {
   background-color: var(--color-page);
   background-image:
-    /* the light the gods are lit by */
+    /* the light Judge is lit by */
     radial-gradient(ellipse 65% 55% at 50% -5%, rgb(212 175 55 / 0.10) 0%, transparent 70%),
     /* the hall falling away into dark at the edges */
     radial-gradient(ellipse 85% 80% at 50% 45%, rgb(255 255 255 / 0.035) 0%, transparent 75%),

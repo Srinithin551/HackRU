@@ -17,6 +17,7 @@ import { Link, Navigate, useLocation, useParams } from 'react-router'
 import { getInsights, getReplay, waitForReport } from '../api.ts'
 import { Timeline, type FlagView, type QuestionView, type ReportView } from '../components/Timeline.tsx'
 import { AnalyzingScreen, Brand, Button, StressBadge, StressIcon } from '../components/ui.tsx'
+import { INTERVIEWER_NAME } from '../lib/constants.ts'
 import { loadFlags } from '../lib/flagStore.ts'
 import { color, stressColor, stressLevel } from '../styles/tokens.ts'
 import type { ChartNote, CoachFlagEvent, ReplayResponse, Report } from '../types.ts'
@@ -175,11 +176,11 @@ function SessionReport({ sessionId }: { sessionId: string }) {
       <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-hairline px-gutter">
         <Brand />
         <p className="hidden text-caption text-ink-secondary md:block">
-          The gods' record{replay.session.user_name ? ` · ${replay.session.user_name}` : ''}
+          {INTERVIEWER_NAME}&apos;s record{replay.session.user_name ? ` · ${replay.session.user_name}` : ''}
           {report.generated_by === 'fallback' && ' · numbers-only report (Gemini unavailable)'}
         </p>
         <Link to={{ pathname: `/session/${sessionId}/verdict`, search }}>
-          <Button>Hear their judgement →</Button>
+          <Button>Hear the judgement →</Button>
         </Link>
       </header>
 
@@ -214,12 +215,12 @@ function SessionReport({ sessionId }: { sessionId: string }) {
             className="panel shrink-0 border-l-4 p-panel"
             style={{ borderLeftColor: color.high, backgroundColor: color.highSubtle }}
           >
-            <p className="label-caps" style={{ color: color.high }}>Where the gods saw you break</p>
+            <p className="label-caps" style={{ color: color.high }}>Where {INTERVIEWER_NAME} saw you break</p>
             <p className="mt-2 text-body font-medium xl:text-lead">{report.hardest_moment}</p>
           </section>
 
           <section className="panel shrink-0 border-l-4 p-panel" style={{ borderLeftColor: color.calm }}>
-            <p className="label-caps" style={{ color: color.calm }}>What to carry out of the palace</p>
+            <p className="label-caps" style={{ color: color.calm }}>What to take from this hearing</p>
             <ol className="mt-3 flex flex-col gap-3">
               {report.top_tips.map((tip, i) => (
                 <li key={i} className="flex gap-3 text-body">
@@ -240,6 +241,11 @@ function SessionReport({ sessionId }: { sessionId: string }) {
               <p className="label-caps">Replay · click a question band</p>
               <Legend />
             </div>
+            <p className="mt-1.5 text-caption text-ink-muted">
+              The chart only shows the highlighted metrics: heart rate (top) and composure (bottom). Breathing is
+              in the notes when you hover. Shaded bands are your answers; the highlighted band is the question
+              shown below.
+            </p>
             {data.replayMissing ? (
               <div className="mt-3 flex flex-1 flex-col items-center justify-center gap-3 text-center">
                 <p className="text-body text-ink-secondary">The replay chart couldn&apos;t load. Your feedback is still here.</p>
@@ -344,7 +350,12 @@ function QuestionRow({ q, active, weakest, onClick }: { q: QuestionView; active:
         active ? 'border-accent bg-surface-2' : 'border-transparent hover:bg-surface-2'
       }`}
     >
-      <span className="w-16 shrink-0 font-mono text-caption whitespace-nowrap text-ink-secondary">{q.label}</span>
+      {/* "Q1 follow-up" is too wide for one line here: the number, then "follow-up" underneath, so it can
+          never run into the question text. */}
+      <span className="flex w-16 shrink-0 flex-col font-mono text-caption leading-tight text-ink-secondary">
+        <span>{q.label.replace(' follow-up', '')}</span>
+        {q.kind === 'follow_up' && <span className="text-[0.625rem] uppercase tracking-wider text-ink-muted">follow-up</span>}
+      </span>
       <span className="min-w-0 flex-1">
         <span className="line-clamp-1 text-caption text-ink">{q.text}</span>
         <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-surface-3">

@@ -9,6 +9,8 @@ It also listens for `end_session` on the WebSocket (_on_client_event) so ending 
 """
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 
@@ -16,7 +18,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
 from backend import config, ws
-from backend.brain import fake, insights
+from backend.brain import fake, insights, material
 from backend.brain.interviewer import run_session
 from backend.brain.state import SessionMeta, SessionState, metas, prune_finished, states, tasks
 from backend.data import queries as data
@@ -52,6 +54,34 @@ async def create_session(body: CreateSessionBody):
     metas[sid] = SessionMeta(sid, body.user_name, body.interview_type, body.role_title)
     log.info("session %s created: %s / %r", sid, body.interview_type, body.role_title)
     return {"session_id": sid}
+
+
+class MaterialBody(BaseModel):
+    """A file imported on the setup page, base64-encoded (JSON keeps it free of multipart dependencies)."""
+    filename: str
+    data: str
+
+
+@router.post("/{session_id}/material")
+async def upload_material(session_id: str, body: MaterialBody):
+    """Attach an imported file (slides, notes, a résumé...) that the interviewer plans its questions from.
+    Must arrive before /start, since planning begins when the interview does."""
+    meta = metas.get(session_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="no such session")
+    if session_id in tasks:
+        raise HTTPException(status_code=409, detail="the interview has already started")
+    try:
+        raw = base64.b64decode(body.data, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="the file didn't arrive intact; try again")
+    try:
+        meta.material = material.from_upload(body.filename, raw)
+    except material.MaterialError as e:
+        raise HTTPException(status_code=415, detail=str(e))
+    m = meta.material
+    log.info("session %s: material %r (%s, %d chars)", session_id, m.name, m.kind, len(m.text))
+    return {"name": m.name, "kind": m.kind, "chars": len(m.text)}
 
 
 @router.post("/{session_id}/start")

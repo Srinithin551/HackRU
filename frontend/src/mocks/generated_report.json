@@ -1,48 +1,48 @@
 {
-  "composure_score": 62,
-  "summary": "Composure 62/100 over 6 questions, including 1 follow-up, with stress averaging 16 out of 100. Your biggest reaction came on Q5, where stress peaked at 88. 4 of 6 answers stayed fully in the calm zone (under 40) and the coach flagged you 2 times.",
-  "hardest_moment": "On Q5 (\"Explain how you would find the longest substring...\"), 14s into your answer, your heart rate hit 97.7 bpm, 31% over your 74.4 bpm baseline, and stress peaked at 87.5.",
+  "composure_score": 58,
+  "summary": "Composure 58/100 over 6 questions, including 1 follow-up, with stress averaging 17 out of 100. Your biggest reaction came on Q5, where stress peaked at 98. 4 of 6 answers stayed fully in the calm zone (under 40) and the coach flagged you 2 times.",
+  "hardest_moment": "On Q5 (\"Explain how you would find the longest substring...\"), 26s into your answer, your heart rate hit 98.5 bpm, 33% over your 74.3 bpm baseline, and stress peaked at 97.6.",
   "per_question": [
     {
       "question_id": "615805cd-7c07-41a3-9ed9-8fa6f388f892",
       "what_happened": "You answered in about 35 words over 26s, opening with \"I built the dashboard for a campus food...\". The structure was clear and got to the point.",
-      "body_signal": "HR averaged 71.6 bpm (-4% vs baseline) and peaked at 76.2; stress averaged 4.3 and peaked at 12.4 26s in.",
+      "body_signal": "HR averaged 72.1 bpm (-3% vs baseline) and peaked at 76.2; stress averaged 5.9 and peaked at 15.8 23s in.",
       "advice": "You were calm here. Add one specific example with a number so the answer lands harder."
     },
     {
       "question_id": "9e39ddd6-3fb4-428b-b1b3-8f1b3e0f3634",
       "what_happened": "You answered in about 37 words over 27s, opening with \"First I would check whether it is the...\". The structure was clear and got to the point.",
-      "body_signal": "HR averaged 74.7 bpm (+0% vs baseline) and peaked at 76.3; stress averaged 2.9 and peaked at 9.2 16s in.",
+      "body_signal": "HR averaged 74.6 bpm (+0% vs baseline) and peaked at 76.3; stress averaged 3.2 and peaked at 10.8 13s in.",
       "advice": "You were calm here. Add one specific example with a number so the answer lands harder."
     },
     {
       "question_id": "7fa0a7ed-46c7-46be-88fe-b605a094d8e4",
       "what_happened": "You answered in about 33 words over 28s, opening with \"We disagreed about using a global store versus...\". The structure was clear and got to the point.",
-      "body_signal": "HR averaged 77.9 bpm (+5% vs baseline) and peaked at 84.3; stress averaged 18.5 and peaked at 42.3 10s in.",
+      "body_signal": "HR averaged 77.8 bpm (+5% vs baseline) and peaked at 82.8; stress averaged 20.9 and peaked at 42.1 11s in.",
       "advice": "Stress climbed mid-answer. Plan one deliberate pause with a slow breath before your second point."
     },
     {
       "question_id": "53f2df52-30a5-492d-bc30-9e4001f5a5a4",
       "what_happened": "You answered in about 34 words over 30s, opening with \"I would use a token bucket per API...\". The structure was clear and got to the point.",
-      "body_signal": "HR averaged 73 bpm (-2% vs baseline) and peaked at 75.5; stress averaged 5.3 and peaked at 10.9 23s in.",
+      "body_signal": "HR averaged 72.9 bpm (-2% vs baseline) and peaked at 75.5; stress averaged 4.4 and peaked at 12.1 21s in.",
       "advice": "You were calm here. Add one specific example with a number so the answer lands harder."
     },
     {
       "question_id": "15d00d14-e58d-4988-b16e-4eefa364260c",
       "what_happened": "You answered in about 39 words over 30s, opening with \"Okay so, um, I would check every substring...\". It had 3 hesitations (\"um\", \"I think\") before the main point.",
-      "body_signal": "HR averaged 88.1 bpm (+18% vs baseline) and peaked at 97.7; stress averaged 61.8 and peaked at 87.5 14s in.",
+      "body_signal": "HR averaged 88.2 bpm (+19% vs baseline) and peaked at 98.5; stress averaged 67.1 and peaked at 97.6 26s in.",
       "advice": "When a question feels hard, say your first step out loud (\"I would start by...\") before reaching for the full answer. It buys thinking time and keeps your pulse down."
     },
     {
       "question_id": "5f5a63cf-ba60-43ad-a837-f371d2af8b31",
       "what_happened": "On the follow-up you answered in about 33 words over 24s, opening with \"I would keep the last index of each...\". The structure was clear and got to the point.",
-      "body_signal": "HR averaged 72 bpm (-3% vs baseline) and peaked at 73.7; stress averaged 2.1 and peaked at 5.4 19s in.",
-      "advice": "Breaking the problem into one small step dropped your stress peak from 87.5 to 5.4. Next time, take that first small step yourself before the interviewer has to offer it."
+      "body_signal": "HR averaged 72.2 bpm (-3% vs baseline) and peaked at 73.7; stress averaged 2.2 and peaked at 6.7 17s in.",
+      "advice": "Breaking the problem into one small step dropped your stress peak from 97.6 to 6.7. Next time, take that first small step yourself before the interviewer has to offer it."
     }
   ],
   "top_tips": [
-    "On questions like Q5 (13.7s in, stress 87.5), start with the simplest approach out loud, then improve it.",
-    "Practice slow exhales between points: your breathing averaged up to 17.3/min against a 13.9/min baseline.",
+    "On questions like Q5 (26s in, stress 97.6), start with the simplest approach out loud, then improve it.",
+    "Practice slow exhales between points: your breathing averaged up to 17.4/min against a 13.9/min baseline.",
     "The coach flagged you 2 times. When you feel your pulse rise, slow your speaking pace instead of speeding up."
   ]
 }

@@ -132,7 +132,6 @@ class VitalsState:
             "ts": datetime.now(timezone.utc).isoformat(),
             "heart_rate": None,
             "breathing_rate": None,
-            "focus": None,        # not provided by the Presage C++ SDK
             "expression": None,   # not provided by the Presage C++ SDK
             "confidence": 0.0,
         }
