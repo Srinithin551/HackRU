@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS sessions (
   ended_at        TIMESTAMPTZ,
   baseline_hr     REAL,
   baseline_br     REAL,
-  baseline_focus  REAL,
   baseline_n      INT,
   report          JSONB
 );
@@ -25,13 +24,14 @@ CREATE TABLE IF NOT EXISTS questions (
   answer_started_at TIMESTAMPTZ,
   answered_at      TIMESTAMPTZ
 );
+-- Replay, reports and per-question stats read a session's questions in order.
+CREATE INDEX IF NOT EXISTS questions_session_idx ON questions (session_id, idx, created_at);
 
 CREATE TABLE IF NOT EXISTS vitals (
   time            TIMESTAMPTZ NOT NULL,
   session_id      UUID NOT NULL,
   heart_rate      REAL,
   breathing_rate  REAL,
-  focus           REAL,
   expression      TEXT,
   confidence      REAL,
   stress          REAL                     -- computed on insert, null before baseline exists
@@ -46,7 +46,6 @@ SELECT time_bucket('5 seconds', time) AS bucket,
        session_id,
        avg(heart_rate)     AS hr,
        avg(breathing_rate) AS br,
-       avg(focus)          AS focus,
        avg(stress)         AS stress,
        max(stress)         AS stress_peak
 FROM vitals

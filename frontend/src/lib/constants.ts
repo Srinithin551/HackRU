@@ -1,48 +1,13 @@
 /** App-wide constants that aren't design tokens. */
 
 /**
- * The god who presides over the trial, shown on the interviewer card. No contract field
- * carries it; swap this when Brain picks the ElevenLabs voice (brain.md: "Pick one calm,
- * professional voice").
+ * The interviewer: one AI interviewer with one voice (the backend's ELEVENLABS_VOICE_ID) for the whole
+ * interview. Shown on the interviewer card, the status pill and the interrupts.
  */
-export const INTERVIEWER_NAME = 'Osiras'
+export const INTERVIEWER_NAME = 'Judge'
 
-/** The product name, as spoken to the mortal standing in the palace. */
-export const APP_NAME = 'Greek God Teacher Program'
-
-/**
- * The pantheon seated in the hall. Osiras presides and always takes the small talk; the
- * others take the planned questions in turn, so each question visibly comes from a
- * different god. `domain` is the single word shown under the name.
- *
- * Each god speaks in their own ElevenLabs voice, chosen by the backend with the same rule
- * (backend/brain/gods.py). Keep the names and order in sync, or a question will be voiced
- * by a different god than the one shown.
- */
-export interface God {
-  name: string
-  domain: string
-}
-
-export const PRESIDING_GOD: God = { name: INTERVIEWER_NAME, domain: 'Judgement' }
-
-export const PANTHEON: readonly God[] = [
-  { name: 'Athena', domain: 'Strategy' },
-  { name: 'Apollo', domain: 'Clarity' },
-  { name: 'Hephaestus', domain: 'Craft' },
-  { name: 'Hera', domain: 'Authority' },
-  { name: 'Hermes', domain: 'Quickness' },
-] as const
-
-/**
- * Which god asks a given question. Calibration (index 0) belongs to Osiras, who opens and
- * closes the trial; planned question 1..n cycles through the pantheon so the same god never
- * asks twice in a row.
- */
-export function godForQuestion(index: number): God {
-  if (index <= 0) return PRESIDING_GOD
-  return PANTHEON[(index - 1) % PANTHEON.length]
-}
+/** The product name, in one place (backend twin: APP_NAME in backend/config.py). */
+export const APP_NAME = 'Osiris'
 
 /** Live sparkline length: the last 60 vitals readings (~60 s at 1 Hz). */
 export const VITALS_WINDOW = 60

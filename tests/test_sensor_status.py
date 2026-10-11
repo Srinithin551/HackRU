@@ -34,3 +34,11 @@ def test_health_shows_the_latest_status(client):
 
 def test_rejects_unknown_states(client):
     assert client.post("/api/sensor/status", json={"state": "dancing"}).status_code == 422
+
+
+def test_page_camera_signal(client, monkeypatch):
+    """The page reports its webcam open; the pre-warmed sensor reads it before starting Presage."""
+    monkeypatch.setattr(sensing, "page_camera_open_at", None)
+    assert client.get("/api/sensor/page-camera").json() == {"open": False}
+    assert client.post("/api/sensor/page-camera", json={"open": True}).status_code == 200
+    assert client.get("/api/sensor/page-camera").json() == {"open": True}

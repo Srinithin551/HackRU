@@ -6,7 +6,8 @@
  *  2. `question`: show it, play its audio. When the audio ENDS, send answer_started and
  *     call onAnswerStart (the page opens the mic). The mic never hears the AI's voice.
  *  3. The page calls finishAnswer(transcript) on "I'm done" or silence → answer_done.
- *  4. `filler`: play it, question text unchanged. `state`: drives the status pill.
+ *  4. `filler`: the closing line. `closing` turns on and `speaking` stays on while it plays, so Judge
+ *     shows as speaking. Question text unchanged. `state`: drives the status pill.
  *  5. `vitals`: ring buffer of the last 60 readings for the sparklines.
  *  6. `coach_flag`: 4 s toast, also saved for the report chart.
  *  6b. `sensor`: what Presage is doing ("Hold still"), re-sent every few seconds by the sensor.
@@ -28,7 +29,6 @@ export interface VitalsSample {
   t: number
   hr: number | null
   br: number | null
-  focus: number | null
   stress: number | null
 }
 
@@ -54,6 +54,8 @@ export interface LiveState {
   flags: CoachFlagEvent[]
   toast: CoachFlagEvent | null
   ended: boolean
+  /** The closing line is playing (or has played). */
+  closing: boolean
   /** POST /start failed (e.g. 404: the session doesn't exist). The page shows it instead of waiting forever. */
   startError: string | null
 }
@@ -74,6 +76,7 @@ const initialState: LiveState = {
   flags: [],
   toast: null,
   ended: false,
+  closing: false,
   startError: null,
 }
 
@@ -128,7 +131,6 @@ function applyEvent(state: LiveState, event: ServerEvent, at: number): LiveState
         t: Date.parse(v.ts) || at,
         hr: v.heart_rate,
         br: v.breathing_rate,
-        focus: v.focus,
         stress: v.stress,
       }
       return { ...state, vitals: [...state.vitals, sample].slice(-VITALS_WINDOW), latest: v, lastVitalsAt: at }
@@ -140,7 +142,7 @@ function applyEvent(state: LiveState, event: ServerEvent, at: number): LiveState
     case 'session_ended':
       return { ...state, ended: true, answering: false, speaking: false }
     case 'filler':
-      return state
+      return { ...state, closing: true, speaking: true, answering: false }
   }
 }
 
@@ -194,7 +196,7 @@ export function useLiveSession(sessionId: string, callbacks: Callbacks = {}) {
       dispatch({ type: 'event', event, at: Date.now() })
       if (event.type === 'filler') {
         stopFiller()
-        stopFiller = playClip(event.data.audio_url)
+        stopFiller = playClip(event.data.audio_url, () => dispatch({ type: 'speaking', value: false }))
       } else if (event.type === 'coach_flag') {
         saveFlag(sessionId, event.data)
         const flag = event.data

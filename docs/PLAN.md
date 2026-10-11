@@ -69,7 +69,6 @@ class VitalsReading(BaseModel):
     ts: datetime                       # UTC, stamped by the sensing client
     heart_rate: Optional[float] = None       # bpm
     breathing_rate: Optional[float] = None   # breaths per minute
-    focus: Optional[float] = None            # 0.0 to 1.0
     expression: Optional[Expression] = None
     confidence: float = 1.0                  # 0 to 1, face/signal quality
 
@@ -79,7 +78,6 @@ class VitalsBatch(BaseModel):
 class Baseline(BaseModel):
     heart_rate: float
     breathing_rate: float
-    focus: float
     n_samples: int
 
 class WindowStats(BaseModel):          # "how is the person right now"
@@ -89,7 +87,6 @@ class WindowStats(BaseModel):          # "how is the person right now"
     hr_delta_pct: Optional[float]      # % above/below baseline
     br_mean: Optional[float]
     br_delta_pct: Optional[float]
-    focus_mean: Optional[float]
     dominant_expression: Optional[str]
     stress: Optional[float]            # 0 to 100
 
@@ -101,7 +98,6 @@ class QuestionStats(BaseModel):        # "how did they react to this question"
     hr_peak: Optional[float]
     hr_delta_pct: Optional[float]
     br_mean: Optional[float]
-    focus_mean: Optional[float]
     stress_mean: Optional[float]
     stress_peak: Optional[float]
     peak_offset_s: Optional[float]     # seconds into the answer when stress peaked
@@ -114,8 +110,8 @@ Defined once in `backend/data/metrics.py`:
 ```
 hr_part    = clamp(hr_delta_pct / 25, 0, 1)            # +25% HR = max
 br_part    = clamp(br_delta_pct / 40, 0, 1)            # +40% breathing = max
-focus_part = clamp((baseline_focus - focus) / 0.5, 0, 1)
-stress     = 100 * (0.5*hr_part + 0.3*br_part + 0.2*focus_part)
+stress     = 100 * (0.5*hr_part + 0.3*br_part) / 0.8
+# There is no focus vital (removed 2026-10-11): Presage never measured it.
 ```
 
 Missing inputs drop out and the remaining weights are renormalized. Thresholds everyone uses: **< 40 calm, 40 to 70 rising, > 70 high.** Data and Sensing may tune the constants after real testing, but the 0 to 100 scale and the thresholds stay fixed.
@@ -126,6 +122,7 @@ Missing inputs drop out and the remaining weights are renormalized. Thresholds e
 |---|---|---|---|
 | POST | `/api/sessions` | Brain | body `{user_name, interview_type, role_title}` → `{session_id}` |
 | POST | `/api/sessions/{id}/start` | Brain | starts calibration + interview loop in background |
+| POST | `/api/sessions/{id}/material` | Brain | optional, before /start: `{filename, data (base64)}` (.pdf .pptx .docx .txt .md) → `{name, kind, chars}`; the questions are planned from it |
 | GET | `/api/sessions/active` | Data | `{session_id}` or `null` (sensing client uses this) |
 | POST | `/api/vitals` | Sensing (route), Data (storage) | body `VitalsBatch` → `{stored: n}` |
 | POST | `/api/sensor/status` | Sensing | body `{state, message, simulated}` from the Presage sensor, broadcast as `sensor` |
@@ -145,7 +142,7 @@ Server → client:
 | `state` | `{state: "calibrating" \| "asking" \| "listening" \| "thinking" \| "done"}` | Brain |
 | `question` | `{question_id, index, total, kind, text, audio_url}` | Brain |
 | `filler` | `{audio_url}` | Brain |
-| `vitals` | `{ts, heart_rate, breathing_rate, focus, stress}` (about 1 per second) | Sensing route |
+| `vitals` | `{ts, heart_rate, breathing_rate, stress}` (about 1 per second) | Sensing route |
 | `coach_flag` | `{ts, level: "rising" \| "high", message}` | Brain |
 | `sensor` | `{state: "idle" \| "starting" \| "warming_up" \| "measuring" \| "adjust" \| "error", message, simulated}` (every 3 s and on change) | Sensing route |
 | `session_ended` | `{report_url, replay_url}` | Brain |

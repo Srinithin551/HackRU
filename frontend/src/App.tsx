@@ -11,8 +11,8 @@ import { VerdictPage } from './pages/VerdictPage.tsx'
  * Routes (frontend.md):
  *   /                     Setup: name, type, role → creates the session
  *   /session/:id          Live interview: camera, questions, vitals
- *   /session/:id/report   The gods' record: replay + per-question feedback
- *   /session/:id/verdict  The judgement: stand again, or be dismissed through the floor
+ *   /session/:id/report   Judge's record: replay + per-question feedback
+ *   /session/:id/verdict  The judgement: take the stand again, or adjourn
  *   /dev                  Dev Console: raw wiring test, every event logged
  * Vercel serves index.html for every path (vercel.json), so deep links work.
  */

@@ -1,28 +1,26 @@
 /** Small shared building blocks: brand mark, buttons, stress icon/badge, status dot. */
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { APP_NAME, INTERVIEWER_NAME } from '../lib/constants.ts'
 import { STRESS_META, stressLevel, type StressLevel } from '../styles/tokens.ts'
 
-/** Logo: a gold temple front on pale stone + wordmark. */
+/** Logo: gold scales of justice (the app is about judgement) + the app's name. */
 export function Brand() {
   return (
     <div className="flex items-center gap-2.5">
       <svg viewBox="0 0 32 32" className="size-8 shrink-0" aria-hidden="true">
         <rect width="32" height="32" rx="9" className="fill-gold-subtle" />
-        {/* pediment */}
-        <path d="M16 6 26 13H6Z" className="fill-gold" />
-        {/* architrave */}
-        <rect x="7" y="14.5" width="18" height="2" rx="0.6" className="fill-gold" />
-        {/* three columns */}
-        <rect x="9.5" y="17.5" width="2.4" height="7" rx="0.8" className="fill-gold" />
-        <rect x="14.8" y="17.5" width="2.4" height="7" rx="0.8" className="fill-gold" />
-        <rect x="20.1" y="17.5" width="2.4" height="7" rx="0.8" className="fill-gold" />
-        {/* stylobate */}
-        <rect x="7" y="25.5" width="18" height="2" rx="0.6" className="fill-gold" />
+        {/* post, beam and base */}
+        <rect x="15.1" y="7" width="1.8" height="17.5" rx="0.6" className="fill-gold" />
+        <circle cx="16" cy="6.6" r="1.6" className="fill-gold" />
+        <rect x="6.5" y="9.2" width="19" height="1.6" rx="0.8" className="fill-gold" />
+        <rect x="11" y="24" width="10" height="2.2" rx="1" className="fill-gold" />
+        {/* hangers */}
+        <path d="M8.6 10.6 6.2 17.2M8.6 10.6l2.4 6.6M23.4 10.6 21 17.2M23.4 10.6l2.4 6.6" className="stroke-gold" strokeWidth="0.9" fill="none" />
+        {/* pans */}
+        <path d="M5.4 17.2h6.4a3.2 2.3 0 0 1-6.4 0Z" className="fill-gold" />
+        <path d="M20.2 17.2h6.4a3.2 2.3 0 0 1-6.4 0Z" className="fill-gold" />
       </svg>
-      <span className="flex flex-col leading-none">
-        <span className="text-gilded font-mono text-micro uppercase tracking-[0.18em]">Greek God</span>
-        <span className="text-lead font-semibold tracking-tight">Teacher Program</span>
-      </span>
+      <span className="text-lead font-semibold tracking-tight">{APP_NAME}</span>
     </div>
   )
 }
@@ -91,28 +89,21 @@ export function StatusDot({ on, children }: { on: boolean; children: ReactNode }
   )
 }
 
-/** Full-screen "The gods confer…" shown between the trial and the verdict. */
+/** Full-screen "Judge deliberates…" shown between the interview and the report. */
 export function AnalyzingScreen({ detail }: { detail?: string }) {
   return (
     <div className="bg-monitor fixed inset-0 z-50 flex animate-fade-in flex-col items-center justify-center gap-6 p-gutter text-center">
-      {/* Three pale figures deliberating, their auras breathing out of phase. */}
-      <div className="flex items-end gap-5" aria-hidden="true">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="relative flex size-16 items-center justify-center">
-            <span
-              className="absolute inset-0 animate-aura rounded-full bg-pale blur-md"
-              style={{ animationDelay: `${i * 0.6}s` }}
-            />
-            <svg viewBox="0 0 32 48" className="relative h-14">
-              {/* a simple pale statue: head and draped shoulders */}
-              <circle cx="16" cy="11" r="6.5" className="fill-pale-deep" />
-              <path d="M16 19c-7 0-11 5-12 13h24c-1-8-5-13-12-13Z" className="fill-pale-deep" />
-            </svg>
-          </div>
-        ))}
+      {/* The interviewer deliberating, the aura breathing. */}
+      <div className="relative flex size-16 items-center justify-center" aria-hidden="true">
+        <span className="absolute inset-0 animate-aura rounded-full bg-pale blur-md" />
+        <svg viewBox="0 0 32 48" className="relative h-14">
+          {/* a simple pale statue: head and draped shoulders */}
+          <circle cx="16" cy="11" r="6.5" className="fill-pale-deep" />
+          <path d="M16 19c-7 0-11 5-12 13h24c-1-8-5-13-12-13Z" className="fill-pale-deep" />
+        </svg>
       </div>
       <div>
-        <p className="text-title font-semibold">The gods confer…</p>
+        <p className="text-title font-semibold">{INTERVIEWER_NAME} deliberates…</p>
         <p className="mt-2 text-body text-ink-secondary">
           {detail ?? 'Weighing every answer against what your body betrayed.'}
         </p>

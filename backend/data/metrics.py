@@ -2,10 +2,10 @@
 
     hr_part    = clamp(hr_delta_pct / 25, 0, 1)            # +25% HR = max
     br_part    = clamp(br_delta_pct / 40, 0, 1)            # +40% breathing = max
-    focus_part = clamp((baseline_focus - focus) / 0.5, 0, 1)
-    stress     = 100 * (0.5*hr_part + 0.3*br_part + 0.2*focus_part)
+    stress     = 100 * (0.5*hr_part + 0.3*br_part) / 0.8   # i.e. 5/8 heart rate, 3/8 breathing
 
-Missing inputs drop out and the remaining weights are renormalized.
+Missing inputs drop out and the remaining weights are renormalized. (A 0.2 "focus" part was removed:
+Presage never measures focus, so it always dropped out anyway.)
 The constants may be tuned with real Presage data; the 0-100 scale and the
 thresholds (< 40 calm, 40-70 rising, > 70 high) stay fixed.
 """
@@ -21,8 +21,7 @@ log = logging.getLogger("data.metrics")
 
 HR_MAX_PCT = 25.0        # HR this % above baseline = full HR contribution
 BR_MAX_PCT = 40.0        # breathing this % above baseline = full BR contribution
-FOCUS_MAX_DROP = 0.5     # focus this far below baseline = full focus contribution
-W_HR, W_BR, W_FOCUS = 0.5, 0.3, 0.2
+W_HR, W_BR = 0.5, 0.3
 # Readings below this are never stored and never scored. 0.4 is Presage's own accuracy standard for heart
 # rate: SmartSpectra marks pulse_rate "stable" (within +/-3 bpm) at confidence >= 40 (docs/data-types.md in
 # Presage-Security/SmartSpectra); the sensing client sends that pulse confidence / 100. Measured with the
@@ -101,8 +100,6 @@ def stress_score(r: VitalsReading, b: Baseline | None) -> float | None:
     br_d = delta_pct(r.breathing_rate, b.breathing_rate)
     if br_d is not None:
         parts.append((W_BR, _clamp01(br_d / BR_MAX_PCT)))
-    if r.focus is not None and b.focus is not None:
-        parts.append((W_FOCUS, _clamp01((b.focus - r.focus) / FOCUS_MAX_DROP)))
     if not parts:
         return None
     weight = sum(w for w, _ in parts)

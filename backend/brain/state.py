@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+from backend.brain.material import Material
 from backend.brain.models import PlannedQuestion
 from backend.brain.specs import DEFAULT_ROLE, InterviewSpec, get_spec
 from backend.contracts import Baseline, WindowStats
@@ -17,6 +18,13 @@ class SessionMeta:
     user_name: str
     interview_type: str   # raw label from the frontend
     role_title: str
+    material: Optional[Material] = None   # an imported file, or a presentation's spoken description
+
+    @property
+    def asks_for_material(self) -> bool:
+        """A Class Presentation with no file: the interviewer opens by asking what the talk covers and
+        plans its questions from the answer."""
+        return self.spec.key == "presentation" and self.material is None
 
     @property
     def spec(self) -> InterviewSpec:
@@ -57,6 +65,7 @@ class SessionState:
     exchanges: list[dict] = field(default_factory=list)    # {kind, text, transcript} for every answered turn
     parting_words: str = ""                                # Gemini's reaction to the last answer, said before the closing line
     report: Optional[dict] = None                          # the final report, also served from here if the DB save fails
+    plan_task: Optional[asyncio.Task] = None               # Gemini planning the questions (started early, awaited after calibration)
 
     end_requested: bool = False
     started: float = field(default_factory=time.monotonic)

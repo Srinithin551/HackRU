@@ -29,7 +29,7 @@ if FAKE:
 
 WARMUP_S = 10                 # Presage warm-up skipped at the start of calibration
 MIN_BASELINE_SAMPLES = 10
-DEFAULT_BASELINE = {"heart_rate": 75.0, "breathing_rate": 15.0, "focus": 0.75}   # population defaults
+DEFAULT_BASELINE = {"heart_rate": 75.0, "breathing_rate": 15.0}   # population defaults
 ACTIVE_CACHE_S = 2.0
 BASELINE_MISS_TTL_S = 10.0    # before calibration ends, re-check the DB for a baseline at most this often
 
@@ -158,8 +158,8 @@ async def end_session(session_id: str) -> None:
 # ---------------------------------------------------------------- vitals
 
 INSERT_VITALS = """
-INSERT INTO vitals (time, session_id, heart_rate, breathing_rate, focus, expression, confidence, stress)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO vitals (time, session_id, heart_rate, breathing_rate, expression, confidence, stress)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 """
 
 
@@ -169,11 +169,11 @@ async def _load_baseline(session_id: str) -> Baseline | None:
         return None
     pool = await db.get_pool()
     row = await pool.fetchrow(
-        "SELECT baseline_hr, baseline_br, baseline_focus, baseline_n FROM sessions WHERE id = $1", sid)
+        "SELECT baseline_hr, baseline_br, baseline_n FROM sessions WHERE id = $1", sid)
     if row is None or row["baseline_hr"] is None:
         return None
     return Baseline(heart_rate=row["baseline_hr"], breathing_rate=row["baseline_br"],
-                    focus=row["baseline_focus"], n_samples=row["baseline_n"] or 0)
+                    n_samples=row["baseline_n"] or 0)
 
 
 async def _cached_baseline(session_id: str) -> Baseline | None:
@@ -219,11 +219,11 @@ async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
             continue
         stress = _r(stress_score(r, await _cached_baseline(str(sid))))
         row = {"time": _utc(r.ts), "session_id": str(sid), "heart_rate": r.heart_rate,
-               "breathing_rate": r.breathing_rate, "focus": r.focus, "expression": r.expression,
+               "breathing_rate": r.breathing_rate, "expression": r.expression,
                "confidence": r.confidence, "stress": stress}
         rows.append(row)
         if r.confidence >= MIN_CONFIDENCE:
-            records.append((row["time"], sid, r.heart_rate, r.breathing_rate, r.focus, r.expression,
+            records.append((row["time"], sid, r.heart_rate, r.breathing_rate, r.expression,
                             r.confidence, stress))
     if dropped_foreign:
         log.warning("insert_vitals: dropped %d reading(s) for a session this backend didn't create", dropped_foreign)
@@ -238,7 +238,7 @@ async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
 
 
 BASELINE_SQL = f"""
-SELECT count(*) AS n, avg(heart_rate) AS hr, avg(breathing_rate) AS br, avg(focus) AS focus
+SELECT count(*) AS n, avg(heart_rate) AS hr, avg(breathing_rate) AS br
 FROM vitals
 WHERE session_id = $1
   AND confidence >= {MIN_CONFIDENCE}::real
@@ -270,29 +270,27 @@ async def compute_baseline(session_id: str) -> Baseline:
     else:
         b = Baseline(heart_rate=row["hr"] or DEFAULT_BASELINE["heart_rate"],
                      breathing_rate=row["br"] or DEFAULT_BASELINE["breathing_rate"],
-                     focus=row["focus"] if row["focus"] is not None else DEFAULT_BASELINE["focus"],
                      n_samples=n)
     _baselines[str(sid)] = b               # cache first, so rows inserted from now on get stress
     _baseline_misses.pop(str(sid), None)
 
     # Store it and read the rows still missing stress (the calibration rows) in parallel: one round trip.
     _, pending = await asyncio.gather(
-        pool.execute("UPDATE sessions SET baseline_hr = $2, baseline_br = $3, baseline_focus = $4, "
-                     "baseline_n = $5 WHERE id = $1", sid, b.heart_rate, b.breathing_rate, b.focus, b.n_samples),
-        pool.fetch("SELECT time, heart_rate, breathing_rate, focus, confidence FROM vitals "
+        pool.execute("UPDATE sessions SET baseline_hr = $2, baseline_br = $3, baseline_n = $4 WHERE id = $1",
+                     sid, b.heart_rate, b.breathing_rate, b.n_samples),
+        pool.fetch("SELECT time, heart_rate, breathing_rate, confidence FROM vitals "
                    f"WHERE session_id = $1 AND stress IS NULL AND confidence >= {MIN_CONFIDENCE}::real", sid))
     times, scores = [], []
     for p in pending:
         s = stress_score(VitalsReading(ts=p["time"], heart_rate=p["heart_rate"],
-                                       breathing_rate=p["breathing_rate"], focus=p["focus"],
-                                       confidence=p["confidence"]), b)
+                                       breathing_rate=p["breathing_rate"], confidence=p["confidence"]), b)
         if s is not None:
             times.append(p["time"])
             scores.append(round(s, 1))
     if times:
         await pool.execute(BACKFILL_SQL, sid, times, scores)
-    log.info("baseline for %s: HR %.1f BR %.1f focus %.2f from %d samples; backfilled %d rows",
-             session_id, b.heart_rate, b.breathing_rate, b.focus, b.n_samples, len(times))
+    log.info("baseline for %s: HR %.1f BR %.1f from %d samples; backfilled %d rows",
+             session_id, b.heart_rate, b.breathing_rate, b.n_samples, len(times))
     return b
 
 
@@ -307,7 +305,7 @@ async def get_baseline(session_id: str) -> Baseline | None:
 
 
 WINDOW_SQL = f"""
-SELECT count(*) AS n, avg(heart_rate) AS hr, avg(breathing_rate) AS br, avg(focus) AS focus,
+SELECT count(*) AS n, avg(heart_rate) AS hr, avg(breathing_rate) AS br,
        avg(stress) AS stress, mode() WITHIN GROUP (ORDER BY expression) AS expression
 FROM vitals
 WHERE session_id = $1 AND time > now() - make_interval(secs => $2)
@@ -326,13 +324,13 @@ async def get_window_stats(session_id: str, seconds: int = 15) -> WindowStats:
         row = await pool.fetchrow(WINDOW_SQL, sid, float(seconds))
     if row is None or row["n"] == 0:
         return WindowStats(seconds=seconds, n_samples=0, hr_mean=None, hr_delta_pct=None, br_mean=None,
-                           br_delta_pct=None, focus_mean=None, dominant_expression=None, stress=None)
+                           br_delta_pct=None, dominant_expression=None, stress=None)
     b = await _cached_baseline(str(sid))
     return WindowStats(
         seconds=seconds, n_samples=row["n"],
         hr_mean=_r(row["hr"]), hr_delta_pct=_r(delta_pct(row["hr"], b.heart_rate if b else None)),
         br_mean=_r(row["br"]), br_delta_pct=_r(delta_pct(row["br"], b.breathing_rate if b else None)),
-        focus_mean=_r(row["focus"], 3), dominant_expression=row["expression"], stress=_r(row["stress"]))
+        dominant_expression=row["expression"], stress=_r(row["stress"]))
 
 
 # ---------------------------------------------------------------- questions
@@ -366,21 +364,21 @@ QUESTION_STATS_SQL = f"""
 SELECT q.id, q.session_id, q.idx, q.kind, q.text, q.transcript,
        q.created_at, q.answer_started_at, q.answered_at,
        COALESCE(q.answer_started_at, q.created_at) AS t_start,
-       COALESCE(q.answered_at, now())              AS t_end,
+       COALESCE(q.answered_at, s_end.ended_at, now()) AS t_end,   -- unanswered: up to the session's end, or now while it's live
        st.*
 FROM questions q
+LEFT JOIN LATERAL (SELECT ended_at FROM sessions WHERE id = q.session_id) s_end ON true
 LEFT JOIN LATERAL (
     SELECT count(*)            AS n,
            avg(v.heart_rate)   AS hr_mean,
            max(v.heart_rate)   AS hr_peak,
            avg(v.breathing_rate) AS br_mean,
-           avg(v.focus)        AS focus_mean,
            avg(v.stress)       AS stress_mean,
            max(v.stress)       AS stress_peak,
            (array_agg(v.time ORDER BY v.stress DESC NULLS LAST))[1] AS peak_time
     FROM vitals v
     WHERE v.session_id = q.session_id
-      AND v.time BETWEEN COALESCE(q.answer_started_at, q.created_at) AND COALESCE(q.answered_at, now())
+      AND v.time BETWEEN COALESCE(q.answer_started_at, q.created_at) AND COALESCE(q.answered_at, s_end.ended_at, now())
       AND v.confidence >= {MIN_CONFIDENCE}::real
 ) st ON true
 """
@@ -395,14 +393,14 @@ def _question_stats(row, b: Baseline | None) -> QuestionStats:
         n_samples=row["n"] or 0,
         hr_mean=_r(row["hr_mean"]), hr_peak=_r(row["hr_peak"]),
         hr_delta_pct=_r(delta_pct(row["hr_mean"], b.heart_rate if b else None)),
-        br_mean=_r(row["br_mean"]), focus_mean=_r(row["focus_mean"], 3),
+        br_mean=_r(row["br_mean"]),
         stress_mean=_r(row["stress_mean"]), stress_peak=_r(row["stress_peak"]),
         peak_offset_s=round((peak - start).total_seconds(), 1) if peak else None)
 
 
 def _empty_stats(question_id) -> QuestionStats:
     return QuestionStats(question_id=str(question_id), duration_s=0.0, n_samples=0, hr_mean=None,
-                         hr_peak=None, hr_delta_pct=None, br_mean=None, focus_mean=None,
+                         hr_peak=None, hr_delta_pct=None, br_mean=None,
                          stress_mean=None, stress_peak=None, peak_offset_s=None)
 
 
@@ -457,12 +455,12 @@ async def get_report(session_id: str) -> dict | None:
 # ---------------------------------------------------------------- replay (GET /api/sessions/{id}/replay)
 
 REPLAY_SESSION_SQL = """
-SELECT id, user_name, started_at, ended_at, baseline_hr, baseline_br, baseline_focus, baseline_n
+SELECT id, user_name, started_at, ended_at, baseline_hr, baseline_br, baseline_n
 FROM sessions WHERE id = $1
 """
 # 5-second rollups from the continuous aggregate (real-time, so the newest rows are included)
 REPLAY_SERIES_SQL = """
-SELECT bucket, hr, br, focus, stress, stress_peak FROM vitals_5s WHERE session_id = $1 ORDER BY bucket
+SELECT bucket, hr, br, stress, stress_peak FROM vitals_5s WHERE session_id = $1 ORDER BY bucket
 """
 
 
@@ -487,15 +485,13 @@ async def get_replay(session_id: str) -> dict | None:
         return None
     b = None
     if s["baseline_hr"] is not None:
-        b = Baseline(heart_rate=s["baseline_hr"], breathing_rate=s["baseline_br"],
-                     focus=s["baseline_focus"], n_samples=s["baseline_n"] or 0)
+        b = Baseline(heart_rate=s["baseline_hr"], breathing_rate=s["baseline_br"], n_samples=s["baseline_n"] or 0)
     return {
         "session": {"id": str(s["id"]), "user_name": s["user_name"], "started_at": _iso(s["started_at"]),
                     "ended_at": _iso(s["ended_at"]),
                     "baseline": None if b is None else {"heart_rate": _r(b.heart_rate),
-                                                        "breathing_rate": _r(b.breathing_rate),
-                                                        "focus": _r(b.focus, 3)}},
-        "series": [{"t": _iso(p["bucket"]), "hr": _r(p["hr"]), "br": _r(p["br"]), "focus": _r(p["focus"], 3),
+                                                        "breathing_rate": _r(b.breathing_rate)}},
+        "series": [{"t": _iso(p["bucket"]), "hr": _r(p["hr"]), "br": _r(p["br"]),
                     "stress": _r(p["stress"]), "stress_peak": _r(p["stress_peak"])} for p in series],
         "questions": [{"id": str(q["id"]), "idx": q["idx"], "kind": q["kind"], "text": q["text"],
                        "transcript": q["transcript"], "answer_started_at": _iso(q["answer_started_at"]),

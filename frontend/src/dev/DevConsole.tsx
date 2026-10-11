@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import './dev.css'
 import { createSession, getHealth, getReplay, startSession, waitForReport } from '../api.ts'
 import { API_BASE, IS_MOCK, wsUrl } from '../lib/config.ts'
+import { APP_NAME } from '../lib/constants.ts'
 import { playClip } from '../lib/playClip.ts'
 import { createSessionSocket, type SessionSocket, type SocketStatus } from '../lib/socket.ts'
 import {
@@ -193,7 +194,7 @@ export function DevConsole() {
 
   return (
     <main className="dev">
-      <h1>Greek God Teacher Program · Dev Console</h1>
+      <h1>{APP_NAME} · Dev Console</h1>
       <p className="muted">
         Temporary page for testing the wiring. Mode: <b>{IS_MOCK ? 'MOCK (no backend)' : 'REAL backend'}</b> · API
         base: <code>{API_BASE || '(same origin → Vite proxy)'}</code> · WebSocket: <code>{wsUrl('SESSION_ID').replace('SESSION_ID', '{session_id}')}</code>
@@ -252,8 +253,8 @@ export function DevConsole() {
           </button>
         </div>
         <p>
-          vitals ({vitalsCount}): HR <b>{vitals?.heart_rate ?? '—'}</b> · BR {vitals?.breathing_rate ?? '—'} · focus{' '}
-          {vitals?.focus ?? '—'} · stress <b>{vitals?.stress ?? '— (no baseline yet / no face)'}</b>
+          vitals ({vitalsCount}): HR <b>{vitals?.heart_rate ?? '—'}</b> · BR {vitals?.breathing_rate ?? '—'} · stress{' '}
+          <b>{vitals?.stress ?? '— (no baseline yet / no face)'}</b>
         </p>
         {flag && <p className={`flag ${flag.level}`}>coach flag ({flag.level}): {flag.message}</p>}
       </section>

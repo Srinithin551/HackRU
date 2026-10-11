@@ -9,7 +9,7 @@ from backend.contracts import QuestionStats
 
 def item(qid="q1", idx=1, **stats_kw) -> HistoryItem:
     base = dict(question_id=qid, duration_s=24.0, n_samples=24, hr_mean=88.0, hr_peak=97.0,
-                hr_delta_pct=18.0, br_mean=17.0, focus_mean=None, stress_mean=52.0,
+                hr_delta_pct=18.0, br_mean=17.0, stress_mean=52.0,
                 stress_peak=74.0, peak_offset_s=11.0)
     base.update(stats_kw)
     return HistoryItem(question_id=qid, idx=idx, kind="main", text="Tell me about a project.",

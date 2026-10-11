@@ -1,4 +1,4 @@
-"""Start the whole Greek God Teacher Program pipeline with one command, and watch that every link is alive.
+"""Start the whole Osiris pipeline with one command, and watch that every link is alive.
 
     webcam → Presage (hidden sensor, sensing_client/presage_node) → backend (/api/vitals) → Tiger Data
            → Brain (Gemini + ElevenLabs) → Chrome window (audio, live dashboard, report)
@@ -15,6 +15,13 @@ stable when the first question lands. The camera light is therefore on while the
     python scripts/run_demo.py --no-preview      # the page doesn't show the webcam (Presage still uses it)
     python scripts/run_demo.py --no-sensing      # no Presage at all (e.g. with scripts/mock_vitals.py)
     python scripts/run_demo.py --legacy-presage  # old way: SmartSpectra app window + log file + client.py
+
+Every run starts empty: the Tiger Data tables are dropped and recreated (scripts/init_db.py --fresh) and the
+generated voice clips are deleted, so nothing from an earlier run can leak into this one (--keep-data skips it).
+If Presage crashes (its engine can abort on a camera hiccup), only Presage is restarted: the interview keeps
+going. Everything printed here is also saved to backend/logs/run-<date>-<time>.log.
+
+    python scripts/run_demo.py --keep-data       # don't empty Tiger Data / the voice cache this time
 
 Needs Node.js 20+ (the Presage SDK is installed into sensing_client/presage_node on first run) and
 PRESAGE_API_KEY in .env (plus optional PRESAGE_BACKUP_API_KEYS, used when a key runs out of credits). The first time, macOS asks whether your terminal app may use the camera: allow it.
@@ -36,13 +43,41 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 VENV_PY = ROOT / ".venv" / "bin" / "python"
+AUDIO_DIR = ROOT / "backend" / "static" / "audio"   # generated voice clips (the committed fake ones live elsewhere)
+LOG_DIR = ROOT / "backend" / "logs"
+KEEP_RUN_LOGS = 10
+SENSOR_RESTART_S = [2, 5, 10, 20]   # waits before restarting a crashed Presage sensor
+SENSOR_STABLE_S = 60                # a sensor that ran this long has its restart backoff reset
+
+_log_file = None
+_log_lock = threading.Lock()
+
+
+def out(line: str) -> None:
+    """Print a line and append it to this run's log file."""
+    print(line, flush=True)
+    if _log_file is not None:
+        with _log_lock:
+            _log_file.write(line + "\n")
+            _log_file.flush()
+
+
+def open_run_log() -> Path:
+    """backend/logs/run-<date>-<time>.log for this run; only the newest KEEP_RUN_LOGS are kept."""
+    global _log_file
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    for old in sorted(LOG_DIR.glob("run-*.log"))[:-(KEEP_RUN_LOGS - 1)]:
+        old.unlink(missing_ok=True)
+    path = LOG_DIR / f"run-{time.strftime('%Y%m%d-%H%M%S')}.log"
+    _log_file = path.open("w", encoding="utf-8")
+    return path
 DB_CONTAINER = "stresstest-tigerdb"
 SENSOR_DIR = ROOT / "sensing_client" / "presage_node"
 CHROME_APPS = (Path("/Applications/Google Chrome.app"), Path.home() / "Applications" / "Google Chrome.app")
 
 
 def say(msg: str) -> None:
-    print(f"[demo] {msg}", flush=True)
+    out(f"[demo] {msg}")
 
 
 def read_env() -> dict:
@@ -159,7 +194,42 @@ def _alive(pid: int) -> bool:
 
 def pipe(proc: subprocess.Popen, name: str) -> None:
     for line in iter(proc.stdout.readline, ""):
-        print(f"[{name}] {line.rstrip()}", flush=True)
+        out(f"[{name}] {line.rstrip()}")
+
+
+def fresh_start(env: dict) -> None:
+    """Every run starts empty: drop and recreate the Tiger Data tables (current schema + columnstore, via
+    scripts/init_db.py --fresh) and delete the generated voice clips. The backend regenerates the few fixed
+    lines at startup; everything else is made per interview anyway."""
+    clips = [p for pattern in ("*.mp3", "*.part") for p in AUDIO_DIR.glob(pattern)]
+    for p in clips:
+        p.unlink(missing_ok=True)
+    say(f"fresh start: deleted {len(clips)} generated voice clip(s)")
+    if not env.get("TIGER_DATABASE_URL"):
+        return
+    try:
+        r = subprocess.run([str(VENV_PY), "scripts/init_db.py", "--fresh", "--columnstore"], cwd=ROOT,
+                           capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        say("WARNING: resetting Tiger Data took over 3 minutes; continuing with whatever is there")
+        return
+    failed = [line.strip() for line in r.stdout.splitlines() if line.strip().startswith("FAIL")]
+    if r.returncode != 0 or failed:
+        say("WARNING: couldn't reset Tiger Data; continuing with whatever is there:")
+        for line in (failed or (r.stdout + r.stderr).strip().splitlines()[-6:]):
+            out(f"[demo]   {line}")
+    else:
+        say("fresh start: Tiger Data tables dropped and recreated empty (schema, indexes, 5 s rollup, columnstore)")
+
+
+def describe_exit(code: int) -> str:
+    """'exit code 1' or 'signal SIGABRT' (negative return codes are signals)."""
+    if code < 0:
+        try:
+            return f"signal {signal.Signals(-code).name}"
+        except ValueError:
+            return f"signal {-code}"
+    return f"exit code {code}"
 
 
 def ensure_sensor() -> str:
@@ -215,11 +285,14 @@ def main() -> None:
                     help="old setup: launch the SmartSpectra app window (sensing_client/presage_macos) and "
                          "sensing_client/client.py instead of the hidden sensor")
     ap.add_argument("--presage", action="store_true", help=argparse.SUPPRESS)   # old flag: Presage is now the default
+    ap.add_argument("--keep-data", action="store_true",
+                    help="don't empty Tiger Data and the voice cache at startup (every run starts empty otherwise)")
     ap.add_argument("--port", type=int, default=8000, help="backend port")
     ap.add_argument("--frontend-port", type=int, default=5173, help="frontend port")
     args = ap.parse_args()
 
     env = read_env()
+    say(f"logging this run to {open_run_log().relative_to(ROOT)}")
     if not VENV_PY.exists():
         sys.exit("[demo] .venv missing: python3.12 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt")
     if not args.fake and not (env.get("GEMINI_API_KEY") and env.get("ELEVENLABS_API_KEY") and env.get("ELEVENLABS_VOICE_ID")):
@@ -228,6 +301,8 @@ def main() -> None:
         ensure_local_db(env["TIGER_DATABASE_URL"])
     else:
         say("WARNING: no TIGER_DATABASE_URL: Data runs in memory and nothing is saved")
+    if args.keep_data:
+        say("--keep-data: keeping Tiger Data and the voice cache from earlier runs")
     if args.presage:
         say("NOTE: --presage isn't needed any more: Presage now runs hidden by default")
 
@@ -238,7 +313,7 @@ def main() -> None:
         r = subprocess.run([str(ROOT / "sensing_client" / "presage_macos" / "start_presage.sh")],
                            capture_output=True, text=True, env={**os.environ, "SESSION_FILE": str(session_file)})
         for line in (r.stdout + r.stderr).splitlines():
-            print(line, flush=True)
+            out(line)
         if r.returncode != 0:
             sys.exit("[demo] couldn't launch Presage (see above)")
     elif sensing:
@@ -253,6 +328,8 @@ def main() -> None:
             say(f"Presage: {len(keys)} API key(s) in .env; when one runs out of credits, the next takes over")
 
     free_ports([args.port] + ([] if args.no_frontend else [args.frontend_port]))
+    if not args.keep_data:
+        fresh_start(env)
     backend_url = f"http://127.0.0.1:{args.port}"
     procs: list[tuple[str, subprocess.Popen]] = []
 
@@ -297,12 +374,20 @@ def main() -> None:
     say(f"backend up: brain={'FAKE' if health['fake'] else 'real'} gemini={health['gemini']} "
         f"elevenlabs={health['elevenlabs']} data={health.get('data_store')} routers={health['routers']}")
 
+    sensor_cmd: list[str] | None = None
+    sensor_env: dict = {}
     if sensing and args.legacy_presage:
         start("presage", [sys.executable, "sensing_client/client.py"],
               extra_env={"BACKEND_URL": backend_url, "SESSION_FILE": str(session_file)})
     elif sensing:
-        start("presage", [node, "sensing_client/presage_node/sensor.mjs"] + (["--simulate"] if args.simulate_vitals else []),
-              extra_env={"BACKEND_URL": backend_url})
+        sensor_cmd = [node, "sensing_client/presage_node/sensor.mjs"] + (["--simulate"] if args.simulate_vitals else [])
+        sensor_env = {"BACKEND_URL": backend_url}
+        if args.no_preview or args.no_frontend:   # the page won't open the camera: don't wait for it
+            sensor_env["PRESAGE_WAIT_FOR_PAGE"] = "0"
+        start("presage", sensor_cmd, extra_env=sensor_env)
+    sensor_started = time.monotonic()
+    sensor_restarts = 0
+    sensor_restart_at: float | None = None
     if not args.no_frontend:
         fe_env = {"VITE_PROXY_TARGET": backend_url}
         if args.no_preview:
@@ -318,14 +403,36 @@ def main() -> None:
             say(f"the frontend didn't come up; when it does, open {url} in Chrome")
 
     # Watch the links that fail silently: Presage feeding vitals, and the backend itself.
+    # A crashed Presage sensor is restarted on its own: it must never take the interview down with it.
     was = None
     presage_was = None
+    next_health = time.monotonic() + 5
     while True:
-        time.sleep(5)
-        for name, p in procs:
-            if p.poll() is not None:
-                say(f"{name} exited with code {p.returncode}; stopping the rest")
-                stop_all()
+        time.sleep(1)
+        for entry in list(procs):
+            name, p = entry
+            if p.poll() is None:
+                continue
+            if name == "presage" and sensor_cmd is not None:
+                procs.remove(entry)
+                if time.monotonic() - sensor_started > SENSOR_STABLE_S:
+                    sensor_restarts = 0
+                wait = SENSOR_RESTART_S[min(sensor_restarts, len(SENSOR_RESTART_S) - 1)]
+                sensor_restarts += 1
+                sensor_restart_at = time.monotonic() + wait
+                say(f"Presage crashed ({describe_exit(p.returncode)}); restarting it in {wait} s. The backend and "
+                    "the page keep running: the interview goes on and vitals resume once Presage is back.")
+                continue
+            say(f"{name} stopped ({describe_exit(p.returncode)}); stopping the rest")
+            stop_all()
+        if sensor_restart_at is not None and time.monotonic() >= sensor_restart_at:
+            sensor_restart_at = None
+            sensor_started = time.monotonic()
+            say("restarting Presage")
+            start("presage", sensor_cmd, extra_env=sensor_env)
+        if time.monotonic() < next_health:
+            continue
+        next_health = time.monotonic() + 5
         try:
             sensor = get_json(f"{backend_url}/health")["sensor"]
         except Exception:
@@ -340,7 +447,7 @@ def main() -> None:
             say({"signal": "Presage vitals: LIVE (heart rate coming through)",
                  "no-face": "Presage vitals: arriving, but no heart rate yet (Presage needs 10-20 s of a still "
                             "face; sit facing a light, face and chest in view)",
-                 "off": "Presage vitals: not arriving (Presage starts when an interview starts)"}[now])
+                 "off": "Presage vitals: not arriving (they're only sent while an interview is on)"}[now])
             was = now
 
 

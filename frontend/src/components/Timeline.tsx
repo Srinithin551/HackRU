@@ -142,7 +142,7 @@ export function Timeline({
           </p>
         )}
 
-        {/* What the gods made of this stretch: one note per variable, written by Gemini
+        {/* What Judge made of this stretch: one note per variable, written by Gemini
             (backend/brain/insights.py), or from the numbers when it isn't available. */}
         {bandNotes.length > 0 && (
           <div className="mt-2 flex flex-col gap-1.5 border-t border-hairline pt-2">
@@ -160,7 +160,7 @@ export function Timeline({
         )}
         {band && bandNotes.length === 0 && (
           <p className="mt-2 border-t border-hairline pt-2 text-micro text-ink-muted">
-            The gods are still writing their notes…
+            Judge is still writing notes…
           </p>
         )}
       </div>

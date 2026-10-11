@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from backend import ws
-from backend.brain import gemini, gods, lines, voice
+from backend.brain import gemini, lines, material, voice
 from backend.brain.history import as_baseline, as_question_stats, as_window_stats, normalize_history
 from backend.brain.models import Decision
 from backend.brain.report import fallback_report
@@ -68,8 +68,7 @@ async def ask(s: SessionState, qid: str, text: str, kind: str, coaching: str = "
     calibrating = kind == "calibration"   # calibration stays "calibrating" so the overlay doesn't flicker
     if not calibrating:
         await set_state(s, "asking")
-    god = gods.god_for_question(s.planned_number)   # the god the page shows asking it, in their own voice
-    audio_url = await voice.tts(f"{coaching} {text}" if coaching else text, god)
+    audio_url = await voice.tts(f"{coaching} {text}" if coaching else text)
     await broadcast(s.session_id, "question", {
         "question_id": qid,
         "index": s.planned_number,       # 0 during calibration, then 1..total (follow-ups keep their parent's number)
@@ -87,7 +86,7 @@ async def say(s: SessionState, text: str) -> float:
     """Speech that isn't a question (the closing line), sent as a `filler` event so the question on
     screen doesn't change. Only sent after the last answer, so it can't overlap a question clip.
     Returns how long the clip plays, in seconds (0 if there's no audio)."""
-    url = await voice.tts(text, gods.PRESIDING)   # the presiding god closes the trial
+    url = await voice.tts(text)
     if url:
         await broadcast(s.session_id, "filler", {"audio_url": url})
     return voice.clip_seconds(url)
@@ -205,16 +204,28 @@ async def calibrate(s: SessionState) -> None:
     page's warm-up ring keeps counting down meanwhile.
     """
     await set_state(s, "calibrating")
-    line, fallback = lines.calibration_lines(s.spec.key)
+    asks_for_material = s.meta.asks_for_material
+    line, fallback = lines.calibration_lines(s.spec.key, asks_for_material)
     for turn in range(2):
         qid = str(await data.insert_question(s.session_id, 0, "calibration", line))
         await ask(s, qid, line, "calibration")
         transcript = await wait_answer(s, qid)
         s.exchanges.append({"kind": "calibration", "text": line, "transcript": transcript})
+        if turn == 0 and asks_for_material:
+            # A presentation with no imported file: plan the questions from what they say it covers.
+            s.meta.material = material.from_speech(transcript)
+            start_planning(s)
         if turn == 1 or s.elapsed() >= CALIBRATION_MIN_S:
             break
         line = spoken(await gemini.small_talk_follow_up(s) or "") or fallback
     await _top_up_calibration(s)
+
+
+def start_planning(s: SessionState) -> None:
+    """Plan the questions with Gemini in the background (from the imported material, if any). Awaited once
+    calibration is over; started only once."""
+    if s.plan_task is None:
+        s.plan_task = asyncio.create_task(gemini.plan_interview(s.spec, s.meta.role, s.meta.material))
 
 
 async def _top_up_calibration(s: SessionState) -> None:
@@ -325,14 +336,17 @@ async def finish(s: SessionState) -> None:
 async def _run(s: SessionState) -> None:
     """The whole session in order:
 
-    1. Start planning questions with Gemini in the background (it has all of calibration to finish).
+    1. Start planning questions with Gemini in the background (it has all of calibration to finish). For a
+       presentation with no imported file, planning starts after the first answer instead, which says what
+       the presentation covers.
     2. Small talk (calibration), then compute the baseline from those readings.
     3. Start the stress watcher (coach flags) and run the question loop.
     4. The closing line plays while the report is written, then finish() sends session_ended.
 
     end_session at any point skips straight to step 4, without the closing line.
     """
-    plan_task =asyncio.create_task(gemini.plan_interview(s.spec, s.meta.role))   # plans during calibration
+    if not s.meta.asks_for_material:
+        start_planning(s)   # plans during calibration
     watcher: Optional[asyncio.Task] = None
     try:
         try:
@@ -346,7 +360,8 @@ async def _run(s: SessionState) -> None:
 
         if not s.end_requested:
             await set_state(s, "thinking")         # while the bridge into the first question is written
-            plan = await plan_task
+            start_planning(s)                      # no-op unless calibration ended before it could start
+            plan = await s.plan_task
             s.queue = list(plan)
             s.total_planned = len(plan)
             watcher = asyncio.create_task(watch_stress(s))   # coach flags from here on
@@ -357,7 +372,8 @@ async def _run(s: SessionState) -> None:
     finally:
         if watcher:
             watcher.cancel()
-        plan_task.cancel()
+        if s.plan_task is not None:
+            s.plan_task.cancel()
 
     # Wrap up: closing line plays while the report is written.
     await set_state(s, "thinking")

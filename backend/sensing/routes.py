@@ -4,6 +4,8 @@
                               and every reading is broadcast to the live page as a `vitals` event.
     POST /api/sensor/status   {state, message, simulated}: what Presage is doing ("Hold still."), shown on
                               the live page as a `sensor` event and in /health.
+    POST /api/sensor/page-camera  {open}: the page has opened its webcam preview. GET returns {open}.
+                              The pre-warmed sensor waits for this before opening the same camera.
 
 The sender is sensing_client/presage_node/sensor.mjs (or the legacy sensing_client/client.py, or
 scripts/mock_vitals.py), always on this machine, so both endpoints are local-only (backend/guards.py).
@@ -12,7 +14,7 @@ Readings are cleaned before Data sees them, because one bad value poisons every 
   - a timestamp more than MAX_FUTURE_S ahead of this machine's clock is dropped. It would otherwise sit in
     every "last N seconds" live window (and drive coach flags) until that time arrives;
   - NaN / infinite numbers and physically impossible values become null (the metric is "not measured");
-  - focus and confidence are clamped to 0-1.
+  - confidence is clamped to 0-1.
 """
 import logging
 import math
@@ -59,7 +61,6 @@ def clean(r: VitalsReading, now: datetime) -> Optional[VitalsReading]:
     return r.model_copy(update={
         "heart_rate": _in_range(r.heart_rate, *HR_RANGE),
         "breathing_rate": _in_range(r.breathing_rate, *BR_RANGE),
-        "focus": _clamp01(r.focus),
         "confidence": _clamp01(r.confidence) or 0.0,
     })
 
@@ -81,7 +82,6 @@ async def ingest(batch: VitalsBatch):
             "ts": r["time"].isoformat(),
             "heart_rate": r["heart_rate"],
             "breathing_rate": r["breathing_rate"],
-            "focus": r["focus"],
             "stress": r["stress"],
         })
     return {"stored": len(rows)}
@@ -92,6 +92,30 @@ class SensorStatus(BaseModel):
     state: Literal["idle", "starting", "warming_up", "measuring", "adjust", "error"]
     message: Optional[str] = Field(default=None, max_length=300)   # e.g. "Hold still."
     simulated: bool = False                                        # artificial vitals (--simulate)
+
+
+class PageCamera(BaseModel):
+    open: bool
+
+
+# When the page last reported its webcam preview open (time.monotonic()), or None.
+page_camera_open_at: Optional[float] = None
+
+
+@router.post("/api/sensor/page-camera")
+async def report_page_camera(body: PageCamera):
+    """The page opened its webcam preview (it opens it once, when the app loads, and keeps it). The pre-warmed
+    Presage sensor waits for this before opening the same camera: when the page opened the camera second,
+    macOS switched the camera's frame size under Presage and its engine aborted (2026-10-11 runs)."""
+    global page_camera_open_at
+    page_camera_open_at = time.monotonic() if body.open else None
+    return {"ok": True}
+
+
+@router.get("/api/sensor/page-camera")
+async def page_camera():
+    """Polled by the sensor while it waits to pre-warm Presage."""
+    return {"open": page_camera_open_at is not None}
 
 
 # Latest status and when it arrived (time.monotonic()), for /health.

@@ -8,6 +8,16 @@ import type { CoachFlagEvent } from '../types.ts'
  */
 const key = (sessionId: string) => `stresstest:flags:${sessionId}`
 
+/** Forget every stored session's flags. Called when a new interview starts, so nothing from an earlier
+ * run lingers in the browser (the launcher empties the database on every run too). */
+export function clearAllFlags(): void {
+  try {
+    for (const k of Object.keys(sessionStorage)) if (k.startsWith('stresstest:flags:')) sessionStorage.removeItem(k)
+  } catch {
+    // storage unavailable: nothing stored either
+  }
+}
+
 export function saveFlag(sessionId: string, flag: CoachFlagEvent): void {
   try {
     const flags = loadFlags(sessionId)

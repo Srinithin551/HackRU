@@ -35,7 +35,6 @@ export const color = {
   highSubtle: '#331614',
   seriesHr: '#d4af37',
   seriesBreathing: '#8f96a3',
-  seriesFocus: '#6ea8c0',
   chartGrid: '#1c1c22',
   chartAxis: '#8c8c97',
 } as const

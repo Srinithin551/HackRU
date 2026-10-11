@@ -16,21 +16,21 @@ from backend.contracts import Baseline, QuestionStats, WindowStats
 
 def qstats(qid="q1", **kw) -> QuestionStats:
     base = dict(question_id=qid, duration_s=20.0, n_samples=20, hr_mean=84.0, hr_peak=91.0, hr_delta_pct=17.0,
-                br_mean=16.0, focus_mean=0.62, stress_mean=46.0, stress_peak=78.0, peak_offset_s=12.0)
+                br_mean=16.0, stress_mean=46.0, stress_peak=78.0, peak_offset_s=12.0)
     base.update(kw)
     return QuestionStats(**base)
 
 
 def window(**kw) -> WindowStats:
     base = dict(seconds=10, n_samples=10, hr_mean=90.0, hr_delta_pct=20.0, br_mean=15.0, br_delta_pct=0.0,
-                focus_mean=0.8, dominant_expression="frown", stress=55.0)
+                dominant_expression="frown", stress=55.0)
     base.update(kw)
     return WindowStats(**base)
 
 
 def state(type_="Software Engineering") -> SessionState:
     s = SessionState("sid", SessionMeta("sid", "Ada", type_, "Backend Engineer"))
-    s.baseline = Baseline(heart_rate=72, breathing_rate=14, focus=0.8, n_samples=30)
+    s.baseline = Baseline(heart_rate=72, breathing_rate=14, n_samples=30)
     return s
 
 
@@ -125,17 +125,16 @@ def test_levels_match_plan_thresholds():
 def test_driver_for_names_the_strongest_signal():
     assert driver_for(window()) == "hr"
     assert driver_for(window(hr_delta_pct=2, br_delta_pct=35)) == "br"
-    assert driver_for(window(hr_delta_pct=0, focus_mean=0.3), baseline_focus=0.8) == "focus"
     # Nothing above baseline: no driver, so the generic pool is used.
-    assert driver_for(window(hr_delta_pct=None, br_delta_pct=None, focus_mean=None)) is None
+    assert driver_for(window(hr_delta_pct=None, br_delta_pct=None)) is None
 
 
 def test_flag_cites_the_number_that_triggered_it():
-    message, command = flag_for(window(), "rising", 0.75, set())
+    message, command = flag_for(window(), "rising", set())
     assert "20%" in message and command
-    message, _ = flag_for(window(hr_delta_pct=2, br_delta_pct=35), "high", 0.75, set())
+    message, _ = flag_for(window(hr_delta_pct=2, br_delta_pct=35), "high", set())
     assert "35%" in message
-    message, _ = flag_for(window(hr_delta_pct=None, br_delta_pct=None, focus_mean=None), "rising", 0.75, set())
+    message, _ = flag_for(window(hr_delta_pct=None, br_delta_pct=None), "rising", set())
     assert "55" in message
 
 
@@ -143,7 +142,7 @@ def test_flags_never_repeat_while_an_unused_phrasing_remains():
     """The frontend makes the user acknowledge each interrupt, so a repeated one reads as a bug."""
     used: set[str] = set()
     w = window()
-    seen = [flag_for(w, "rising", 0.75, used)[0] for _ in range(len(VARIANTS[("hr", "rising")]))]
+    seen = [flag_for(w, "rising", used)[0] for _ in range(len(VARIANTS[("hr", "rising")]))]
     assert len(set(seen)) == len(seen)
 
 

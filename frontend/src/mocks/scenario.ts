@@ -6,7 +6,7 @@
  * DOM-free.
  */
 import type { InterviewType } from '../types.ts'
-import type { OverlayKind, Rng } from './sim.ts'
+import type { OverlayKind } from './sim.ts'
 
 export interface PlannedQuestion {
   /** Spoken aloud: under 30 words, no markdown. */
@@ -36,7 +36,6 @@ export interface Scenario {
 /** backend/brain/lines.py CALIBRATION_LINE. */
 export const CALIBRATION_LINE = 'Thanks for joining me today. To start, tell me a little about yourself.'
 export const CLOSING_LINE = "That's everything I had. Thanks for walking me through all of that, your report is coming up now."
-export const FILLERS = ['Okay.', 'Got it.', 'Mm, alright.', "Take your time, let's keep going."] as const
 
 const CALIBRATION_ANSWER =
   "Sure. I'm a computer science student, and most of what I build is backend work, APIs and data pipelines. " +
@@ -286,16 +285,5 @@ export function getScenario(interviewType: InterviewType): Scenario {
   return {
     calibration: { text: CALIBRATION_LINE, answer: CALIBRATION_ANSWER, answerMs: 38_000 },
     questions: questions.map((question) => ({ ...question })),
-  }
-}
-
-/** Rotating filler picker: random, but never the same clip twice in a row. */
-export function createFillerPicker(rng: Rng): () => string {
-  let last = -1
-  return () => {
-    let i = Math.floor(rng() * FILLERS.length)
-    if (i === last) i = (i + 1 + Math.floor(rng() * (FILLERS.length - 1))) % FILLERS.length
-    last = i
-    return FILLERS[i]
   }
 }

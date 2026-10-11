@@ -68,7 +68,7 @@ def assert_one_voice(log):
 
 def stressed_readings(sid, n=5):
     now = datetime.now(timezone.utc)
-    return [VitalsReading(session_id=sid, ts=now, heart_rate=100, breathing_rate=21, focus=0.3,
+    return [VitalsReading(session_id=sid, ts=now, heart_rate=100, breathing_rate=21,
                           expression="frown", confidence=0.95) for _ in range(n)]
 
 
@@ -163,7 +163,7 @@ def test_stress_spike_triggers_coach_flag_and_ease_off(client):
     assert report["adaptations"][0]["question_id"] == q1["data"]["question_id"]
     assert report["coach_flags"] and report["coach_flags"][0]["question_id"] == q1["data"]["question_id"]
     q1_feedback = next(p for p in report["per_question"] if p["question_id"] == q1["data"]["question_id"])
-    assert "peaked at 9" in q1_feedback["body_signal"]
+    assert "peaked at 100" in q1_feedback["body_signal"]
 
 
 def test_end_session_mid_interview(client):
@@ -305,7 +305,7 @@ def test_turns_after_small_talk_are_written_by_gemini(client, monkeypatch):
     monkeypatch.setattr(config, "BRAIN_FAKE", False)
     spoken = []
 
-    async def fake_tts(text, god=None):
+    async def fake_tts(text):
         spoken.append(text)
         return f"/audio/{len(spoken)}.mp3"
 
@@ -355,7 +355,7 @@ def test_coaching_mid_interview_and_on_the_last_question(client, monkeypatch):
     monkeypatch.setattr(config, "BRAIN_FAKE", False)
     spoken = []
 
-    async def fake_tts(text, god=None):
+    async def fake_tts(text):
         spoken.append(text)
         return f"/audio/{len(spoken)}.mp3"
 
@@ -428,7 +428,7 @@ def test_second_small_talk_turn_reacts_to_the_first_answer(client, monkeypatch, 
         seen.append([e["transcript"] for e in s.exchanges])
         return gemini_line
 
-    async def no_audio(text, god=None):
+    async def no_audio(text):
         return None
 
     monkeypatch.setattr(gemini, "small_talk_follow_up", small_talk)

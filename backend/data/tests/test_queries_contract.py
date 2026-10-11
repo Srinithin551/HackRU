@@ -54,7 +54,7 @@ def test_fake_end_to_end_shapes():
         assert isinstance(sid, str) and await queries.get_active_session() == sid
         fake_queries._sessions[sid]["started_at"] = t0      # pretend the session began a minute ago
 
-        calm = [VitalsReading(ts=t0 + timedelta(seconds=i), heart_rate=72, breathing_rate=14, focus=0.8,
+        calm = [VitalsReading(ts=t0 + timedelta(seconds=i), heart_rate=72, breathing_rate=14,
                               expression="neutral", confidence=0.95) for i in range(40)]
         lost = [VitalsReading(ts=t0 + timedelta(seconds=40), confidence=0.0),
                 VitalsReading(ts=t0 + timedelta(seconds=41), heart_rate=72, confidence=MIN_CONFIDENCE - 0.01)]
@@ -62,7 +62,7 @@ def test_fake_end_to_end_shapes():
         assert len(rows) == 42                                  # returned for the live chart...
         assert len(fake_queries._vitals[sid]) == 40             # ...but below the cutoff is never stored
         for r in rows:
-            assert set(r) == {"time", "session_id", "heart_rate", "breathing_rate", "focus",
+            assert set(r) == {"time", "session_id", "heart_rate", "breathing_rate",
                               "expression", "confidence", "stress"}
             assert r["session_id"] == sid and r["stress"] is None        # no baseline yet
 
@@ -73,19 +73,19 @@ def test_fake_end_to_end_shapes():
         qid = await queries.insert_question(sid, 1, "main", "Tell me about a bug you fixed.")
         start = t0 + timedelta(seconds=45)
         await queries.mark_answer_started(qid, start)
-        spike = [VitalsReading(ts=start + timedelta(seconds=i), heart_rate=90, breathing_rate=18.2, focus=0.5,
+        spike = [VitalsReading(ts=start + timedelta(seconds=i), heart_rate=90, breathing_rate=18.2,
                                expression="frown", confidence=0.95) for i in range(10)]
         rows = await queries.insert_vitals(spike)
-        assert rows[0]["stress"] == pytest.approx(84.5, abs=0.1)
+        assert rows[0]["stress"] == pytest.approx(90.6, abs=0.1)
         await queries.mark_answered(qid, start + timedelta(seconds=12), "I once...")
 
         w = await queries.get_window_stats(sid)
-        assert isinstance(w, WindowStats) and w.seconds == 15 and w.stress == pytest.approx(84.5, abs=0.1)
+        assert isinstance(w, WindowStats) and w.seconds == 15 and w.stress == pytest.approx(90.6, abs=0.1)
         assert w.hr_delta_pct == pytest.approx(25, abs=0.1) and w.dominant_expression == "frown"
 
         qs = await queries.get_question_stats(qid)
         assert isinstance(qs, QuestionStats) and qs.question_id == qid and qs.n_samples == 10
-        assert qs.duration_s == 12 and qs.stress_peak == pytest.approx(84.5, abs=0.1)
+        assert qs.duration_s == 12 and qs.stress_peak == pytest.approx(90.6, abs=0.1)
 
         hist = await queries.get_session_history(sid)
         assert [set(h) for h in hist] == [{"question_id", "idx", "kind", "text", "transcript", "stats"}]
@@ -109,8 +109,8 @@ def test_fake_end_to_end_shapes():
 REPLAY_KEYS = {
     "top": {"session", "series", "questions"},
     "session": {"id", "user_name", "started_at", "ended_at", "baseline"},
-    "baseline": {"heart_rate", "breathing_rate", "focus"},
-    "series": {"t", "hr", "br", "focus", "stress", "stress_peak"},
+    "baseline": {"heart_rate", "breathing_rate"},
+    "series": {"t", "hr", "br", "stress", "stress_peak"},
     "question": {"id", "idx", "kind", "text", "transcript", "answer_started_at", "answered_at", "stats"},
 }
 

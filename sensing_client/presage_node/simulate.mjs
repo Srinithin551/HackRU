@@ -8,7 +8,7 @@
  *   0-3 s     no face found
  *   3-9 s     face found, Presage warming up (no pulse yet)
  *   9-50 s    calm: HR ~70, breathing ~14 (calibration happens here)
- *   50 s on   60 s cycles: calm, "hold still" at 12-15 s, a 25 s stress spike from 30 s (HR ~98,
+ *   50 s on   60 s cycles: calm, "hold still" at 12-17 s (long enough to outlast the hint delay), a 25 s stress spike from 30 s (HR ~98,
  *             breathing ~21), and in every other cycle the face is lost at 22-26 s
  *
  * Also mixed in: 1 in 8 pulses at a weak 30% confidence (Data drops those), and junk breathing values at
@@ -50,7 +50,7 @@ export function scenarioAt(t) {
   const cycle = Math.floor((t - CALM_UNTIL_S) / CYCLE_S)
   const o = (t - CALM_UNTIL_S) % CYCLE_S
   if (cycle % 2 === 1 && o >= 22 && o < 26) return { validation: NO_FACE, stressed: 0 }
-  const validation = o >= 12 && o < 15 ? MOTION : OK
+  const validation = o >= 12 && o < 17 ? MOTION : OK
   // Stress ramps up over 8 s from 30 s, holds, and is gone by 55 s.
   const stressed = o < 30 || o >= 55 ? 0 : Math.min(1, (o - 30) / 8)
   return { validation, stressed }

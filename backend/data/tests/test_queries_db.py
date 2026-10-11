@@ -44,11 +44,11 @@ def run(coro_fn):
 
 
 def calm(t, conf=0.95):
-    return VitalsReading(ts=t, heart_rate=72, breathing_rate=14, focus=0.8, expression="neutral", confidence=conf)
+    return VitalsReading(ts=t, heart_rate=72, breathing_rate=14, expression="neutral", confidence=conf)
 
 
 def spiked(t):
-    return VitalsReading(ts=t, heart_rate=90, breathing_rate=18.2, focus=0.5, expression="frown", confidence=0.95)
+    return VitalsReading(ts=t, heart_rate=90, breathing_rate=18.2, expression="frown", confidence=0.95)
 
 
 def test_full_session_on_tiger_data():
@@ -67,7 +67,7 @@ def test_full_session_on_tiger_data():
 
         b = await queries.compute_baseline(sid)
         assert isinstance(b, Baseline) and b.n_samples == 30        # first 10 s skipped
-        assert b.heart_rate == pytest.approx(72) and b.focus == pytest.approx(0.8)
+        assert b.heart_rate == pytest.approx(72)
         assert await queries.get_baseline(sid) == b
         stored = await pool.fetchrow("SELECT baseline_hr, baseline_n FROM sessions WHERE id = $1::uuid", sid)
         assert stored["baseline_n"] == 30
@@ -80,18 +80,18 @@ def test_full_session_on_tiger_data():
         start = now - timedelta(seconds=20)
         await queries.mark_answer_started(qid, start)
         rows = await queries.insert_vitals([spiked(start + timedelta(seconds=i)) for i in range(20)])
-        assert rows[0]["stress"] == pytest.approx(84.5, abs=0.1)
+        assert rows[0]["stress"] == pytest.approx(90.6, abs=0.1)
         await queries.mark_answered(qid, now - timedelta(seconds=1), "Token bucket per user...")
 
         w = await queries.get_window_stats(sid, 15)
         assert isinstance(w, WindowStats) and w.seconds == 15 and 12 <= w.n_samples <= 16
-        assert w.stress == pytest.approx(84.5, abs=0.1) and w.hr_delta_pct == pytest.approx(25, abs=0.1)
+        assert w.stress == pytest.approx(90.6, abs=0.1) and w.hr_delta_pct == pytest.approx(25, abs=0.1)
         assert w.dominant_expression == "frown"
 
         qs = await queries.get_question_stats(qid)
         assert isinstance(qs, QuestionStats) and qs.question_id == qid
         assert qs.n_samples == 20 and qs.duration_s == pytest.approx(19, abs=0.1)
-        assert qs.hr_peak == pytest.approx(90) and qs.stress_peak == pytest.approx(84.5, abs=0.1)
+        assert qs.hr_peak == pytest.approx(90) and qs.stress_peak == pytest.approx(90.6, abs=0.1)
         assert 0 <= qs.peak_offset_s <= 19
 
         empty = await queries.get_question_stats("00000000-0000-0000-0000-000000000000")
@@ -110,10 +110,10 @@ def test_full_session_on_tiger_data():
         # stress is in vitals_5s right away (not after the next 30 s policy refresh)
         replay = await queries.get_replay(sid)
         assert_replay_shape(replay)
-        assert replay["session"]["baseline"] == {"heart_rate": 72.0, "breathing_rate": 14.0, "focus": 0.8}
+        assert replay["session"]["baseline"] == {"heart_rate": 72.0, "breathing_rate": 14.0}
         cal_buckets = [p for p in replay["series"] if p["t"] < (now - timedelta(seconds=85)).isoformat()]
         assert cal_buckets and all(p["stress"] == 0 for p in cal_buckets if p["hr"] is not None)
-        assert max(p["stress_peak"] or 0 for p in replay["series"]) == pytest.approx(84.5, abs=0.1)
+        assert max(p["stress_peak"] or 0 for p in replay["series"]) == pytest.approx(90.6, abs=0.1)
         assert [q["id"] for q in replay["questions"]] == [qid] and replay["questions"][0]["stats"] == qs.model_dump()
     run(body)
 
@@ -122,7 +122,7 @@ def test_baseline_falls_back_to_population_defaults():
     async def body(sid, now, pool):
         await queries.insert_vitals([calm(now - timedelta(seconds=100 - i)) for i in range(5)])
         b = await queries.compute_baseline(sid)
-        assert (b.heart_rate, b.breathing_rate, b.focus, b.n_samples) == (75.0, 15.0, 0.75, 0)
+        assert (b.heart_rate, b.breathing_rate, b.n_samples) == (75.0, 15.0, 0)
     run(body)
 
 

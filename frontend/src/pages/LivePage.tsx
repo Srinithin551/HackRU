@@ -2,7 +2,7 @@
  * The trial (/session/:id). Two panels, no scrolling on a laptop or projector:
  *
  *   ┌────────────────────┬──────────────────────────────────────┐
- *   │ THE GODS           │   YOUR CAMERA (mirrored)             │
+ *   │ JUDGE              │   YOUR CAMERA (mirrored)             │
  *   │ the bench          │        ┌───────────────────┐         │
  *   │ who is asking      │        │ interrupt (gold)  │ ◀ here, │
  *   │ the question       │        └───────────────────┘   never │
@@ -13,13 +13,13 @@
  *   └────────────────────┴──────────────────────────────────────┘
  *
  * The protocol lives in useLiveSession (WebSocket), speech in useSpeechToText, the camera in
- * useCamera, and the interrupt rules (reset / never repeat / comply first) in GodInterrupt.
+ * useCamera, and the interrupt rules (reset / never repeat / comply first) in InterruptBox.
  * On session_ended this page fades out and navigates to the verdict.
  */
 import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
-import { GodInterrupt } from '../components/GodInterrupt.tsx'
-import { GodsPanel } from '../components/GodsPanel.tsx'
+import { InterruptBox } from '../components/InterruptBox.tsx'
+import { InterviewerPanel } from '../components/InterviewerPanel.tsx'
 import { CalibrationBanner, SensorHint, SimulatedChip } from '../components/LiveOverlays.tsx'
 import { AnalyzingScreen, Brand, Button, StatusDot } from '../components/ui.tsx'
 import { VitalsRow } from '../components/VitalsRow.tsx'
@@ -28,7 +28,7 @@ import { useInterrupt } from '../hooks/useInterrupt.ts'
 import { useLiveSession, type LiveState } from '../hooks/useLiveSession.ts'
 import { useNow } from '../hooks/useNow.ts'
 import { useSpeechToText } from '../hooks/useSpeechToText.ts'
-import { godForQuestion, SENSOR_STALE_MS, SENSOR_STATUS_STALE_MS } from '../lib/constants.ts'
+import { INTERVIEWER_NAME, SENSOR_STALE_MS, SENSOR_STATUS_STALE_MS } from '../lib/constants.ts'
 
 export function LivePage() {
   const { id } = useParams()
@@ -74,8 +74,7 @@ function LiveSession({ sessionId }: { sessionId: string }) {
     finishRef.current = live.finishAnswer
   }, [live.finishAnswer])
 
-  const god = godForQuestion(live.question?.kind === 'calibration' ? 0 : (live.question?.index ?? 0))
-  const { interrupt, pending, acknowledge } = useInterrupt(live.question, live.flags, god.name)
+  const { interrupt, pending, acknowledge } = useInterrupt(live.question, live.flags, INTERVIEWER_NAME)
   useEffect(() => {
     interruptPendingRef.current = pending
   }, [pending])
@@ -88,7 +87,7 @@ function LiveSession({ sessionId }: { sessionId: string }) {
     live.finishAnswer(transcript)
   }
   const onEnd = () => {
-    if (window.confirm('Leave the palace now? The gods will judge what they have already heard.')) live.endSession()
+    if (window.confirm(`Leave now? Your report will cover what ${INTERVIEWER_NAME} has already heard.`)) live.endSession()
   }
 
   const sensorOn = live.lastVitalsAt !== null && now - live.lastVitalsAt < SENSOR_STALE_MS
@@ -101,20 +100,20 @@ function LiveSession({ sessionId }: { sessionId: string }) {
     <div className="bg-monitor flex h-dvh flex-col overflow-hidden">
       <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-hairline px-gutter">
         <Brand />
-        <PhasePill live={live} listening={stt.listening} godName={god.name} />
+        <PhasePill live={live} listening={stt.listening} />
         <div className="flex items-center gap-2">
           {live.socket === 'reconnecting' && <span className="text-caption text-rising">Reconnecting…</span>}
           <Button variant="ghost" onClick={toggleCamera} className="hidden sm:inline-flex">
             {cameraOn ? 'Hide camera' : 'Show camera'}
           </Button>
           <Button variant="secondary" onClick={onEnd} disabled={live.ended}>
-            Leave the palace
+            Leave the stand
           </Button>
         </div>
       </header>
 
       <main className="grid min-h-0 flex-1 gap-gutter overflow-y-auto p-gutter lg:grid-cols-[minmax(19rem,25rem)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden">
-        <GodsPanel
+        <InterviewerPanel
           question={live.question}
           speaking={live.speaking}
           thinking={live.phase === 'thinking'}
@@ -126,7 +125,7 @@ function LiveSession({ sessionId }: { sessionId: string }) {
               onChange={(e) => setTyped(e.target.value)}
               disabled={!live.answering}
               rows={3}
-              placeholder={live.answering ? 'Type your answer…' : 'Wait for the god to finish'}
+              placeholder={live.answering ? 'Type your answer…' : `Wait for ${INTERVIEWER_NAME} to finish`}
               className="w-full resize-none rounded-control border border-border-strong bg-surface-2 px-3 py-2 text-body text-ink placeholder:text-ink-muted focus:outline-2 focus:outline-accent disabled:opacity-50"
             />
           )}
@@ -135,13 +134,13 @@ function LiveSession({ sessionId }: { sessionId: string }) {
           </Button>
           <p className={`text-caption ${pending ? 'text-high' : 'text-ink-muted'}`}>
             {pending
-              ? "A god has interrupted. Do as they ask, then press “As you command”."
+              ? `${INTERVIEWER_NAME} has interrupted. Do as asked, then press “Yes, Your Honor”.`
               : (stt.error ??
                 (stt.supported
                   ? 'Or simply stop speaking: your answer ends after 3.5 s of silence.'
-                  : 'The gods hear you best in Chrome. You can type your answer instead.'))}
+                  : `${INTERVIEWER_NAME} hears you best in Chrome. You can type your answer instead.`))}
           </p>
-        </GodsPanel>
+        </InterviewerPanel>
 
         <div className="flex min-h-0 flex-col gap-gutter lg:overflow-hidden">
           <section
@@ -168,9 +167,9 @@ function LiveSession({ sessionId }: { sessionId: string }) {
               {presage?.simulated && <SimulatedChip />}
             </div>
 
-            {/* The interrupt box: top-right of the camera, over the mortal's own face. */}
+            {/* The interrupt box: top-right of the camera, over the candidate's own face. */}
             <div className="pointer-events-none absolute right-gutter top-gutter z-20 flex justify-end">
-              {interrupt && <GodInterrupt interrupt={interrupt} onAcknowledge={acknowledge} />}
+              {interrupt && <InterruptBox interrupt={interrupt} onAcknowledge={acknowledge} />}
             </div>
 
             <div className="absolute inset-x-0 top-16 flex flex-col items-center gap-3 px-gutter">
@@ -178,7 +177,7 @@ function LiveSession({ sessionId }: { sessionId: string }) {
                 <CalibrationBanner
                   startedAt={live.calibrationStartedAt}
                   now={now}
-                  // Small talk done but the baseline needs a few more seconds: the gods wait quietly.
+                  // Small talk done but the baseline needs a few more seconds: Judge waits quietly.
                   quiet={live.question !== null && !live.speaking && !live.answering}
                 />
               )}
@@ -192,7 +191,7 @@ function LiveSession({ sessionId }: { sessionId: string }) {
                   <StatusDot on={stt.listening}>{stt.listening ? 'Heard' : 'Silent'}</StatusDot>
                 </div>
                 <p className={`mt-1 line-clamp-3 min-h-[1.5em] text-lead ${transcript ? 'text-ink' : 'text-ink-muted'}`}>
-                  {transcript || captionHint(live, typedMode, god.name)}
+                  {transcript || captionHint(live, typedMode)}
                 </p>
               </div>
             </div>
@@ -206,10 +205,10 @@ function LiveSession({ sessionId }: { sessionId: string }) {
       {live.startError && (
         <div className="bg-monitor fixed inset-0 z-50 grid place-items-center p-gutter text-center">
           <div className="panel-gold max-w-md p-panel">
-            <p className="text-title font-semibold">The trial cannot begin</p>
+            <p className="text-title font-semibold">The hearing cannot begin</p>
             <p className="mt-2 text-body text-ink-secondary">{live.startError}</p>
             <Link to={{ pathname: '/', search }} className="mt-5 inline-block">
-              <Button>Return to the gates</Button>
+              <Button>Back to the start</Button>
             </Link>
           </div>
         </div>
@@ -218,24 +217,24 @@ function LiveSession({ sessionId }: { sessionId: string }) {
   )
 }
 
-function captionHint(live: LiveState, typedMode: boolean, godName: string): string {
-  if (live.ended) return 'The trial is over.'
+function captionHint(live: LiveState, typedMode: boolean): string {
+  if (live.ended) return 'The interview is over.'
   if (live.speaking) return 'Listen…'
   if (live.answering) return typedMode ? 'Type your answer in the panel on the left.' : 'Speak whenever you are ready.'
-  if (live.phase === 'thinking') return `${godName} considers your answer…`
-  return 'The gods are taking their seats…'
+  if (live.phase === 'thinking') return `${INTERVIEWER_NAME} considers your answer…`
+  return `${INTERVIEWER_NAME} is getting ready…`
 }
 
 /** One-line status in the header. */
-function PhasePill({ live, listening, godName }: { live: LiveState; listening: boolean; godName: string }) {
+function PhasePill({ live, listening }: { live: LiveState; listening: boolean }) {
   let text: string
-  if (live.ended) text = 'The trial is over'
-  else if (!live.question && live.phase === null) text = 'Approaching the palace…'
-  else if (live.speaking) text = `${godName} speaks`
+  if (live.ended) text = 'The interview is over'
+  else if (!live.question && live.phase === null) text = 'Connecting…'
+  else if (live.speaking) text = `${INTERVIEWER_NAME} speaks`
   else if (live.answering) text = listening ? 'Your turn · they are listening' : 'Your turn'
-  else if (live.phase === 'thinking') text = `${godName} considers`
+  else if (live.phase === 'thinking') text = `${INTERVIEWER_NAME} considers`
   else if (live.phase === 'calibrating') text = 'Taking your measure'
-  else text = 'The hall is gathering'
+  else text = 'Court is coming to order'
   return (
     <div className="hidden items-center gap-2 rounded-full border border-hairline bg-surface-1 px-3.5 py-1.5 md:flex">
       <span className={`size-2 rounded-full ${live.answering ? 'animate-pulse bg-accent' : 'bg-ink-muted'}`} />
@@ -246,10 +245,10 @@ function PhasePill({ live, listening, godName }: { live: LiveState; listening: b
 
 function CameraPlaceholder({ status, onRetry, onEnable }: { status: CameraStatus; onRetry: () => void; onEnable: () => void }) {
   const copy: Record<CameraStatus, string> = {
-    starting: 'Opening your eye to the hall…',
+    starting: 'Opening your camera…',
     live: '',
-    denied: 'Camera access is blocked. Allow it from the address bar to see yourself. The gods still read your vitals.',
-    unavailable: 'No camera found. The gods still read your vitals from the sensor.',
+    denied: `Camera access is blocked. Allow it from the address bar to see yourself. ${INTERVIEWER_NAME} still reads your vitals.`,
+    unavailable: `No camera found. ${INTERVIEWER_NAME} still reads your vitals from the sensor.`,
     off: 'Camera preview is off.',
   }
   return (

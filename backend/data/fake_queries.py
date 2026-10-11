@@ -7,7 +7,7 @@ Nothing persists across restarts. queries.py routes calls here; don't import thi
 Every session here was created by this process, so all of them count as "this backend's" sessions (the
 `_mine` rule in queries.py). Known differences from the real queries.py, which tests on this file can't
 catch: create_session closes every older open session (queries.py only closes its own), and a mean of
-exactly 0 (e.g. focus 0.0) falls back to the population default in compute_baseline.
+exactly 0 (e.g. breathing 0.0) falls back to the population default in compute_baseline.
 """
 import logging
 import uuid
@@ -26,7 +26,7 @@ _vitals: dict[str, list[dict]] = defaultdict(list)
 
 WARMUP_S = 10
 MIN_BASELINE_SAMPLES = 10
-DEFAULT_BASELINE = Baseline(heart_rate=75.0, breathing_rate=15.0, focus=0.75, n_samples=0)
+DEFAULT_BASELINE = Baseline(heart_rate=75.0, breathing_rate=15.0, n_samples=0)
 
 
 def _now() -> datetime:
@@ -48,8 +48,7 @@ def _r(x, digits=1):
 
 def _stress(row: dict, b: Optional[Baseline]) -> Optional[float]:
     s = stress_score(VitalsReading(ts=row["time"], heart_rate=row["heart_rate"],
-                                   breathing_rate=row["breathing_rate"], focus=row["focus"],
-                                   confidence=row["confidence"]), b)
+                                   breathing_rate=row["breathing_rate"], confidence=row["confidence"]), b)
     return _r(s)
 
 
@@ -103,7 +102,7 @@ async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
             continue
         row = {
             "time": _utc(r.ts), "session_id": sid, "heart_rate": r.heart_rate,
-            "breathing_rate": r.breathing_rate, "focus": r.focus,
+            "breathing_rate": r.breathing_rate,
             "expression": r.expression, "confidence": r.confidence,
         }
         row["stress"] = _stress(row, _sessions[sid]["baseline"])
@@ -126,7 +125,6 @@ async def compute_baseline(session_id) -> Baseline:
         b = Baseline(
             heart_rate=_mean(v["heart_rate"] for v in good) or DEFAULT_BASELINE.heart_rate,
             breathing_rate=_mean(v["breathing_rate"] for v in good) or DEFAULT_BASELINE.breathing_rate,
-            focus=_mean(v["focus"] for v in good) or DEFAULT_BASELINE.focus,
             n_samples=len(good),
         )
     s["baseline"] = b
@@ -154,7 +152,6 @@ async def get_window_stats(session_id, seconds=15) -> WindowStats:
         seconds=seconds, n_samples=len(rows),
         hr_mean=_r(hr), hr_delta_pct=_r(delta_pct(hr, b.heart_rate if b else None)),
         br_mean=_r(br), br_delta_pct=_r(delta_pct(br, b.breathing_rate if b else None)),
-        focus_mean=_r(_mean(v["focus"] for v in rows), 3),
         dominant_expression=exprs.most_common(1)[0][0] if exprs else None,
         stress=_r(_mean(v["stress"] for v in rows)),
     )
@@ -187,7 +184,7 @@ async def get_question_stats(question_id) -> QuestionStats:
     if q is None:
         log.warning("get_question_stats: unknown question %s", question_id)
         return QuestionStats(question_id=str(question_id), duration_s=0.0, n_samples=0, hr_mean=None,
-                             hr_peak=None, hr_delta_pct=None, br_mean=None, focus_mean=None,
+                             hr_peak=None, hr_delta_pct=None, br_mean=None,
                              stress_mean=None, stress_peak=None, peak_offset_s=None)
     start = q["answer_started_at"] or q["created_at"]
     end = q["answered_at"] or _now()
@@ -205,7 +202,6 @@ async def get_question_stats(question_id) -> QuestionStats:
         hr_mean=_r(hr), hr_peak=max(hrs) if hrs else None,
         hr_delta_pct=_r(delta_pct(hr, b.heart_rate if b else None)),
         br_mean=_r(_mean(v["breathing_rate"] for v in rows)),
-        focus_mean=_r(_mean(v["focus"] for v in rows), 3),
         stress_mean=_r(_mean(v["stress"] for v in rows)),
         stress_peak=peak["stress"] if peak else None,
         peak_offset_s=round((peak["time"] - start).total_seconds(), 1) if peak else None,
@@ -255,7 +251,7 @@ async def get_replay(session_id) -> Optional[dict]:
         stresses = [v["stress"] for v in rows if v["stress"] is not None]
         series.append({"t": _iso(bucket), "hr": _r(_mean(v["heart_rate"] for v in rows)),
                        "br": _r(_mean(v["breathing_rate"] for v in rows)),
-                       "focus": _r(_mean(v["focus"] for v in rows), 3), "stress": _r(_mean(stresses)),
+                       "stress": _r(_mean(stresses)),
                        "stress_peak": max(stresses) if stresses else None})
     b = s["baseline"]
     qs = sorted((q for q in _questions.values() if q["session_id"] == session_id),
@@ -264,8 +260,7 @@ async def get_replay(session_id) -> Optional[dict]:
         "session": {"id": session_id, "user_name": s.get("user_name"), "started_at": _iso(s["started_at"]),
                     "ended_at": _iso(s["ended_at"]),
                     "baseline": None if b is None else {"heart_rate": _r(b.heart_rate),
-                                                        "breathing_rate": _r(b.breathing_rate),
-                                                        "focus": _r(b.focus, 3)}},
+                                                        "breathing_rate": _r(b.breathing_rate)}},
         "series": series,
         "questions": [{"id": q["id"], "idx": q["idx"], "kind": q["kind"], "text": q["text"],
                        "transcript": q["transcript"], "answer_started_at": _iso(q["answer_started_at"]),

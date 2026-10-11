@@ -118,7 +118,7 @@ def test_every_model_failing_falls_back(fake_gemini):
 
 def test_final_report_from_gemini(fake_gemini):
     stats = QuestionStats(question_id="q1", duration_s=20, n_samples=20, hr_mean=84, hr_peak=91, hr_delta_pct=17,
-                          br_mean=16, focus_mean=0.6, stress_mean=46, stress_peak=78, peak_offset_s=12)
+                          br_mean=16, stress_mean=46, stress_peak=78, peak_offset_s=12)
     items = normalize_history([{"question_id": "q1", "idx": 1, "kind": "main", "text": "Q", "transcript": "A",
                                 "stats": stats}])
     fake_gemini({"composure_score": 61, "summary": "Steady.", "hardest_moment": "Q1: stress hit 78 at 12s.",

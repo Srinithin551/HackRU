@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import messages from '@smartspectra/node-sdk/messages'
-import { BREATH_HOLD_S, PULSE_COAST_S, PULSE_HOLD_S, VitalsState, toNumber } from '../vitals.mjs'
+import { BREATH_HOLD_S, HINT_DELAY_MS, HINT_MIN_SHOW_MS, PULSE_COAST_S, PULSE_HOLD_S, VitalsState, toNumber } from '../vitals.mjs'
 
 const { Metrics } = messages.presage.smartspectra
 const S = 1000
@@ -34,7 +34,7 @@ test('a pulse becomes a reading with confidence on a 0-1 scale', () => {
   assert.equal(r.ts, '2026-10-10T22:01:05.000Z')
   assert.equal(r.heart_rate, 72)
   assert.equal(r.confidence, 0.61)
-  assert.equal(r.focus, null)
+  assert.equal('focus' in r, false)   // there is no focus vital
   assert.equal(r.expression, null)
 })
 
@@ -123,21 +123,44 @@ test('the same measurement repeated in a later packet is not counted twice', () 
   assert.equal(v.pulse.length, 1)
 })
 
-test('status walks idle → starting → warming_up → measuring, and flags weak signals and errors', () => {
+test('status walks idle → starting → warming_up → measuring; hints wait, then stay up; errors are immediate', () => {
+  const weak = { state: 'adjust', message: 'Weak signal. Face a light and hold still.' }
   const v = new VitalsState()
   assert.equal(v.status(0).state, 'idle')
   v.active = true
   assert.equal(v.status(0).state, 'starting')
   v.running = true
   assert.equal(v.status(0).state, 'warming_up')
-  v.ingestMetrics(wire(pulse(70, 30)), 0)
-  assert.deepEqual(v.status(0), { state: 'adjust', message: 'Weak signal. Face a light and hold still.' })
-  v.ingestMetrics(wire(pulse(70, 65)), 1 * S)
-  assert.deepEqual(v.status(1 * S), { state: 'measuring', message: null })
-  v.ingestValidation(12, 'Hold still', 2 * S)
-  assert.deepEqual(v.status(2 * S), { state: 'adjust', message: 'Hold still.' })
+
+  v.ingestMetrics(wire(pulse(70, 30)), 0)                      // only a weak pulse
+  assert.equal(v.status(0).state, 'warming_up')                 // not shown at once (it used to flicker)...
+  assert.deepEqual(v.status(HINT_DELAY_MS), weak)               // ...only once it has lasted
+  v.ingestMetrics(wire(pulse(70, 65)), 3 * S)                   // a strong pulse arrives
+  assert.deepEqual(v.status(3 * S), weak)                       // the hint stays up long enough to read
+  assert.deepEqual(v.status(HINT_DELAY_MS + HINT_MIN_SHOW_MS + 1), { state: 'measuring', message: null })
+
+  v.ingestValidation(12, 'Hold still', 6 * S)
+  assert.equal(v.status(6 * S).state, 'measuring')              // a one-second wobble never shows
+  v.ingestValidation(0, 'Hold still and record', 7 * S)
+  assert.equal(v.status(7 * S).state, 'measuring')
+  v.ingestValidation(12, 'Hold still', 8 * S)
+  assert.equal(v.status(8 * S).state, 'measuring')
+  assert.deepEqual(v.status(8 * S + HINT_DELAY_MS), { state: 'adjust', message: 'Hold still.' })   // a lasting one does
+
   v.error = 'Presage rejected the API key. Check PRESAGE_API_KEY in .env.'
-  assert.equal(v.status(2 * S).state, 'error')
+  assert.equal(v.status(11 * S).state, 'error')
+})
+
+test('a weak newest pulse does not replace a strong one from the last 8 s (more usable readings)', () => {
+  const v = running()
+  v.ingestMetrics(wire(pulse(72, 60)), 0)
+  v.ingestMetrics(wire(pulse(90, 25)), 2 * S)
+  const r = v.reading(3 * S, 'sid')
+  assert.deepEqual([r.heart_rate, r.confidence], [72, 0.6])     // the strong value, at its own confidence
+  assert.equal(v.status(3 * S).state, 'measuring')              // and no "weak signal" while it's recent
+  // Once no strong pulse is left in the window, the weak one is reported as it is (Data then drops it).
+  const later = v.reading((PULSE_HOLD_S + 1) * S, 'sid')
+  assert.deepEqual([later.heart_rate, later.confidence], [90, 0.25])
 })
 
 test('reset forgets old values, so a new interview never shows the last one', () => {

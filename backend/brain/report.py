@@ -62,8 +62,6 @@ def body_signal_text(st: Optional[QuestionStats]) -> str:
                      + (f", peaking at {num(st.hr_peak)}" if st.hr_peak is not None else ""))
     peak_at = f" {st.peak_offset_s:.0f}s in" if st.peak_offset_s is not None else ""
     parts.append(f"stress averaged {num(st.stress_mean)} and peaked at {num(st.stress_peak)}{peak_at}")
-    if st.focus_mean is not None:
-        parts.append(f"focus {num(st.focus_mean, 2)}")
     text = ", ".join(parts)
     return text[0].upper() + text[1:] + "."
 

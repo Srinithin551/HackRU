@@ -1,41 +1,32 @@
 /**
- * The webcam preview in the middle of the live screen. Video only (the mic is used
- * by speech-to-text) and nothing is recorded or uploaded: the stream only feeds a
- * <video> element.
+ * The webcam preview on the live screen. Video only (the mic is used by speech-to-text) and nothing is
+ * recorded or uploaded: the stream only feeds a <video> element.
  *
- * Presage runs in a hidden background process (sensing_client/presage_node) that opens
- * the same webcam itself. macOS normally lets both use it; if the preview and Presage
- * fight over the camera, turn the preview off with the camera button (or run_demo.py
- * --no-preview): vitals keep flowing from the sensor.
+ * The stream is the app's one shared camera stream (lib/cameraStream.ts), opened when the app loads and kept
+ * until the window closes, because Presage measures from the same camera and re-opening it could change the
+ * camera's mode under Presage. So "Hide camera" only hides the video; it doesn't release the camera.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { hasCamera, PREVIEW_ENABLED, sharedCamera } from '../lib/cameraStream.ts'
 
 export type CameraStatus = 'starting' | 'live' | 'denied' | 'unavailable' | 'off'
-
-const hasCamera = () => typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
 
 export function useCamera() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   // VITE_CAMERA_PREVIEW=0 starts with the preview off (run_demo.py --no-preview), leaving the webcam to Presage.
-  const [enabled, setEnabled] = useState(import.meta.env.VITE_CAMERA_PREVIEW !== '0')
+  const [enabled, setEnabled] = useState(PREVIEW_ENABLED)
   const [attempt, setAttempt] = useState(0)
   const [status, setStatus] = useState<Exclude<CameraStatus, 'off'>>(hasCamera() ? 'starting' : 'unavailable')
 
   useEffect(() => {
     if (!enabled || !hasCamera()) return
     const video = videoRef.current // the <video> is always rendered, so it exists by now
-    let stream: MediaStream | null = null
     let cancelled = false
-    navigator.mediaDevices
-      .getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false })
-      .then((s) => {
-        if (cancelled) {
-          s.getTracks().forEach((t) => t.stop())
-          return
-        }
-        stream = s
+    sharedCamera()
+      .then((stream) => {
+        if (cancelled) return
         if (video) {
-          video.srcObject = s
+          video.srcObject = stream
           video.play().catch(() => {})
         }
         setStatus('live')
@@ -46,8 +37,7 @@ export function useCamera() {
       })
     return () => {
       cancelled = true
-      stream?.getTracks().forEach((t) => t.stop()) // turns the camera light off
-      if (video) video.srcObject = null
+      if (video) video.srcObject = null // detach only: the shared stream (and the camera) stays open
     }
   }, [enabled, attempt])
 

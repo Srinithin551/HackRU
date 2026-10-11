@@ -24,10 +24,10 @@ const question = (over: Partial<QuestionEvent> = {}): QuestionEvent => ({
 describe('nextInterrupt', () => {
   it('turns the first unseen flag into an interrupt carrying its command', () => {
     const shown = new Set<string>()
-    const got = nextInterrupt([flag('Your pulse climbs 20% above your calm.')], shown, 'Athena')
+    const got = nextInterrupt([flag('Your pulse climbs 20% above your calm.')], shown, 'Judge')
     expect(got).toMatchObject({
       kind: 'rising',
-      god: 'Athena',
+      speaker: 'Judge',
       message: 'Your pulse climbs 20% above your calm.',
       command: 'take one slow breath',
     })
@@ -55,30 +55,30 @@ describe('nextInterrupt', () => {
   })
 
   it('falls back to a command when the backend sent none', () => {
-    const got = nextInterrupt([flag('Steady yourself.', { command: undefined })], new Set(), 'Osiras')
+    const got = nextInterrupt([flag('Steady yourself.', { command: undefined })], new Set(), 'Judge')
     expect(got?.command).toBeTruthy()
   })
 
   it('ignores blank messages', () => {
-    expect(nextInterrupt([flag('   ')], new Set(), 'Osiras')).toBeNull()
+    expect(nextInterrupt([flag('   ')], new Set(), 'Judge')).toBeNull()
   })
 })
 
 describe('coachingInterrupt', () => {
   it('raises coaching attached to a question, with a compliance command', () => {
-    const got = coachingInterrupt(question({ coaching: 'That missed the question.' }), new Set(), 'Athena')
+    const got = coachingInterrupt(question({ coaching: 'That missed the question.' }), new Set(), 'Judge')
     expect(got).toMatchObject({ kind: 'coaching', message: 'That missed the question.' })
     expect(got?.command).toBeTruthy()
   })
 
   it('raises nothing for a question without coaching', () => {
-    expect(coachingInterrupt(question(), new Set(), 'Athena')).toBeNull()
-    expect(coachingInterrupt(null, new Set(), 'Athena')).toBeNull()
+    expect(coachingInterrupt(question(), new Set(), 'Judge')).toBeNull()
+    expect(coachingInterrupt(null, new Set(), 'Judge')).toBeNull()
   })
 
   it('does not repeat coaching already shown', () => {
     const shown = new Set<string>()
-    coachingInterrupt(question({ coaching: 'Be specific.' }), shown, 'Athena')
+    coachingInterrupt(question({ coaching: 'Be specific.' }), shown, 'Judge')
     expect(coachingInterrupt(question({ question_id: 'q2', coaching: 'Be specific.' }), shown, 'Apollo')).toBeNull()
   })
 })

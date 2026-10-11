@@ -15,7 +15,7 @@ import type {
   SessionState,
 } from '../types.ts'
 import { estimateSpeechMs, mockAudioUrl } from './audio.ts'
-import { CLOSING_LINE, createFillerPicker, getScenario } from './scenario.ts'
+import { CLOSING_LINE, getScenario } from './scenario.ts'
 import type { PlannedQuestion, Scenario } from './scenario.ts'
 import { realScheduler } from './scheduler.ts'
 import type { Scheduler, TimerId } from './scheduler.ts'
@@ -143,7 +143,6 @@ export class MockSessionEngine {
   private readonly timing: EngineTiming
   private readonly scenario: Scenario
   private readonly nextId: () => string
-  private readonly pickFiller: () => string
   private readonly model: VitalsModel
   private readonly listeners = new Set<Listener>()
   private readonly recording: SessionRecording
@@ -158,7 +157,7 @@ export class MockSessionEngine {
   private listening = false
   private baseline: Baseline | null = null
   private lastFlagAt = Number.NEGATIVE_INFINITY
-  /** Flag phrasings already shown, so no interrupt ever repeats itself (see GodInterrupt). */
+  /** Flag phrasings already shown, so no interrupt ever repeats itself (see InterruptBox). */
   private readonly usedFlagTexts = new Set<string>()
   private vitalsTimer: TimerId | null = null
   private watcherTimer: TimerId | null = null
@@ -173,7 +172,6 @@ export class MockSessionEngine {
     this.scenario = getScenario(config.interviewType)
     const seed = config.seed ?? config.sessionId
     this.nextId = createIdGenerator(seededRng(seed, 'ids'))
-    this.pickFiller = createFillerPicker(seededRng(seed, 'fillers'))
     this.model = new VitalsModel(seededRng(seed, 'vitals'))
     this.recording = {
       session: {
@@ -351,7 +349,7 @@ export class MockSessionEngine {
       return
     }
 
-    this.emit({ type: 'filler', data: { audio_url: mockAudioUrl(this.pickFiller()) } })
+    // Like the real backend: no filler clip between turns (the only filler is the closing line).
     this.emitState('thinking')
     this.later(() => this.decideNext(active), this.timing.thinkingMs)
   }
@@ -447,7 +445,6 @@ export class MockSessionEngine {
       time: now,
       heart_rate: roundOrNull(sample.heart_rate, 1),
       breathing_rate: roundOrNull(sample.breathing_rate, 1),
-      focus: roundOrNull(sample.focus, 2),
       expression: sample.expression,
       confidence: round(sample.confidence, 2),
       stress: null,
@@ -460,7 +457,6 @@ export class MockSessionEngine {
         ts: isoUtc(now),
         heart_rate: reading.heart_rate,
         breathing_rate: reading.breathing_rate,
-        focus: reading.focus,
         stress: reading.stress,
       },
     })
@@ -474,7 +470,7 @@ export class MockSessionEngine {
     if (w.stress === null) return
     const level = watcherLevel(w.stress)
     if (!level || now - this.lastFlagAt <= this.timing.flagCooldownMs) return
-    const { message, command } = flagFor(w, this.baseline, level, this.usedFlagTexts)
+    const { message, command } = flagFor(w, level, this.usedFlagTexts)
     const flag: CoachFlagEvent = { ts: isoUtc(now), level, message, command }
     this.lastFlagAt = now
     this.recording.flags.push({ ...flag, question_id: this.current?.record.id ?? null, stress: round(w.stress, 1) })

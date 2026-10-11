@@ -23,7 +23,7 @@ export const PULSE_MIN_CONFIDENCE = 40    // Presage's "stable" threshold for he
  *
  * Presage goes quiet for a few seconds fairly often (a turn of the head, a hand near the face, a
  * dark frame). Reporting null the instant PULSE_HOLD_S lapses made the whole chain go void: the
- * backend drops sub-cutoff readings, so the live chart froze, stress went null and the gods lost
+ * backend drops sub-cutoff readings, so the live chart froze, stress went null and the interviewer lost
  * sight of the mortal mid-answer.
  *
  * Instead, while the face is STILL IN FRAME, we coast: keep emitting the last known pulse with a
@@ -33,6 +33,11 @@ export const PULSE_MIN_CONFIDENCE = 40    // Presage's "stable" threshold for he
  * and inventing a pulse for an empty chair would be a lie.
  */
 export const PULSE_COAST_S = 12
+
+// Hints ("Weak signal", "Hold still") only show once a problem has lasted HINT_DELAY_MS, and stay up at least
+// HINT_MIN_SHOW_MS: Presage's confidence wobbles every second or two, and an instant hint flickered on and off.
+export const HINT_DELAY_MS = 2500
+export const HINT_MIN_SHOW_MS = 3000
 
 // Presage's ValidationCode values (@smartspectra/node-sdk ValidationCode), with what to tell the user.
 export const VALIDATION = {
@@ -86,6 +91,9 @@ export class VitalsState {
     this.lastBreathTs = 0
     this.validation = null   // {code, hint, at}
     this.running = false     // Presage's pipeline reported Running
+    this.shown = null        // the status last handed out, and since when (hint debouncing)
+    this.shownAt = 0
+    this.adjustSince = null  // when the current run of "adjust" statuses began
   }
 
   /** One decoded Metrics message from the SDK's 'metrics' event. */
@@ -146,7 +154,6 @@ export class VitalsState {
       ts: new Date(wallNowMs).toISOString(),
       heart_rate: null,
       breathing_rate: null,
-      focus: null,        // Presage doesn't measure focus
       expression: null,   // not requested (faceMetrics would add load for little gain)
       confidence: 0,
     }
@@ -164,9 +171,14 @@ export class VitalsState {
       r.confidence = round(Math.min(1, Math.max(0, last.confidence * decay)), 2)
       return r
     }
-    const recent = held.filter((p) => nowMs - p.at <= SMOOTH_S * 1000)
-    r.heart_rate = round(median((recent.length ? recent : held.slice(-1)).map((p) => p.value)), 1)
-    r.confidence = round(Math.min(1, Math.max(0, held.at(-1).confidence)), 2)
+    // A weak newest pulse doesn't replace a strong one from the last PULSE_HOLD_S: Presage's confidence wobbles
+    // second to second, and reporting the weak value made Data drop about half the readings (below its 0.4
+    // cutoff). Only values at Presage's own accuracy standard (>= 40) are used when there are any.
+    const strong = held.filter((p) => p.confidence * 100 >= PULSE_MIN_CONFIDENCE)
+    const use = strong.length ? strong : held
+    const recent = use.filter((p) => nowMs - p.at <= SMOOTH_S * 1000)
+    r.heart_rate = round(median((recent.length ? recent : use.slice(-1)).map((p) => p.value)), 1)
+    r.confidence = round(Math.min(1, Math.max(0, use.at(-1).confidence)), 2)
 
     const breath = this.breath.filter((b) => nowMs - b.at <= BREATH_HOLD_S * 1000)
     if (breath.length) {
@@ -186,6 +198,26 @@ export class VitalsState {
    *   idle       no interview, so Presage (and the camera) is off
    */
   status(nowMs) {
+    const raw = this._rawStatus(nowMs)
+    let out = raw
+    if (raw.state !== 'adjust') {
+      this.adjustSince = null
+      // A hint that is up stays at least HINT_MIN_SHOW_MS, so it can be read.
+      if (this.shown?.state === 'adjust' && raw.state === 'measuring' && nowMs - this.shownAt < HINT_MIN_SHOW_MS) out = this.shown
+    } else if (this.shown?.state !== 'adjust') {
+      // A new problem: show it only once it has lasted HINT_DELAY_MS.
+      this.adjustSince ??= nowMs
+      if (nowMs - this.adjustSince < HINT_DELAY_MS && this.shown) out = this.shown
+    }
+    if (!this.shown || out.state !== this.shown.state || out.message !== this.shown.message) {
+      this.shown = out
+      this.shownAt = nowMs
+    }
+    return out
+  }
+
+  /** The status right now, before debouncing (see status()). */
+  _rawStatus(nowMs) {
     if (this.error) return { state: 'error', message: this.error }
     if (!this.active) return { state: 'idle', message: null }
     if (!this.running) return { state: 'starting', message: 'Starting Presage…' }
@@ -200,7 +232,7 @@ export class VitalsState {
       if (this.coasting(nowMs)) return { state: 'adjust', message: 'Signal faint. Hold still and face the light.' }
       return { state: 'warming_up', message: 'Reading your pulse… hold still, facing a light.' }
     }
-    if (held.at(-1).confidence * 100 < PULSE_MIN_CONFIDENCE) {
+    if (!held.some((p) => p.confidence * 100 >= PULSE_MIN_CONFIDENCE)) {
       return { state: 'adjust', message: 'Weak signal. Face a light and hold still.' }
     }
     return { state: 'measuring', message: null }
