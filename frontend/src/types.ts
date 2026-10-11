@@ -287,6 +287,21 @@ export interface CoachFlagEvent {
   message: string
 }
 
+/**
+ * What Presage is doing, from the hidden sensor (sensing_client/presage_node), every few seconds:
+ *   idle (no interview) · starting · warming_up (face found, no pulse yet) · measuring
+ *   adjust (framing / lighting / motion / weak signal, see message) · error (camera access, API key, network)
+ */
+export type SensorState = 'idle' | 'starting' | 'warming_up' | 'measuring' | 'adjust' | 'error'
+
+export interface SensorStatusEvent {
+  state: SensorState
+  /** What to tell the user, e.g. "Hold still." Null while measuring normally. */
+  message: string | null
+  /** True when the sensor runs with --simulate: the vitals are artificial. */
+  simulated: boolean
+}
+
 export interface SessionEndedEvent {
   report_url: string
   replay_url: string
@@ -299,6 +314,7 @@ export type ServerEvent =
   | { type: 'filler'; data: FillerEvent }
   | { type: 'vitals'; data: VitalsEvent }
   | { type: 'coach_flag'; data: CoachFlagEvent }
+  | { type: 'sensor'; data: SensorStatusEvent }
   | { type: 'session_ended'; data: SessionEndedEvent }
 
 export type ServerEventType = ServerEvent['type']

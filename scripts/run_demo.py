@@ -1,23 +1,28 @@
 """Start the whole StressTest pipeline with one command, and watch that every link is alive.
 
-    webcam → Presage (SmartSpectra app) → sensing_client → backend (/api/vitals) → Tiger Data
-           → Brain (Gemini + ElevenLabs) → browser (audio, live dashboard, report)
+    webcam → Presage (hidden sensor, sensing_client/presage_node) → backend (/api/vitals) → Tiger Data
+           → Brain (Gemini + ElevenLabs) → Chrome window (audio, live dashboard, report)
 
-    python scripts/run_demo.py                 # everything, real Gemini + ElevenLabs
-    python scripts/run_demo.py --fake          # BRAIN_FAKE=1: no Gemini/ElevenLabs calls
-    python scripts/run_demo.py --no-preview    # don't open the webcam in the browser (SmartSpectra keeps it)
-    python scripts/run_demo.py --no-sensing    # skip the Presage client (e.g. with scripts/mock_vitals.py)
-    python scripts/run_demo.py --presage       # also launch the Presage SmartSpectra app (press Start in it)
+The only window you see is StressTest in Chrome, which opens by itself. Presage runs in the background
+with no window, and only during an interview (the camera light is off otherwise).
 
-Before running: start the SmartSpectra app (Presage) and press Start, so it writes to SESSION_FILE
-(default ~/smartspectra_session.txt), or pass --presage to launch it (one-time build:
-sensing_client/presage_macos/setup_presage.sh). Ctrl+C stops everything this script started.
-Standard library only.
+    python scripts/run_demo.py                   # everything, real Gemini + ElevenLabs + Presage
+    python scripts/run_demo.py --fake            # BRAIN_FAKE=1: no Gemini/ElevenLabs calls
+    python scripts/run_demo.py --simulate-vitals # artificial Presage vitals, no camera (testing)
+    python scripts/run_demo.py --no-open         # don't open the Chrome window
+    python scripts/run_demo.py --no-preview      # the page doesn't show the webcam (Presage still uses it)
+    python scripts/run_demo.py --no-sensing      # no Presage at all (e.g. with scripts/mock_vitals.py)
+    python scripts/run_demo.py --legacy-presage  # old way: SmartSpectra app window + log file + client.py
+
+Needs Node.js 20+ (the Presage SDK is installed into sensing_client/presage_node on first run) and
+PRESAGE_API_KEY in .env (plus optional PRESAGE_BACKUP_API_KEYS, used when a key runs out of credits). The first time, macOS asks whether your terminal app may use the camera: allow it.
+Ctrl+C stops everything this script started. Standard library only.
 """
 
 import argparse
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -30,6 +35,8 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parent.parent
 VENV_PY = ROOT / ".venv" / "bin" / "python"
 DB_CONTAINER = "stresstest-tigerdb"
+SENSOR_DIR = ROOT / "sensing_client" / "presage_node"
+CHROME_APPS = (Path("/Applications/Google Chrome.app"), Path.home() / "Applications" / "Google Chrome.app")
 
 
 def say(msg: str) -> None:
@@ -75,19 +82,137 @@ def ensure_local_db(url: str) -> None:
     say("Tiger Data: local TimescaleDB container is up")
 
 
+# Commands this launcher starts. A process on one of our ports matching these, running from this repo,
+# is a leftover from an earlier run (e.g. its terminal was closed) and is safe to stop.
+OUR_COMMANDS = ("uvicorn backend.main:app", "sensing_client/client.py", "presage_node/sensor.mjs", "vite")
+
+
+def _cmd_and_cwd(pid: int) -> tuple[str, str]:
+    cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    cwd = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"], capture_output=True, text=True).stdout
+    cwd = next((line[1:] for line in cwd.splitlines() if line.startswith("n")), "")
+    return cmd, cwd
+
+
+def _ours(cmd: str, cwd: str) -> bool:
+    return any(c in cmd for c in OUR_COMMANDS) and cwd.startswith(str(ROOT))
+
+
+def _is_sensing_client(pid: int, cmd: str) -> bool:
+    """Python running sensing_client/client.py or Node running the Presage sensor, not just a command line
+    mentioning them (a shell, an editor, a grep). The executable must be Python or Node and the script
+    must be its first argument."""
+    exe = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    exe = exe.rsplit("/", 1)[-1].lower()
+    args = cmd.split()
+    script = next((a for a in args[1:] if not a.startswith("-")), "")
+    if "python" in exe:
+        return script.endswith("sensing_client/client.py")
+    return exe == "node" and script.endswith("presage_node/sensor.mjs")
+
+
+def free_ports(ports: list[int]) -> None:
+    """Stop leftover StressTest processes (on our ports, plus orphaned sensing clients); refuse to touch
+    anything else."""
+    pids = set()
+    for port in ports:
+        out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"], capture_output=True, text=True).stdout
+        for pid in map(int, out.split()):
+            cmd, cwd = _cmd_and_cwd(pid)
+            if not _ours(cmd, cwd):
+                sys.exit(f"[demo] port {port} is in use by another program (pid {pid}: {cmd[:100]}).\n"
+                         f"[demo] stop it (kill {pid}) or pick another port with --port / --frontend-port")
+            pids.add(pid)
+    out = subprocess.run(["pgrep", "-f", "sensing_client/client.py|presage_node/sensor.mjs"],
+                         capture_output=True, text=True).stdout
+    for pid in map(int, out.split()):
+        if pid in (os.getpid(), os.getppid()):
+            continue
+        cmd, cwd = _cmd_and_cwd(pid)
+        if _is_sensing_client(pid, cmd) and cwd.startswith(str(ROOT)):
+            pids.add(pid)
+    for pid in pids:
+        args = _cmd_and_cwd(pid)[0].split()
+        what = " ".join(a for a in args[1:] if not a.startswith("/"))[:70] or args[0]   # drop interpreter paths
+        say(f"stopping a leftover StressTest process from an earlier run (pid {pid}: {what})")
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    deadline = time.time() + 8
+    while pids and time.time() < deadline:
+        pids = {pid for pid in pids if _alive(pid)}
+        time.sleep(0.3)
+    for pid in pids:
+        os.kill(pid, signal.SIGKILL)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
 def pipe(proc: subprocess.Popen, name: str) -> None:
     for line in iter(proc.stdout.readline, ""):
         print(f"[{name}] {line.rstrip()}", flush=True)
 
 
+def ensure_sensor() -> str:
+    """Node.js plus Presage's Node SDK for the hidden sensor (installed on first run). Returns node's path."""
+    node = shutil.which("node")
+    if not node:
+        sys.exit("[demo] Node.js 20+ is needed for the Presage sensor: install it from nodejs.org")
+    major = subprocess.run([node, "--version"], capture_output=True, text=True).stdout.strip().lstrip("v").split(".")[0]
+    if not major.isdigit() or int(major) < 20:
+        sys.exit(f"[demo] the Presage sensor needs Node.js 20 or newer (found {major or 'unknown'})")
+    if not (SENSOR_DIR / "node_modules" / "@smartspectra" / "node-sdk").exists():
+        say("installing Presage's Node SDK into sensing_client/presage_node (one time, about 400 MB)…")
+        if subprocess.run(["npm", "ci", "--no-audit", "--no-fund"], cwd=SENSOR_DIR).returncode != 0:
+            sys.exit("[demo] npm couldn't install the Presage SDK (see above)")
+    return node
+
+
+def wait_for(url: str, proc: subprocess.Popen, timeout: float = 60) -> bool:
+    """True once `url` answers; False if `proc` dies or it takes too long."""
+    deadline = time.time() + timeout
+    while time.time() < deadline and proc.poll() is None:
+        try:
+            urllib.request.urlopen(url, timeout=2).close()
+            return True
+        except Exception:
+            time.sleep(0.5)
+    return False
+
+
+def open_chrome(url: str) -> None:
+    """StressTest in its own Chrome window (app mode: no tabs or address bar). Chrome is needed for
+    speech-to-text; without it, the default browser opens instead."""
+    app = next((a for a in CHROME_APPS if a.exists()), None)
+    if app is None:
+        say(f"Google Chrome isn't installed: opening {url} in your default browser (speech-to-text needs Chrome)")
+        subprocess.run(["open", url])
+        return
+    # -n hands the flags to Chrome even when it's already running (it opens a window in the open profile).
+    subprocess.run(["open", "-na", str(app), "--args", f"--app={url}", "--window-size=1440,900"])
+    say(f"opened StressTest in a Chrome window ({url})")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--fake", action="store_true", help="BRAIN_FAKE=1 (no Gemini/ElevenLabs calls)")
-    ap.add_argument("--no-sensing", action="store_true", help="don't start the Presage sensing client")
+    ap.add_argument("--simulate-vitals", action="store_true",
+                    help="the Presage sensor sends artificial vitals instead of using the camera (testing)")
+    ap.add_argument("--no-sensing", action="store_true", help="don't start the Presage sensor")
     ap.add_argument("--no-frontend", action="store_true", help="don't start the Vite dev server")
-    ap.add_argument("--no-preview", action="store_true", help="browser doesn't open the webcam (SmartSpectra owns it)")
-    ap.add_argument("--presage", action="store_true",
-                    help="launch the Presage SmartSpectra app (built by sensing_client/presage_macos/setup_presage.sh)")
+    ap.add_argument("--no-open", action="store_true", help="don't open the Chrome window")
+    ap.add_argument("--no-preview", action="store_true", help="the page doesn't show the webcam (Presage still uses it)")
+    ap.add_argument("--legacy-presage", action="store_true",
+                    help="old setup: launch the SmartSpectra app window (sensing_client/presage_macos) and "
+                         "sensing_client/client.py instead of the hidden sensor")
+    ap.add_argument("--presage", action="store_true", help=argparse.SUPPRESS)   # old flag: Presage is now the default
     ap.add_argument("--port", type=int, default=8000, help="backend port")
     ap.add_argument("--frontend-port", type=int, default=5173, help="frontend port")
     args = ap.parse_args()
@@ -101,26 +226,40 @@ def main() -> None:
         ensure_local_db(env["TIGER_DATABASE_URL"])
     else:
         say("WARNING: no TIGER_DATABASE_URL: Data runs in memory and nothing is saved")
-
-    session_file = Path(os.environ.get("SESSION_FILE", "~/smartspectra_session.txt")).expanduser()
     if args.presage:
+        say("NOTE: --presage isn't needed any more: Presage now runs hidden by default")
+
+    sensing = not args.no_sensing
+    node = None
+    session_file = Path(os.environ.get("SESSION_FILE", "~/smartspectra_session.txt")).expanduser()
+    if sensing and args.legacy_presage:
         r = subprocess.run([str(ROOT / "sensing_client" / "presage_macos" / "start_presage.sh")],
                            capture_output=True, text=True, env={**os.environ, "SESSION_FILE": str(session_file)})
         for line in (r.stdout + r.stderr).splitlines():
             print(line, flush=True)
         if r.returncode != 0:
             sys.exit("[demo] couldn't launch Presage (see above)")
-    if not args.no_sensing and not session_file.exists():
-        say(f"NOTE: {session_file} doesn't exist yet: start the SmartSpectra app and press Start")
+    elif sensing:
+        node = ensure_sensor()
+        keys = {k for k in [env.get("PRESAGE_API_KEY", "")] + env.get("PRESAGE_BACKUP_API_KEYS", "").replace(",", " ").split()
+                if k.strip()}
+        if args.simulate_vitals:
+            say("Presage: SIMULATED vitals (no camera); the live page says so")
+        elif not keys:
+            say("WARNING: no Presage API key in .env (PRESAGE_API_KEY): no real vitals (the live page shows the error)")
+        else:
+            say(f"Presage: {len(keys)} API key(s) in .env; when one runs out of credits, the next takes over")
 
+    free_ports([args.port] + ([] if args.no_frontend else [args.frontend_port]))
     backend_url = f"http://127.0.0.1:{args.port}"
     procs: list[tuple[str, subprocess.Popen]] = []
 
-    def start(name: str, cmd: list[str], cwd: Path = ROOT, extra_env: dict | None = None) -> None:
+    def start(name: str, cmd: list[str], cwd: Path = ROOT, extra_env: dict | None = None) -> subprocess.Popen:
         p = subprocess.Popen(cmd, cwd=cwd, env={**os.environ, **(extra_env or {})}, text=True,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
         threading.Thread(target=pipe, args=(p, name), daemon=True).start()
         procs.append((name, p))
+        return p
 
     def stop_all(*_):
         say("stopping…")
@@ -136,11 +275,16 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, stop_all)
     signal.signal(signal.SIGTERM, stop_all)
+    signal.signal(signal.SIGHUP, stop_all)   # terminal window closed: don't leave orphaned servers behind
 
     # No --reload: a code reload mid-interview would drop the session.
     start("backend", [str(VENV_PY), "-m", "uvicorn", "backend.main:app", "--port", str(args.port)],
           extra_env={"BRAIN_FAKE": "1"} if args.fake else {"BRAIN_FAKE": env.get("BRAIN_FAKE", "0")})
+    backend = procs[0][1]
     for _ in range(60):
+        if backend.poll() is not None:   # it died (e.g. couldn't bind the port): don't trust any /health
+            say(f"backend failed to start (exit code {backend.returncode}); see the [backend] lines above")
+            stop_all()
         try:
             health = get_json(f"{backend_url}/health")
             break
@@ -151,19 +295,29 @@ def main() -> None:
     say(f"backend up: brain={'FAKE' if health['fake'] else 'real'} gemini={health['gemini']} "
         f"elevenlabs={health['elevenlabs']} data={health.get('data_store')} routers={health['routers']}")
 
-    if not args.no_sensing:
+    if sensing and args.legacy_presage:
         start("presage", [sys.executable, "sensing_client/client.py"],
               extra_env={"BACKEND_URL": backend_url, "SESSION_FILE": str(session_file)})
+    elif sensing:
+        start("presage", [node, "sensing_client/presage_node/sensor.mjs"] + (["--simulate"] if args.simulate_vitals else []),
+              extra_env={"BACKEND_URL": backend_url})
     if not args.no_frontend:
         fe_env = {"VITE_PROXY_TARGET": backend_url}
         if args.no_preview:
             fe_env["VITE_CAMERA_PREVIEW"] = "0"
-        start("frontend", ["npm", "run", "dev", "--", "--port", str(args.frontend_port), "--strictPort"],
-              cwd=ROOT / "frontend", extra_env=fe_env)
-        say(f"open http://localhost:{args.frontend_port} in Chrome (Chrome is needed for speech-to-text)")
+        frontend = start("frontend", ["npm", "run", "dev", "--", "--port", str(args.frontend_port), "--strictPort"],
+                         cwd=ROOT / "frontend", extra_env=fe_env)
+        url = f"http://localhost:{args.frontend_port}"
+        if args.no_open:
+            say(f"open {url} in Chrome (Chrome is needed for speech-to-text)")
+        elif wait_for(url, frontend):
+            open_chrome(url)
+        else:
+            say(f"the frontend didn't come up; when it does, open {url} in Chrome")
 
     # Watch the links that fail silently: Presage feeding vitals, and the backend itself.
     was = None
+    presage_was = None
     while True:
         time.sleep(5)
         for name, p in procs:
@@ -175,12 +329,16 @@ def main() -> None:
         except Exception:
             say("WARNING: backend /health not answering")
             continue
+        presage = sensor.get("presage") or {}
+        if presage.get("state") == "error" and presage.get("message") != presage_was:
+            say(f"Presage ERROR: {presage['message']}")
+        presage_was = presage.get("message") if presage.get("state") == "error" else None
         now = ("signal" if sensor.get("signal") else "no-face") if sensor["live"] else "off"
         if now != was:
             say({"signal": "Presage vitals: LIVE (heart rate coming through)",
-                 "no-face": "Presage vitals: readings arriving but NO FACE / no heart rate: is the SmartSpectra "
-                            "app running, and is your face in view?",
-                 "off": "Presage vitals: not arriving (starts once a session is active)"}[now])
+                 "no-face": "Presage vitals: arriving, but no heart rate yet (Presage needs 10-20 s of a still "
+                            "face; sit facing a light, face and chest in view)",
+                 "off": "Presage vitals: not arriving (Presage starts when an interview starts)"}[now])
             was = now
 
 

@@ -1,5 +1,8 @@
 # Presage on macOS (real webcam vitals)
 
+> **Replaced** by the hidden Presage sensor in [`../presage_node`](../presage_node/README.md), which needs no
+> window, no Xcode build and no log file. This app is the fallback: `scripts/run_demo.py --legacy-presage`.
+
 Presage's SDK runs inside its **SmartSpectra macOS sample app**. `stresstest_log.patch` makes that app
 append every metrics update to `~/smartspectra_session.txt`, in the format `sensing_client/client.py`
 reads:

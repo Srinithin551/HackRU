@@ -47,6 +47,8 @@ function describe(event: ServerEvent): string {
       return `filler ${event.data.audio_url}`
     case 'coach_flag':
       return `coach_flag (${event.data.level}) ${event.data.message}`
+    case 'sensor':
+      return `sensor ${event.data.state}${event.data.message ? `: ${event.data.message}` : ''}`
     case 'session_ended':
       return 'session_ended'
     case 'vitals':
@@ -78,6 +80,7 @@ export function DevConsole() {
   const socketRef = useRef<SessionSocket | null>(null)
   const stopQuestionAudio = useRef<() => void>(() => {})
   const stopFiller = useRef<() => void>(() => {})
+  const lastSensor = useRef('')
 
   const addLog = useCallback((line: string) => {
     setLog((prev) => [`${stamp()}  ${line}`, ...prev].slice(0, MAX_LOG))
@@ -102,6 +105,13 @@ export function DevConsole() {
       if (event.type === 'vitals') {
         setVitals(event.data)
         setVitalsCount((n) => n + 1)
+        return
+      }
+      if (event.type === 'sensor') {
+        // Re-sent every 3 s: log only changes.
+        const line = describe(event)
+        if (line !== lastSensor.current) addLog(line)
+        lastSensor.current = line
         return
       }
       addLog(describe(event))

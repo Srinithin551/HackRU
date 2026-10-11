@@ -12,6 +12,7 @@ import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
 if __package__ in (None, ""):   # also support `cd backend && uvicorn main:app`
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -26,6 +27,23 @@ from backend.brain import voice
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
 log = logging.getLogger("main")
+
+
+class _QuietPolling(logging.Filter):
+    """Drops uvicorn's access lines for the sensor's once-a-second traffic and the launcher's health checks,
+    so the terminal stays readable. Failed requests (4xx/5xx) are still logged."""
+    QUIET = {("GET", "/api/sessions/active"), ("POST", "/api/vitals"), ("POST", "/api/sensor/status"),
+             ("GET", "/health")}
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) == 5:   # (client, method, path, http_version, status)
+            _, method, path, _, status = args
+            return not ((method, str(path).split("?")[0]) in self.QUIET and int(status) < 400)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietPolling())
 
 OPTIONAL_ROUTERS = ["backend.data.routes", "backend.sensing.routes"]
 mounted: list[str] = []
@@ -98,8 +116,21 @@ async def health():
         # confidence cutoff? (stored vs. below_cutoff since startup)
         # live = readings are arriving; signal = they carry a heart rate (a face is in view)
         "sensor": {"live": since is not None and since < SENSOR_STALE_S, "seconds_since_reading": since,
-                   "signal": signal_since is not None and signal_since < SENSOR_STALE_S, **_ingest_counts()},
+                   "signal": signal_since is not None and signal_since < SENSOR_STALE_S, **_ingest_counts(),
+                   "presage": _presage_status()},
     }
+
+
+PRESAGE_STATUS_STALE_S = 10.0   # the sensor re-posts its status every 3 s
+
+
+def _presage_status() -> Optional[dict]:
+    """Latest status from the Presage sensor (sensing_client/presage_node), or None if it isn't running."""
+    sensing = sys.modules.get("backend.sensing.routes")
+    at = getattr(sensing, "latest_status_at", None)
+    if at is None or time.monotonic() - at > PRESAGE_STATUS_STALE_S:
+        return None
+    return sensing.latest_status
 
 
 def _ingest_counts() -> dict:

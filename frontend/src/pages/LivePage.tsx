@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { CoachingChip, CoachingPopup } from '../components/CoachingPopup.tsx'
-import { CalibrationBanner, CoachToast, ThinkingDots, Waveform } from '../components/LiveOverlays.tsx'
+import { CalibrationBanner, CoachToast, SensorHint, SimulatedChip, ThinkingDots, Waveform } from '../components/LiveOverlays.tsx'
 import { HrSparkline, StressSparkline } from '../components/Sparklines.tsx'
 import { StressGauge } from '../components/StressGauge.tsx'
 import { AnalyzingScreen, Brand, Button, StatusDot } from '../components/ui.tsx'
@@ -25,8 +25,8 @@ import { useLiveSession, type LiveState } from '../hooks/useLiveSession.ts'
 import { useNow } from '../hooks/useNow.ts'
 import { useSpeechToText } from '../hooks/useSpeechToText.ts'
 import { useTweenedNumber } from '../hooks/useTweenedNumber.ts'
-import { INTERVIEWER_NAME, SENSOR_STALE_MS } from '../lib/constants.ts'
-import type { QuestionEvent } from '../types.ts'
+import { INTERVIEWER_NAME, SENSOR_STALE_MS, SENSOR_STATUS_STALE_MS } from '../lib/constants.ts'
+import type { QuestionEvent, SensorStatusEvent } from '../types.ts'
 
 export function LivePage() {
   const { id } = useParams()
@@ -76,6 +76,8 @@ function LiveSession({ sessionId }: { sessionId: string }) {
   }
 
   const sensorOn = live.lastVitalsAt !== null && now - live.lastVitalsAt < SENSOR_STALE_MS
+  // Presage's own status ("Hold still."); dropped if the sensor stops re-sending it.
+  const presage = live.sensor && live.sensorAt !== null && now - live.sensorAt < SENSOR_STATUS_STALE_MS ? live.sensor : null
   const calibrating = live.phase === 'calibrating' && !live.ended
   const transcript = typedMode ? typed : stt.text
 
@@ -123,14 +125,16 @@ function LiveSession({ sessionId }: { sessionId: string }) {
           <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-page/70 to-transparent" />
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-page/80 to-transparent" />
 
-          <div className="absolute top-gutter left-gutter flex items-center gap-2">
+          <div className="absolute inset-x-gutter top-gutter flex flex-wrap items-center justify-between gap-2">
             <span className="rounded-full border border-hairline bg-page/60 px-3 py-1 font-mono text-micro uppercase tracking-[0.08em] text-ink-secondary backdrop-blur">
               Preview only · nothing is recorded
             </span>
+            {presage?.simulated && <SimulatedChip />}
           </div>
 
           <div className="absolute inset-x-0 top-14 flex flex-col items-center gap-3 px-gutter">
             {calibrating && <CalibrationBanner startedAt={live.calibrationStartedAt} now={now} />}
+            {presage && <SensorHint sensor={presage} />}
             {live.toast && <CoachToast key={live.toast.ts + live.toast.message} flag={live.toast} />}
           </div>
 
@@ -147,7 +151,7 @@ function LiveSession({ sessionId }: { sessionId: string }) {
           </div>
         </section>
 
-        <VitalsPanel live={live} sensorOn={sensorOn} />
+        <VitalsPanel live={live} sensorOn={sensorOn} presage={presage} />
       </main>
 
       {leaving && <AnalyzingScreen />}
@@ -334,7 +338,14 @@ function CameraPlaceholder({ status, onRetry, onEnable }: { status: CameraStatus
   )
 }
 
-function VitalsPanel({ live, sensorOn }: { live: LiveState; sensorOn: boolean }) {
+function sensorLabel(sensorOn: boolean, everHadVitals: boolean, presage: SensorStatusEvent | null): string {
+  if (sensorOn) return presage?.simulated ? 'Simulated sensor' : 'Sensor connected'
+  if (presage?.state === 'starting' || presage?.state === 'warming_up') return 'Presage starting…'
+  if (presage?.state === 'error') return 'Presage error'
+  return everHadVitals ? 'No signal' : 'Waiting for sensor'
+}
+
+function VitalsPanel({ live, sensorOn, presage }: { live: LiveState; sensorOn: boolean; presage: SensorStatusEvent | null }) {
   const v = live.latest
   const hr = useTweenedNumber(sensorOn ? (v?.heart_rate ?? null) : null)
   const stress = sensorOn ? (v?.stress ?? null) : null
@@ -346,7 +357,7 @@ function VitalsPanel({ live, sensorOn }: { live: LiveState; sensorOn: boolean })
     <aside className="panel flex min-h-0 flex-col gap-4 overflow-y-auto p-panel">
       <div className="flex items-center justify-between">
         <span className="label-caps">Live vitals</span>
-        <StatusDot on={sensorOn}>{sensorOn ? 'Sensor connected' : live.lastVitalsAt ? 'No signal' : 'Waiting for sensor'}</StatusDot>
+        <StatusDot on={sensorOn}>{sensorLabel(sensorOn, live.lastVitalsAt !== null, presage)}</StatusDot>
       </div>
 
       <div>
