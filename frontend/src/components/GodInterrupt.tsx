@@ -22,7 +22,7 @@ const KIND_STYLE: Record<InterruptKind, { ring: string; chip: string; label: str
   rising: { ring: 'border-rising bg-rising-subtle', chip: 'bg-rising text-on-accent', label: 'A god stirs',
     glow: 'shadow-[0_0_40px_-6px_rgb(245_184_61/0.55)]' },
   high: { ring: 'border-high bg-high-subtle', chip: 'bg-high text-on-accent', label: 'A god rises',
-    glow: 'animate-smite' },
+    glow: 'shadow-[0_0_40px_-6px_rgb(240_82_74/0.6)]' },
   coaching: { ring: 'border-gold bg-gold-subtle', chip: 'bg-gold text-on-accent', label: 'A god corrects you',
     glow: 'shadow-[0_0_40px_-6px_rgb(212_175_55/0.55)]' },
 }
