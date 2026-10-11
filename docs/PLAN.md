@@ -128,6 +128,7 @@ Missing inputs drop out and the remaining weights are renormalized. Thresholds e
 | POST | `/api/sessions/{id}/start` | Brain | starts calibration + interview loop in background |
 | GET | `/api/sessions/active` | Data | `{session_id}` or `null` (sensing client uses this) |
 | POST | `/api/vitals` | Sensing (route), Data (storage) | body `VitalsBatch` → `{stored: n}` |
+| POST | `/api/sensor/status` | Sensing | body `{state, message, simulated}` from the Presage sensor, broadcast as `sensor` |
 | GET | `/api/sessions/{id}/replay` | Data | chart series + questions + per-question stats |
 | GET | `/api/sessions/{id}/report` | Brain | Gemini feedback JSON (shape in brain.md) |
 | GET | `/audio/{file}.mp3` | Brain | static files from `backend/static/audio/` |
@@ -146,6 +147,7 @@ Server → client:
 | `filler` | `{audio_url}` | Brain |
 | `vitals` | `{ts, heart_rate, breathing_rate, focus, stress}` (about 1 per second) | Sensing route |
 | `coach_flag` | `{ts, level: "rising" \| "high", message}` | Brain |
+| `sensor` | `{state: "idle" \| "starting" \| "warming_up" \| "measuring" \| "adjust" \| "error", message, simulated}` (every 3 s and on change) | Sensing route |
 | `session_ended` | `{report_url, replay_url}` | Brain |
 
 Client → server:

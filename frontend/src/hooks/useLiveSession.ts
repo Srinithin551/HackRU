@@ -9,6 +9,7 @@
  *  4. `filler`: play it, question text unchanged. `state`: drives the status pill.
  *  5. `vitals`: ring buffer of the last 60 readings for the sparklines.
  *  6. `coach_flag`: 4 s toast, also saved for the report chart.
+ *  6b. `sensor`: what Presage is doing ("Hold still"), re-sent every few seconds by the sensor.
  *  7. `session_ended`: the report is already saved; onEnded navigates to it.
  *
  * The server replays the latest state/question when a socket (re)connects, so a
@@ -20,7 +21,7 @@ import { TOAST_MS, VITALS_WINDOW } from '../lib/constants.ts'
 import { saveFlag } from '../lib/flagStore.ts'
 import { playClip } from '../lib/playClip.ts'
 import { createSessionSocket, type SessionSocket, type SocketStatus } from '../lib/socket.ts'
-import type { CoachFlagEvent, QuestionEvent, ServerEvent, SessionState, VitalsEvent } from '../types.ts'
+import type { CoachFlagEvent, QuestionEvent, SensorStatusEvent, ServerEvent, SessionState, VitalsEvent } from '../types.ts'
 
 export interface VitalsSample {
   /** epoch ms */
@@ -47,6 +48,9 @@ export interface LiveState {
   lastVitalsAt: number | null
   /** When calibration began (epoch ms), for the warm-up ring. */
   calibrationStartedAt: number | null
+  /** Latest Presage status from the sensor, and when it arrived (epoch ms). */
+  sensor: SensorStatusEvent | null
+  sensorAt: number | null
   flags: CoachFlagEvent[]
   toast: CoachFlagEvent | null
   ended: boolean
@@ -63,6 +67,8 @@ const initialState: LiveState = {
   latest: null,
   lastVitalsAt: null,
   calibrationStartedAt: null,
+  sensor: null,
+  sensorAt: null,
   flags: [],
   toast: null,
   ended: false,
@@ -123,6 +129,8 @@ function applyEvent(state: LiveState, event: ServerEvent, at: number): LiveState
     }
     case 'coach_flag':
       return { ...state, flags: [...state.flags, event.data], toast: event.data }
+    case 'sensor':
+      return { ...state, sensor: event.data, sensorAt: at }
     case 'session_ended':
       return { ...state, ended: true, answering: false, speaking: false }
     case 'filler':

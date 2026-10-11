@@ -2,6 +2,9 @@
 """
 StressTest sensing client (Option B: local process on the demo laptop).
 
+FALLBACK: the hidden Presage sensor (sensing_client/presage_node/sensor.mjs) replaces this client and the
+SmartSpectra app. This one runs with `scripts/run_demo.py --legacy-presage`.
+
 The SmartSpectra macOS app owns the webcam and appends metrics to a log file.
 This client follows that file live, turns it into one VitalsReading per second
 (see backend/contracts.py), and POSTs batches to /api/vitals while a session

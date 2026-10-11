@@ -18,6 +18,9 @@ export const TOAST_MS = 4_000
 /** No vitals for this long = sensor disconnected / no face. */
 export const SENSOR_STALE_MS = 3_000
 
+/** The Presage sensor re-sends its status every 3 s; older than this = the sensor isn't running. */
+export const SENSOR_STATUS_STALE_MS = 10_000
+
 /** Speech-to-text auto-stop (frontend.md): 3.5 s of silence after at least 3 s of speech. */
 export const SILENCE_MS = 3_500
 export const MIN_SPEECH_MS = 3_000

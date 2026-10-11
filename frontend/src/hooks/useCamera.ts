@@ -3,9 +3,10 @@
  * by speech-to-text) and nothing is recorded or uploaded: the stream only feeds a
  * <video> element.
  *
- * Note for Sensing: if Presage runs as a separate local process (Option B in
- * sensing.md), it may need exclusive access to the camera on macOS. Then turn the
- * preview off with the camera button; vitals keep flowing from the sensor.
+ * Presage runs in a hidden background process (sensing_client/presage_node) that opens
+ * the same webcam itself. macOS normally lets both use it; if the preview and Presage
+ * fight over the camera, turn the preview off with the camera button (or run_demo.py
+ * --no-preview): vitals keep flowing from the sensor.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 
@@ -15,7 +16,7 @@ const hasCamera = () => typeof navigator !== 'undefined' && !!navigator.mediaDev
 
 export function useCamera() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  // VITE_CAMERA_PREVIEW=0 starts with the preview off, for when the SmartSpectra app (Presage) owns the webcam.
+  // VITE_CAMERA_PREVIEW=0 starts with the preview off (run_demo.py --no-preview), leaving the webcam to Presage.
   const [enabled, setEnabled] = useState(import.meta.env.VITE_CAMERA_PREVIEW !== '0')
   const [attempt, setAttempt] = useState(0)
   const [status, setStatus] = useState<Exclude<CameraStatus, 'off'>>(hasCamera() ? 'starting' : 'unavailable')

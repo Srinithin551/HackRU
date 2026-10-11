@@ -124,6 +124,10 @@ Severity: 🔴 fix before the demo · 🟠 should fix · 🟡 nice to have
 **Still to do (P1, P2):** fix breathing confidence and pulse staleness in the client, then run a full interview with
 real Presage vitals end to end.
 
+**Update (later on 2026-10-10):** Presage now runs as a hidden Node.js sensor (`sensing_client/presage_node`) instead
+of the SmartSpectra app + log file + `client.py`, which fixes P1 and P2 at the source and removes most of P11's
+setup. The old path stays as `run_demo.py --legacy-presage`.
+
 ---
 
 ## 4. Hand-offs

@@ -1,0 +1,17 @@
+{
+  "name": "stresstest-presage-sensor",
+  "private": true,
+  "description": "Headless Presage sensor: webcam → SmartSpectra Node SDK → POST /api/vitals. No window.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node sensor.mjs",
+    "simulate": "node sensor.mjs --simulate",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@smartspectra/node-sdk": "3.4.0"
+  }
+}

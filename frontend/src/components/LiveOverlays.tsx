@@ -1,7 +1,7 @@
-/** Pieces drawn on or next to the camera: voice waveform, coach toast, warm-up ring. */
+/** Pieces drawn on or next to the camera: voice waveform, coach toast, warm-up ring, Presage hints. */
 import { CALIBRATION_MS } from '../lib/constants.ts'
 import { STRESS_META } from '../styles/tokens.ts'
-import type { CoachFlagEvent } from '../types.ts'
+import type { CoachFlagEvent, SensorStatusEvent } from '../types.ts'
 import { StressIcon } from './ui.tsx'
 
 const BARS = [0.55, 0.85, 1, 0.7, 0.9, 0.6, 0.8]
@@ -82,5 +82,34 @@ export function CalibrationBanner({ startedAt, now }: { startedAt: number | null
         </p>
       </div>
     </div>
+  )
+}
+
+/**
+ * What Presage needs from the user ("Hold still.", "No face found…"), from the hidden sensor. Amber for
+ * framing/lighting, red when Presage itself failed, neutral while it starts. Nothing while measuring normally.
+ */
+export function SensorHint({ sensor }: { sensor: SensorStatusEvent }) {
+  if (!sensor.message || sensor.state === 'measuring' || sensor.state === 'idle') return null
+  const tone =
+    sensor.state === 'error'
+      ? 'border-high bg-high-subtle/90'
+      : sensor.state === 'adjust'
+        ? 'border-rising bg-rising-subtle/90'
+        : 'border-hairline bg-surface-1/85'
+  return (
+    <div role="status" aria-live="polite" className={`max-w-md rounded-control border px-4 py-2 text-center backdrop-blur-md ${tone}`}>
+      <p className="font-mono text-micro uppercase tracking-[0.08em] text-ink-muted">Presage</p>
+      <p className="text-caption font-medium text-ink">{sensor.message}</p>
+    </div>
+  )
+}
+
+/** Shown during a --simulate test so nobody mistakes the vitals for real readings. */
+export function SimulatedChip() {
+  return (
+    <span className="rounded-full border border-rising bg-page/60 px-3 py-1 font-mono text-micro uppercase tracking-[0.08em] text-ink-secondary backdrop-blur">
+      Simulated vitals
+    </span>
   )
 }
