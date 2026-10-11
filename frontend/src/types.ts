@@ -27,7 +27,7 @@ export interface VitalsReading {
   /** 0.0 to 1.0 */
   focus?: number | null
   expression?: Expression | null
-  /** 0 to 1, face/signal quality. Data ignores readings under 0.5. */
+  /** 0 to 1, face/signal quality. Data ignores readings under MIN_CONFIDENCE (0.4 by default). */
   confidence: number
 }
 
@@ -213,6 +213,7 @@ export interface ReportCoachFlag {
   level: CoachLevel
   stress: number
   message: string
+  command?: string
 }
 
 export interface Adaptation {
@@ -227,6 +228,31 @@ export interface Adaptation {
   action: 'coach' | 'redirect' | 'follow_up' | 'ease_off' | 'push' | 'next' | 'wrap_up'
   answer_quality: number
   rationale: string
+}
+
+// ---------------------------------------------------------------------------
+// REST: GET /api/sessions/{id}/insights (owner: Brain)
+// ---------------------------------------------------------------------------
+
+/** Which measured series a chart note explains. */
+export type ChartVariable = 'heart_rate' | 'breathing' | 'composure'
+
+/**
+ * One Gemini-written note about what a variable did during one question, shown when you hover that
+ * stretch of the replay chart. Generated on first request, so the report never waits on it.
+ */
+export interface ChartNote {
+  /** Matches ReplayQuestion.id. */
+  question_id: string
+  variable: ChartVariable
+  /** At most ~6 words, shown in bold. */
+  headline: string
+  /** 1-2 sentences citing a real number. */
+  detail: string
+}
+
+export interface InsightsResponse {
+  notes: ChartNote[]
 }
 
 // ---------------------------------------------------------------------------
@@ -274,7 +300,7 @@ export interface VitalsEvent {
   heart_rate: number | null
   breathing_rate: number | null
   focus: number | null
-  /** Null until the baseline exists, or when confidence < 0.5. */
+  /** Null until the baseline exists, or when confidence is below the cutoff (0.4 by default). */
   stress: number | null
 }
 
@@ -283,8 +309,13 @@ export type CoachLevel = 'rising' | 'high'
 export interface CoachFlagEvent {
   ts: IsoDateTime
   level: CoachLevel
-  /** On-screen only, e.g. "Heart rate up 22% from your baseline. Slow down." */
+  /** What the god observed, citing the number that triggered it. On screen only, never spoken. */
   message: string
+  /**
+   * The single thing to do, shown as "Please <command>." The mortal must acknowledge it before the
+   * trial moves on. Optional so older sessions and fixtures still type-check.
+   */
+  command?: string
 }
 
 /**

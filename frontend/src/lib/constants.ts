@@ -1,10 +1,44 @@
 /** App-wide constants that aren't design tokens. */
 
 /**
- * Shown on the interviewer card. No contract field carries it; swap this when Brain
- * picks the ElevenLabs voice (brain.md: "Pick one calm, professional voice").
+ * The god who presides over the trial, shown on the interviewer card. No contract field
+ * carries it; swap this when Brain picks the ElevenLabs voice (brain.md: "Pick one calm,
+ * professional voice").
  */
-export const INTERVIEWER_NAME = 'Morgan'
+export const INTERVIEWER_NAME = 'Osiras'
+
+/** The product name, as spoken to the mortal standing in the palace. */
+export const APP_NAME = 'Greek God Teacher Program'
+
+/**
+ * The pantheon seated in the hall. Osiras presides and always takes the small talk; the
+ * others take the planned questions in turn, so each question visibly comes from a
+ * different god. `domain` is the single word shown under the name.
+ */
+export interface God {
+  name: string
+  domain: string
+}
+
+export const PRESIDING_GOD: God = { name: INTERVIEWER_NAME, domain: 'Judgement' }
+
+export const PANTHEON: readonly God[] = [
+  { name: 'Athena', domain: 'Strategy' },
+  { name: 'Apollo', domain: 'Clarity' },
+  { name: 'Hephaestus', domain: 'Craft' },
+  { name: 'Hera', domain: 'Authority' },
+  { name: 'Hermes', domain: 'Quickness' },
+] as const
+
+/**
+ * Which god asks a given question. Calibration (index 0) belongs to Osiras, who opens and
+ * closes the trial; planned question 1..n cycles through the pantheon so the same god never
+ * asks twice in a row.
+ */
+export function godForQuestion(index: number): God {
+  if (index <= 0) return PRESIDING_GOD
+  return PANTHEON[(index - 1) % PANTHEON.length]
+}
 
 /** Live sparkline length: the last 60 vitals readings (~60 s at 1 Hz). */
 export const VITALS_WINDOW = 60

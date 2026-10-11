@@ -19,6 +19,7 @@ import type {
   CreateSessionRequest,
   CreateSessionResponse,
   HealthResponse,
+  InsightsResponse,
   ReplayResponse,
   Report,
   StartSessionResponse,
@@ -32,6 +33,8 @@ export interface Api {
   getReplay(sessionId: string): Promise<ReplayResponse>
   /** Resolves to null while the report is still being generated. */
   getReport(sessionId: string): Promise<Report | null>
+  /** Chart notes for the replay tooltips. Empty when they can't be produced. */
+  getInsights(sessionId: string): Promise<InsightsResponse>
 }
 
 export class ApiError extends Error {
@@ -77,6 +80,8 @@ const httpApi: Api = {
       throw err
     }
   },
+  // Gemini writes these on first request, so allow for a slow first call.
+  getInsights: (id) => request(`${sessionPath(id)}/insights`, {}, 40_000),
 }
 
 const impl: Api = IS_MOCK ? mockApi : httpApi
@@ -85,6 +90,19 @@ export const createSession = (body: CreateSessionRequest) => impl.createSession(
 export const getActiveSession = () => impl.getActiveSession()
 export const getReplay = (sessionId: string) => impl.getReplay(sessionId)
 export const getReport = (sessionId: string) => impl.getReport(sessionId)
+
+/**
+ * Chart notes for the replay tooltips. Decorative: a failure leaves the tooltips showing plain
+ * numbers, so this resolves to an empty list instead of rejecting.
+ */
+export const getInsights = async (sessionId: string): Promise<InsightsResponse> => {
+  try {
+    return await impl.getInsights(sessionId)
+  } catch (err) {
+    console.warn('[api] insights unavailable', err)
+    return { notes: [] }
+  }
+}
 
 /**
  * GET /health: which backend pieces are live (fake mode, Gemini, ElevenLabs, mounted routers).

@@ -12,6 +12,7 @@ import type { ReplayResponse, Report } from '../types.ts'
 import replaySample from './generated_replay.json'
 import reportSample from './generated_report.json'
 import { mockHub } from './hub.ts'
+import { buildInsights } from './insights.ts'
 import { buildReplay } from './replay.ts'
 import { buildReport } from './report.ts'
 
@@ -73,5 +74,12 @@ export const mockApi: Api = {
     await delay(REPORT_DELAY_MS)
     const recording = engine.getRecording()
     return buildReport(buildReplay(recording), recording.flags)
+  },
+
+  async getInsights(sessionId) {
+    await delay(READ_DELAY_MS)
+    const engine = mockHub.get(sessionId)
+    const replay = engine && engine.phase === 'ended' ? buildReplay(engine.getRecording()) : copy(REPLAY_SAMPLE)
+    return { notes: buildInsights(replay) }
   },
 }

@@ -39,7 +39,7 @@ export function CoachToast({ flag }: { flag: CoachFlagEvent }) {
     <div
       role="status"
       aria-live="polite"
-      className="flex max-w-xl animate-toast-in items-start gap-3 rounded-control border px-4 py-3 shadow-[0_12px_40px_rgb(0_0_0/0.45)] backdrop-blur-md"
+      className="flex max-w-xl animate-toast-in items-start gap-3 rounded-control border px-4 py-3 shadow-[0_12px_40px_rgb(0_0_0/0.7)] backdrop-blur-md"
       style={{ backgroundColor: `${meta.subtle}e6`, borderColor: meta.color }}
     >
       <StressIcon level={flag.level} className="mt-1 size-3.5 shrink-0" />

@@ -21,7 +21,7 @@ import {
   YAxis,
 } from 'recharts'
 import { color, STRESS_HIGH, STRESS_META, STRESS_RISING, stressColor, stressGradientStops } from '../styles/tokens.ts'
-import type { CoachLevel, QuestionFeedback, QuestionKind, QuestionStats } from '../types.ts'
+import type { ChartNote, ChartVariable, CoachLevel, QuestionFeedback, QuestionKind, QuestionStats } from '../types.ts'
 
 export interface QuestionView {
   id: string
@@ -53,6 +53,22 @@ export interface ReportView {
   flags: FlagView[]
 }
 
+/** Each variable keeps one color wherever it appears: chart stroke, tooltip, legend. */
+const VARIABLE_COLOR: Record<ChartVariable, string> = {
+  heart_rate: color.seriesHr,
+  breathing: color.seriesBreathing,
+  composure: color.rising,
+}
+const VARIABLE_LABEL: Record<ChartVariable, string> = {
+  heart_rate: 'Heart rate',
+  breathing: 'Breathing',
+  composure: 'Composure',
+}
+
+/** Which notes each panel's tooltip explains. Breathing isn't drawn, so it rides with heart rate. */
+const HR_PANEL_VARS: readonly ChartVariable[] = ['heart_rate', 'breathing']
+const STRESS_PANEL_VARS: readonly ChartVariable[] = ['composure']
+
 const MONO = 'Geist Mono Variable, ui-monospace, monospace'
 const TICK = { fill: color.chartAxis, fontSize: 11, fontFamily: MONO }
 const isNum = (v: number | null): v is number => typeof v === 'number'
@@ -69,7 +85,18 @@ interface TooltipProps {
   payload?: readonly { dataKey?: unknown; value?: unknown }[]
 }
 
-export function Timeline({ view, selectedId, onSelect }: { view: ReportView; selectedId: string | null; onSelect: (id: string) => void }) {
+export function Timeline({
+  view,
+  selectedId,
+  onSelect,
+  notes = [],
+}: {
+  view: ReportView
+  selectedId: string | null
+  onSelect: (id: string) => void
+  /** Per-question, per-variable explanations shown in the tooltip. Empty until they arrive. */
+  notes?: readonly ChartNote[]
+}) {
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, '')
   const { points, start, end, questions, flags, baselineHr } = view
   const bands = questions.filter((q): q is QuestionView & { start: number; end: number } => q.start !== null && q.end !== null)
@@ -85,17 +112,56 @@ export function Timeline({ view, selectedId, onSelect }: { view: ReportView; sel
     if (hit) onSelect(hit.id)
   }
 
-  const renderTooltip = ({ active, label, payload }: TooltipProps) => {
+  const makeTooltip = (shown: readonly ChartVariable[]) => ({ active, label, payload }: TooltipProps) => {
     if (!active || !payload?.length) return null
+    const x = Number(label)
+    const band = bands.find((q) => x >= q.start && x <= q.end) ?? null
+    const bandNotes = band ? notes.filter((n) => n.question_id === band.id && shown.includes(n.variable)) : []
+    const value = (key: string): number | null => {
+      const hit = payload.find((p) => p.dataKey === key)
+      return typeof hit?.value === 'number' ? hit.value : null
+    }
+    const hr = value('hr')
+    const stress = value('stress')
+
     return (
-      <div className="rounded-control border border-border-strong bg-surface-2 px-3 py-2 shadow-lg">
-        <p className="font-mono text-micro text-ink-muted">{clock(Number(label) - start)}</p>
-        {payload.map((p) =>
-          typeof p.value === 'number' ? (
-            <p key={String(p.dataKey)} className="text-caption text-ink">
-              {p.dataKey === 'hr' ? `Heart rate ${Math.round(p.value)} bpm` : `Stress ${Math.round(p.value)}`}
-            </p>
-          ) : null,
+      <div className="max-w-[20rem] rounded-control border border-border-strong bg-surface-1 px-3 py-2.5 shadow-[0_10px_34px_rgb(0_0_0/0.75)]">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="font-mono text-micro text-ink-muted">{clock(x - start)}</p>
+          {band && <p className="font-mono text-micro font-semibold text-accent">{band.label}</p>}
+        </div>
+
+        {hr !== null && (
+          <p className="mt-1 text-caption text-ink">
+            <span className="font-semibold">Heart rate</span> {Math.round(hr)} bpm
+          </p>
+        )}
+        {stress !== null && (
+          <p className="text-caption text-ink">
+            <span className="font-semibold">Composure</span> {Math.round(stress)}/100
+          </p>
+        )}
+
+        {/* What the gods made of this stretch: one note per variable, written by Gemini
+            (backend/brain/insights.py), or from the numbers when it isn't available. */}
+        {bandNotes.length > 0 && (
+          <div className="mt-2 flex flex-col gap-1.5 border-t border-hairline pt-2">
+            {bandNotes.map((note) => (
+              <div key={`${note.question_id}:${note.variable}`}>
+                <p className="text-micro font-semibold text-ink">
+                  <span style={{ color: VARIABLE_COLOR[note.variable] }}>{VARIABLE_LABEL[note.variable]}</span>
+                  {' · '}
+                  {note.headline}
+                </p>
+                <p className="text-micro leading-snug text-ink-secondary">{note.detail}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        {band && bandNotes.length === 0 && (
+          <p className="mt-2 border-t border-hairline pt-2 text-micro text-ink-muted">
+            The gods are still writing their notes…
+          </p>
         )}
       </div>
     )
@@ -161,7 +227,7 @@ export function Timeline({ view, selectedId, onSelect }: { view: ReportView; sel
                 label={{ value: `baseline ${Math.round(baselineHr)}`, position: 'insideBottomRight', fill: color.inkMuted, fontSize: 11, fontFamily: MONO }}
               />
             )}
-            <Tooltip content={renderTooltip} cursor={{ stroke: color.borderStrong }} />
+            <Tooltip content={makeTooltip(HR_PANEL_VARS)} cursor={{ stroke: color.borderStrong }} />
             <Line dataKey="hr" type="monotone" stroke={color.seriesHr} strokeWidth={2} dot={false} isAnimationActive={false} />
           </ComposedChart>
         </ResponsiveContainer>
@@ -187,7 +253,7 @@ export function Timeline({ view, selectedId, onSelect }: { view: ReportView; sel
             {bandsFor(false)}
             <ReferenceLine y={STRESS_RISING} stroke={color.rising} strokeOpacity={0.5} strokeDasharray="4 4" />
             <ReferenceLine y={STRESS_HIGH} stroke={color.high} strokeOpacity={0.5} strokeDasharray="4 4" />
-            <Tooltip content={renderTooltip} cursor={{ stroke: color.borderStrong }} />
+            <Tooltip content={makeTooltip(STRESS_PANEL_VARS)} cursor={{ stroke: color.borderStrong }} />
             <Area
               dataKey="stress"
               type="monotone"
