@@ -1,6 +1,6 @@
-# StressTest data context
+# Osiris data context
 
-What is in our Tiger Data database, what each column means, and who touches it. Written for teammates and for their Claude sessions: paste this file into context before writing anything that reads or writes vitals.
+What is in our Tiger Data database, what each column means, and who touches it. (There is no `focus` column: Presage never measures focus, so it was removed on 2026-10-11. Every launch of `scripts/run_demo.py` recreates these tables empty.) Written for teammates and for their Claude sessions: paste this file into context before writing anything that reads or writes vitals.
 
 - **Database:** Tiger Data (PostgreSQL + TimescaleDB), one cloud service. Verified on PostgreSQL 18.6 + TimescaleDB 2.30.2. Connection string in `TIGER_DATABASE_URL` (in `backend/.env`, never in git).
 - **Schema file:** [`backend/data/schema.sql`](../../backend/data/schema.sql), applied by `python scripts/init_db.py`.
@@ -38,11 +38,10 @@ One row per interview. Holds the calm **baseline** that every stress number is r
 | `ended_at` | TIMESTAMPTZ | yes | UTC | Null while the session is live | `end_session` |
 | `baseline_hr` | REAL | yes | bpm | Calm heart rate from calibration | `compute_baseline` |
 | `baseline_br` | REAL | yes | breaths/min | Calm breathing rate from calibration | `compute_baseline` |
-| `baseline_focus` | REAL | yes | 0.0 to 1.0 | Calm focus from calibration | `compute_baseline` |
-| `baseline_n` | INT | yes | count | Readings averaged into the baseline. **0 means population defaults were used** (HR 75, BR 15, focus 0.75) because calibration had fewer than 10 good readings | `compute_baseline` |
+| `baseline_n` | INT | yes | count | Readings averaged into the baseline. **0 means population defaults were used** (HR 75, BR 15) because calibration had fewer than 10 good readings | `compute_baseline` |
 | `report` | JSONB | yes | Brain's `Report` (brain.md) | Gemini's final report, served at `/api/sessions/{id}/report` | `save_report` |
 
-**Active session** = most recent row with `ended_at IS NULL` and `started_at` in the last 30 minutes (`get_active_session`, cached 2 s). Sensing tags readings with it when they arrive without a `session_id`.
+**Active session** = most recent row *created by this backend process* with `ended_at IS NULL` and `started_at` in the last 30 minutes (`get_active_session`, cached 2 s). Sensing tags readings with it when they arrive without a `session_id`.
 
 ## `questions`
 
@@ -72,10 +71,9 @@ One row per reading from Presage (or `mock_vitals.py`), about 1 per second while
 | `session_id` | UUID | no | | Session the reading belongs to | No foreign key (hypertable); set from the reading or the active session |
 | `heart_rate` | REAL | yes | bpm, ~40 to 180 | | Null if Presage gave no value |
 | `breathing_rate` | REAL | yes | breaths/min, ~6 to 40 | | Null if not supported |
-| `focus` | REAL | yes | 0.0 to 1.0 | Presage attention/engagement | Null if not supported |
 | `expression` | TEXT | yes | `neutral`, `happy`, `surprised`, `frown`, `confused`, `unknown` | Dominant facial expression | Enum enforced by Pydantic (`Expression`), not the DB |
 | `confidence` | REAL | yes* | 0.0 to 1.0 | Face / signal quality | *Always set in practice (contract default 1.0). **Readings below the confidence cutoff (`DATA_MIN_CONFIDENCE`, default 0.4: Presage's accuracy standard for heart rate) are never stored** (they still reach the live chart via the broadcast) |
-| `stress` | REAL | yes | 0 to 100 | Computed on insert by `metrics.stress_score` | NULL when: no baseline yet (calibration) or all of HR/BR/focus missing. `compute_baseline` backfills calibration rows |
+| `stress` | REAL | yes | 0 to 100 | Computed on insert by `metrics.stress_score` | NULL when: no baseline yet (calibration) or both HR and BR missing. `compute_baseline` backfills calibration rows |
 
 ### Stress score
 
@@ -84,8 +82,7 @@ Computed in Python (`backend/data/metrics.py`), stored per row, never recomputed
 ```
 hr_part    = clamp((hr / baseline_hr - 1) * 100 / 25, 0, 1)      # +25% HR = max
 br_part    = clamp((br / baseline_br - 1) * 100 / 40, 0, 1)      # +40% breathing = max
-focus_part = clamp((baseline_focus - focus) / 0.5, 0, 1)         # 0.5 focus drop = max
-stress     = 100 * (0.5*hr_part + 0.3*br_part + 0.2*focus_part)  # missing inputs drop out, weights renormalize
+stress     = 100 * (0.5*hr_part + 0.3*br_part) / 0.8              # a missing input drops out, weights renormalize
 ```
 
 Thresholds (fixed, everyone uses them): **< 40 calm · 40 to 70 rising · > 70 high**.
@@ -102,7 +99,6 @@ Thresholds (fixed, everyone uses them): **< 40 calm · 40 to 70 rising · > 70 h
 | `session_id` | UUID | |
 | `hr` | double | `avg(heart_rate)`. **Includes low-confidence rows** (the view has no confidence filter), but those rows have null vitals, so `avg` skips them |
 | `br` | double | `avg(breathing_rate)` |
-| `focus` | double | `avg(focus)` |
 | `stress` | double | `avg(stress)` (nulls skipped) |
 | `stress_peak` | REAL | `max(stress)` in the bucket |
 

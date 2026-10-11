@@ -1,5 +1,10 @@
 # Role: Data
 
+> **At submission (HackRU 2026):** this is the plan written at the start, when the app was called StressTest.
+> As built: there is **no focus vital** (Presage never measures it), so the stress score is 5/8 heart rate +
+> 3/8 breathing and the schema has no focus columns. The launcher wipes and recreates the tables on every run
+> (`init_db.py --fresh --columnstore`). See [docs/data/README.md](../data/README.md) and the [README](../../README.md).
+
 **Owner:** Likhil
 **You own:** Tiger Data, the schema, the stress score, every query Brain uses, the replay endpoint, and the mock vitals generator.
 **Files:** `backend/data/*`, `scripts/mock_vitals.py`

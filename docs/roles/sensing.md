@@ -1,5 +1,10 @@
 # Role: Sensing
 
+> **At submission (HackRU 2026):** this is the plan written at the start, when the app was called StressTest.
+> As built: **Option B**, a hidden local process. [`sensing_client/presage_node`](../../sensing_client/presage_node/README.md)
+> runs Presage's SmartSpectra **Node.js SDK** with no window, pre-warms after the page opens the webcam, and posts
+> heart rate, breathing and status. Presage doesn't measure focus or expressions, so those fields are gone or always null.
+
 **Owner:** Sharvil
 **You own:** getting real vitals out of Presage and into the backend, reliably, once per second.
 **Files:** `backend/sensing/routes.py`, `sensing_client/` (or a browser module handed to Frontend)

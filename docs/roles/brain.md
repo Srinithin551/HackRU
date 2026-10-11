@@ -1,5 +1,11 @@
 # Role: Brain
 
+> **At submission (HackRU 2026):** this is the plan written at the start, when the app was called StressTest.
+> The product is now **Osiris** with one interviewer, **Judge**, in one ElevenLabs voice. The opener asks a
+> presentation's content when no file is imported, questions can be planned from an imported file, coaching
+> and coach flags appear as interrupts on the camera, and there is no focus vital. The
+> **"As built"** section below is the integration reference; the [README](../../README.md) describes the product.
+
 **Owner:** Srinithin
 **You own:** the interview loop, Gemini, ElevenLabs, the WebSocket hub, and the backend skeleton.
 **Files:** `backend/main.py`, `config.py`, `contracts.py`, `ws.py`, `backend/brain/*`
@@ -224,7 +230,7 @@ async def tts(text: str) -> str:
 
 ## As built: integration reference
 
-Everything above is implemented on the `brain` branch. This section is what the other roles need to plug in; where the build differs from the plan above, it says so.
+Everything above is implemented and merged into `main`. This section is what the other roles need to plug in; where the build differs from the plan above, it says so.
 
 ### Run it
 
@@ -232,9 +238,9 @@ Everything above is implemented on the `brain` branch. This section is what the 
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
 cp .env.example .env                                  # fill in keys; BRAIN_FAKE=1 needs none
-BRAIN_FAKE=1 uvicorn backend.main:app --reload        # from the repo root (dev only: never --reload for a demo)
+BRAIN_FAKE=1 uvicorn backend.main:app                # from the repo root (never --reload for a demo)
 python scripts/fake_frontend.py                       # terminal stand-in for the browser
-pytest                                                # 119 tests, < 2 seconds
+pytest tests                                          # 171 tests, about 3 seconds
 ```
 
 `GET /health` reports fake mode, whether Gemini/ElevenLabs keys are set, and which routers are mounted.
@@ -247,8 +253,9 @@ pytest                                                # 119 tests, < 2 seconds
 | `backend/config.py` | All env vars (`.env` at repo root or `backend/.env`) |
 | `backend/contracts.py` | PLAN.md section 3, verbatim |
 | `backend/ws.py` | `broadcast()`, `inbox`, `/ws/{session_id}` |
-| `backend/brain/routes.py` | `POST /api/sessions`, `POST /api/sessions/{id}/start`, `GET /api/sessions/{id}/report`, debug `GET /api/sessions/{id}/status` |
-| `backend/brain/interviewer.py` | The loop: calibration, questions, filler, decide, resolve, wrap-up, crash recovery |
+| `backend/brain/routes.py` | `POST /api/sessions`, `POST /api/sessions/{id}/material`, `POST /api/sessions/{id}/start`, `GET /api/sessions/{id}/report`, `GET /api/sessions/{id}/insights`, debug `GET /api/sessions/{id}/status` |
+| `backend/brain/material.py` | Reads an imported file (.txt/.md as-is, .docx/.pptx from their XML incl. speaker notes, PDFs passed to Gemini) or a presentation's spoken description; the questions are planned from it |
+| `backend/brain/interviewer.py` | The loop: calibration (incl. the presentation-content opener), planning, questions, decide, resolve, wrap-up, crash recovery |
 | `backend/brain/watcher.py` | Coach flags every 3s while listening |
 | `backend/brain/gemini.py`, `prompts.py` | The three Gemini calls, each with a timeout and a fallback, logged to `backend/logs/` |
 | `backend/brain/voice.py` | ElevenLabs TTS, sha1 disk cache, request dedupe, clip length from file size |
@@ -310,14 +317,14 @@ pytest                                                # 119 tests, < 2 seconds
 | `INTERVAL_S` / `WINDOW_S` / `COOLDOWN_S` / `MIN_SAMPLES` | 3 / 10 / 12 / 3 | `watcher.py` |
 | Questions, `max_turns`, `max_seconds` per type | SWE/Behavioral/Presentation: 5 (2,3,3,4,5), 7, 480s. Demo: 3 (2,4,5), 5, 240s | `specs.py` |
 | `GEMINI_MODEL` (plan + report), `GEMINI_FAST_MODEL` (decide_next), `GEMINI_THINKING_LEVEL` | `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `minimal` | `.env`. Free tier: `gemini-3.6-flash` allows only **20 requests/day** (seen 2026-10-10); the Brain then rests it and uses flash-lite. Enable billing for the demo |
-| `ELEVENLABS_MODEL`, `ELEVENLABS_VOICE_ID` | `eleven_flash_v2_5`, Eric (`cjVigY5qzO86Huf0OWal`) | `.env` |
+| `ELEVENLABS_MODEL`, `ELEVENLABS_VOICE_ID` | `eleven_flash_v2_5`, Brian (`nPczCjzI2devNBz1zQrb`), Judge's one voice | `.env` |
 
 ### End-to-end flow and what happens when a link fails
 
 | # | Link | Code | If it fails |
 |---|---|---|---|
-| 1 | Webcam → Presage (SmartSpectra C++ app) | Sensing, outside the repo | No log lines: client reports "NO FACE", confidence 0; UI shows "Waiting for sensor"; `/health` `sensor.live=false` |
-| 2 | Presage log → sensing client → `POST /api/vitals` | `sensing_client/client.py`, `backend/sensing/routes.py` | Client buffers 30 readings and retries; never crashes; only posts while a session is active. "Active" = the newest open session **created by this backend**, and a new interview closes this backend's older ones, so readings never go to a teammate's session on a shared Tiger Data service or to a stale one |
+| 1 | Webcam → Presage (SmartSpectra Node SDK, headless) | `sensing_client/presage_node/sensor.mjs` | No face: the reading is all nulls at confidence 0 and the page shows Presage's hint; if the engine crashes, `run_demo.py` restarts the sensor and the interview continues; `/health` `sensor.presage` shows its status |
+| 2 | Sensor → `POST /api/vitals` | `sensor.mjs`, `backend/sensing/routes.py` | The sensor buffers 30 readings and retries; never exits on its own; only posts while a session is active. "Active" = the newest open session **created by this backend**, and a new interview closes this backend's older ones, so readings never go to a teammate's session on a shared Tiger Data service or to a stale one |
 | 3 | Vitals → Tiger Data (stress score, baseline) | `backend/data/queries.py`, `metrics.py` | Readings below `DATA_MIN_CONFIDENCE` (default 0.4, Presage's accuracy standard for heart rate; measured: at 0.7 a 60%-confidence Presage signal lost every reading) are dropped; `/health` `sensor.stored` / `sensor.below_cutoff` show the split live, and the log warns if most are dropped; no baseline yet → stress `null`; < 10 calm samples → population baseline |
 | 4 | Brain reads stats → Gemini | `brain/interviewer.py`, `gemini.py` | Every call has a timeout and a fallback; quota/overload errors rest that model (1 h for a daily quota, 20 s for 503) and fail over to the other |
 | 5 | ElevenLabs voice | `brain/voice.py` | `audio_url: null` → the page shows the text and opens the mic right away |
@@ -331,8 +338,8 @@ Other guards:
 - Setup fields are trimmed and capped (60/40/120 chars), and transcripts are capped at 4,000 chars.
 - No answer within 120s with the tab gone ends the session.
 
-### Coaching pop-up (Live page)
-While the interviewer speaks a coaching turn, `CoachingPopup` overlays the interviewer panel with the full text ("Stepping out of the interview", "Got it", Escape). When it's the user's turn it docks into a `CoachingChip` under the question, and clicking the chip reopens it. Question labels everywhere use the live numbering ("Q2", "Q2 follow-up"; "Q2+" on the chart).
+### Interrupts (Live page)
+Coaching on the previous answer and coach flags both appear as an **interrupt** in the top-right of the camera (`InterruptBox`). The user must press "Yes, Your Honor" before answering on, the same text is never shown twice, and an interrupt clears when the question changes. Question labels everywhere use the live numbering ("Q2", "Q2 follow-up"; "Q2+" on the chart).
 
 ### Where the build differs from the plan above
 
