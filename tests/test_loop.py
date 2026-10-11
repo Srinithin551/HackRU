@@ -305,7 +305,7 @@ def test_turns_after_small_talk_are_written_by_gemini(client, monkeypatch):
     monkeypatch.setattr(config, "BRAIN_FAKE", False)
     spoken = []
 
-    async def fake_tts(text):
+    async def fake_tts(text, god=None):
         spoken.append(text)
         return f"/audio/{len(spoken)}.mp3"
 
@@ -355,7 +355,7 @@ def test_coaching_mid_interview_and_on_the_last_question(client, monkeypatch):
     monkeypatch.setattr(config, "BRAIN_FAKE", False)
     spoken = []
 
-    async def fake_tts(text):
+    async def fake_tts(text, god=None):
         spoken.append(text)
         return f"/audio/{len(spoken)}.mp3"
 
@@ -428,7 +428,7 @@ def test_second_small_talk_turn_reacts_to_the_first_answer(client, monkeypatch, 
         seen.append([e["transcript"] for e in s.exchanges])
         return gemini_line
 
-    async def no_audio(text):
+    async def no_audio(text, god=None):
         return None
 
     monkeypatch.setattr(gemini, "small_talk_follow_up", small_talk)

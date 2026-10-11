@@ -14,6 +14,10 @@ export const APP_NAME = 'Greek God Teacher Program'
  * The pantheon seated in the hall. Osiras presides and always takes the small talk; the
  * others take the planned questions in turn, so each question visibly comes from a
  * different god. `domain` is the single word shown under the name.
+ *
+ * Each god speaks in their own ElevenLabs voice, chosen by the backend with the same rule
+ * (backend/brain/gods.py). Keep the names and order in sync, or a question will be voiced
+ * by a different god than the one shown.
  */
 export interface God {
   name: string

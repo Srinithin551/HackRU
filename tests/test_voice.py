@@ -79,3 +79,35 @@ def test_clip_seconds_from_file_size(monkeypatch, tmp_path):
     assert voice.clip_seconds("/audio/abc.mp3") == 7.0
     assert voice.clip_seconds("/audio/missing.mp3") == 0.0
     assert voice.clip_seconds(None) == 0.0
+
+
+def test_each_god_speaks_in_their_own_voice(eleven, monkeypatch):
+    """Questions go to ElevenLabs in the voice of the god the page shows asking them; the presiding god
+    (warm-up, closing) has his own; ELEVENLABS_GOD_VOICES=0 puts everyone back on ELEVENLABS_VOICE_ID."""
+    from backend.brain import gods
+    used = []
+    monkeypatch.setattr(voice, "synthesize_to_file",
+                        lambda text, path, voice_id=None: (used.append(voice_id), path.write_bytes(b"ID3")))
+    everyone = [gods.PRESIDING, *gods.PANTHEON]
+    for god in everyone:
+        assert asyncio.run(voice.tts("Speak, mortal.", god))
+    assert used == [config.GOD_VOICES[g] for g in everyone]
+    assert len(set(used)) == len(everyone)   # nobody shares a voice
+    assert gods.god_for_question(0) == "Osiras" and gods.god_for_question(1) == "Athena"
+    assert gods.god_for_question(6) == "Athena"   # 1..n cycles through the pantheon
+
+    monkeypatch.setattr(config, "GOD_VOICES_ON", False)
+    assert voice.voice_for("Hera") == "voice1"
+
+
+def test_gods_match_the_frontend():
+    """backend/brain/gods.py must name the gods in the same order as frontend/src/lib/constants.ts, or a
+    question would be voiced by a different god than the one on screen."""
+    import re
+    from pathlib import Path
+    from backend.brain import gods
+    src = (Path(__file__).resolve().parent.parent / "frontend/src/lib/constants.ts").read_text()
+    presiding = re.search(r"INTERVIEWER_NAME = '([^']+)'", src).group(1)
+    pantheon_block = re.search(r"PANTHEON: readonly God\[\] = \[(.*?)\]", src, re.S).group(1)
+    assert presiding == gods.PRESIDING
+    assert tuple(re.findall(r"name: '([^']+)'", pantheon_block)) == gods.PANTHEON

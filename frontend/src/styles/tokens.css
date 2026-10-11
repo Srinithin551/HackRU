@@ -102,7 +102,7 @@
 
   /* ---- Motion -------------------------------------------------------------
      Everything slow and weighty: the hall is old and in no hurry. The gods' own
-     flourishes (descend, shimmer, smite, halo, kindle) are gold and used sparingly,
+     flourishes (descend, shimmer, halo, kindle) are gold and used sparingly,
      so each one still means something. All of it is disabled under
      prefers-reduced-motion by the rule at the bottom of this file. */
   --animate-beat: beat 1s var(--ease-out-expo) infinite;
@@ -122,21 +122,11 @@
   --animate-shimmer: shimmer 3.2s ease-in-out infinite;
   /* The halo around the god who is speaking. */
   --animate-halo: halo 2.4s ease-in-out infinite;
-  /* Divine displeasure: one sharp flash when a high interrupt lands. */
-  --animate-smite: smite 620ms ease-out both;
 
   /* ---- Guided transitions -------------------------------------------------
-     Three choreographed moments, each one a deliberate piece of staging rather
-     than a generic fade: moving between chambers of the palace, one god handing
-     the floor to the next, and the doors reopening for another attempt.
-
-     Note: `page-enter` animates opacity ONLY. A transform or filter on a page
-     wrapper would become the containing block for the `fixed` overlays inside it
-     (AnalyzingScreen, the start-error screen), so the movement in a page change is
-     carried by the light sweep instead, which sits outside the wrapper. */
-  --animate-page-enter: page-enter 620ms ease-out both;
-  /* A shaft of gold crossing the hall as you pass between chambers. */
-  --animate-light-sweep: light-sweep 900ms var(--ease-out-expo) both;
+     Two choreographed moments, each one a deliberate piece of staging rather
+     than a generic fade: one god handing the floor to the next, and the doors
+     reopening for another attempt. Page changes are instant. */
   /* The god taking the floor. The one yielding it simply dims through GodBust's own
      500ms transition: a fill-forwards fade-out would leave an empty seat on the bench. */
   --animate-god-arrive: god-arrive 760ms var(--ease-out-expo) both;
@@ -208,25 +198,6 @@
   @keyframes halo {
     0%, 100% { box-shadow: 0 0 0 0 rgb(212 175 55 / 0.55), 0 0 18px 0 rgb(212 175 55 / 0.25); }
     50% { box-shadow: 0 0 0 9px rgb(212 175 55 / 0), 0 0 30px 4px rgb(212 175 55 / 0.4); }
-  }
-  /* One flash of divine displeasure. */
-  @keyframes smite {
-    0% { opacity: 0; transform: scale(0.94); box-shadow: 0 0 0 0 rgb(240 82 74 / 0); }
-    18% { opacity: 1; transform: scale(1.02); box-shadow: 0 0 60px 12px rgb(240 82 74 / 0.6); }
-    40% { box-shadow: 0 0 24px 2px rgb(240 82 74 / 0.3); }
-    100% { opacity: 1; transform: none; box-shadow: 0 0 18px 0 rgb(240 82 74 / 0.18); }
-  }
-  /* Entering a new chamber: the room resolves out of the dark. */
-  @keyframes page-enter {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-  /* The shaft of gold that crosses the hall as the chamber changes. */
-  @keyframes light-sweep {
-    0% { opacity: 0; transform: translateX(-60%) skewX(-12deg); }
-    18% { opacity: 1; }
-    80% { opacity: 0.85; }
-    100% { opacity: 0; transform: translateX(160%) skewX(-12deg); }
   }
   /* The next god takes it: descends, flares gold, settles. */
   @keyframes god-arrive {
