@@ -93,9 +93,19 @@ async def health():
         "routers": mounted,
         # "tiger_data" when TIGER_DATABASE_URL is set and in use, "in_memory" otherwise
         "data_store": "unknown" if db is None else ("in_memory" if db.use_fake() else "tiger_data"),
-        # Is Presage → sensing client → /api/vitals feeding readings right now?
-        "sensor": {"live": since is not None and since < SENSOR_STALE_S, "seconds_since_reading": since},
+        # Is Presage → sensing client → /api/vitals feeding readings right now, and are they passing the
+        # confidence cutoff? (stored vs. below_cutoff since startup)
+        "sensor": {"live": since is not None and since < SENSOR_STALE_S, "seconds_since_reading": since,
+                   **_ingest_counts()},
     }
+
+
+def _ingest_counts() -> dict:
+    metrics = sys.modules.get("backend.data.metrics")
+    if metrics is None or not hasattr(metrics, "INGEST"):
+        return {}
+    return {"min_confidence": metrics.MIN_CONFIDENCE, "stored": metrics.INGEST["stored"],
+            "below_cutoff": metrics.INGEST["below_cutoff"]}
 
 
 _AUDIO_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}\.mp3$")

@@ -128,6 +128,9 @@ SmartSpectra), `--no-sensing` (use `scripts/mock_vitals.py` instead of Presage).
 
 ### Run pieces by hand
 
+> For a demo, never start the backend with `--reload`: a reload restarts the server and drops the live
+> interview. `scripts/run_demo.py` never uses it.
+
 ```bash
 source .venv/bin/activate
 uvicorn backend.main:app                          # backend (BRAIN_FAKE=1 for no API calls)

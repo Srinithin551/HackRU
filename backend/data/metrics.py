@@ -9,13 +9,44 @@ Missing inputs drop out and the remaining weights are renormalized.
 The constants may be tuned with real Presage data; the 0-100 scale and the
 thresholds (< 40 calm, 40-70 rising, > 70 high) stay fixed.
 """
+import logging
+import os
+import time
+from collections import Counter
+
+from backend import config  # noqa: F401  (loads .env so DATA_MIN_CONFIDENCE can be set there)
 from backend.contracts import Baseline, VitalsReading
+
+log = logging.getLogger("data.metrics")
 
 HR_MAX_PCT = 25.0        # HR this % above baseline = full HR contribution
 BR_MAX_PCT = 40.0        # breathing this % above baseline = full BR contribution
 FOCUS_MAX_DROP = 0.5     # focus this far below baseline = full focus contribution
 W_HR, W_BR, W_FOCUS = 0.5, 0.3, 0.2
-MIN_CONFIDENCE = 0.7     # readings below this are never stored and never scored
+# Readings below this are never stored and never scored. 0.5 is the team contract (PLAN.md, sensing.md,
+# data.md). Measured with the real sensing client: at 0.7, a Presage signal around 60% confidence lost
+# 100% of readings, and a 90% signal updating every 2 s lost 27% (the client lowers confidence while it
+# repeats a stale value). Tune on the demo laptop with DATA_MIN_CONFIDENCE in .env, no code change.
+MIN_CONFIDENCE = float(os.getenv("DATA_MIN_CONFIDENCE") or 0.5)
+
+# Ingestion counts since startup ("stored" / "below_cutoff"), shown in /health, so you can see live
+# whether Presage readings are passing the cutoff.
+INGEST: Counter = Counter()
+_last_warning = 0.0
+
+
+def count_ingested(confidences: list[float]) -> None:
+    """Tally readings that pass / fail the cutoff, and warn (at most every 30 s) when most fail."""
+    global _last_warning
+    below = sum(1 for c in confidences if c < MIN_CONFIDENCE)
+    INGEST["stored"] += len(confidences) - below
+    INGEST["below_cutoff"] += below
+    total = INGEST["stored"] + INGEST["below_cutoff"]
+    if total >= 20 and INGEST["below_cutoff"] / total > 0.5 and time.monotonic() - _last_warning > 30:
+        _last_warning = time.monotonic()
+        log.warning("%d of %d vitals readings were below the %.2f confidence cutoff and dropped "
+                    "(no face, or a weak Presage signal). Lower DATA_MIN_CONFIDENCE if the face is in view.",
+                    INGEST["below_cutoff"], total, MIN_CONFIDENCE)
 
 CALM_BELOW, HIGH_ABOVE = 40.0, 70.0
 
@@ -32,7 +63,7 @@ def delta_pct(value: float | None, base: float | None) -> float | None:
 
 
 def stress_score(r: VitalsReading, b: Baseline | None) -> float | None:
-    """0-100, or None if there's no baseline yet, confidence < MIN_CONFIDENCE (0.7), or no usable inputs."""
+    """0-100, or None if there's no baseline yet, confidence < MIN_CONFIDENCE, or no usable inputs."""
     if b is None or r.confidence is None or r.confidence < MIN_CONFIDENCE:
         return None
     parts: list[tuple[float, float]] = []

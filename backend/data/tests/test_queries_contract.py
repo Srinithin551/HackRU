@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from backend.contracts import Baseline, QuestionStats, VitalsReading, WindowStats
+from backend.data.metrics import MIN_CONFIDENCE
 from backend.data import fake_queries, queries
 
 # name -> parameters exactly as written in PLAN.md section 3 (name, default or None)
@@ -55,10 +56,10 @@ def test_fake_end_to_end_shapes():
         calm = [VitalsReading(ts=t0 + timedelta(seconds=i), heart_rate=72, breathing_rate=14, focus=0.8,
                               expression="neutral", confidence=0.95) for i in range(40)]
         lost = [VitalsReading(ts=t0 + timedelta(seconds=40), confidence=0.0),
-                VitalsReading(ts=t0 + timedelta(seconds=41), heart_rate=72, confidence=0.69)]
+                VitalsReading(ts=t0 + timedelta(seconds=41), heart_rate=72, confidence=MIN_CONFIDENCE - 0.01)]
         rows = await queries.insert_vitals(calm + lost)
         assert len(rows) == 42                                  # returned for the live chart...
-        assert len(fake_queries._vitals[sid]) == 40             # ...but confidence < 0.7 is never stored
+        assert len(fake_queries._vitals[sid]) == 40             # ...but below the cutoff is never stored
         for r in rows:
             assert set(r) == {"time", "session_id", "heart_rate", "breathing_rate", "focus",
                               "expression", "confidence", "stress"}
@@ -142,3 +143,28 @@ def test_routes_through_brains_app():
         assert client.get(f"/api/sessions/{uuid.uuid4()}/replay").status_code == 404
         asyncio.run(queries.end_session(sid))
         assert client.get("/api/sessions/active").json() is None
+
+
+def test_new_session_closes_older_open_ones():
+    """One sensor, one person: starting an interview closes this backend's older open sessions, so stale
+    sessions can never soak up Presage readings between interviews."""
+    async def run():
+        a = await queries.create_session("A", "demo", "x")
+        b = await queries.create_session("B", "demo", "x")
+        assert await queries.get_active_session() == b
+        await queries.end_session(b)
+        assert await queries.get_active_session() is None      # not the leftover A
+    asyncio.run(run())
+
+
+def test_ingest_counts_track_the_cutoff():
+    from backend.data import metrics
+    before = dict(metrics.INGEST)
+    async def run():
+        sid = await queries.create_session("C", "demo", "x")
+        now = datetime.now(timezone.utc)
+        await queries.insert_vitals([VitalsReading(session_id=sid, ts=now, heart_rate=72, confidence=0.9),
+                                     VitalsReading(session_id=sid, ts=now, heart_rate=None, confidence=0.0)])
+    asyncio.run(run())
+    assert metrics.INGEST["stored"] - before.get("stored", 0) == 1
+    assert metrics.INGEST["below_cutoff"] - before.get("below_cutoff", 0) == 1

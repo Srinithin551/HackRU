@@ -35,13 +35,13 @@ Every column, unit and gotcha: **[DATA_CONTEXT.md](DATA_CONTEXT.md)**. SQL and q
 
 ## The stress score
 
-Stress is 0 to 100 and always **relative to your own calm baseline**, measured during the 30 to 45 s calibration chat (first 10 s skipped for Presage warm-up). Heart rate counts for half: +25% over baseline maxes its part out. Breathing counts 30% (maxed at +40%), and a focus drop of 0.5 counts 20%. If a signal is missing, the others are re-weighted, and readings with face confidence under 0.7 aren't stored or scored at all (a lost face shows as a gap). So **+25% heart rate alone = 50**, and a full mock spike (HR +25%, breathing +30%, focus 0.5) peaks around **85**. Everyone uses the same thresholds: **under 40 calm, 40 to 70 rising, over 70 high**.
+Stress is 0 to 100 and always **relative to your own calm baseline**, measured during the 30 to 45 s calibration chat (first 10 s skipped for Presage warm-up). Heart rate counts for half: +25% over baseline maxes its part out. Breathing counts 30% (maxed at +40%), and a focus drop of 0.5 counts 20%. If a signal is missing, the others are re-weighted, and readings with face confidence under the cutoff (`DATA_MIN_CONFIDENCE`, default 0.5) aren't stored or scored at all (a lost face shows as a gap). So **+25% heart rate alone = 50**, and a full mock spike (HR +25%, breathing +30%, focus 0.5) peaks around **85**. Everyone uses the same thresholds: **under 40 calm, 40 to 70 rising, over 70 high**.
 
 ![Stress score vs heart-rate rise](charts/chart2_stress_response_curve.png)
 
 ## What it looks like
 
-A mock session through Brain's real interview loop, stored on Tiger Data. The `s` key spike takes stress from 3 to 88 in six seconds, the `d` distraction raises it to about 24 (focus only), and `f` (face lost) leaves a gap, since readings under 0.7 confidence aren't stored:
+A mock session through Brain's real interview loop, stored on Tiger Data. The `s` key spike takes stress from 3 to 88 in six seconds, the `d` distraction raises it to about 24 (focus only), and `f` (face lost) leaves a gap, since readings under the confidence cutoff aren't stored:
 
 ![One mock session](charts/chart1_session_timeline.png)
 

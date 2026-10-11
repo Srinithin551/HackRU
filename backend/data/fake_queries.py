@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from backend.contracts import Baseline, QuestionStats, VitalsReading, WindowStats
-from backend.data.metrics import MIN_CONFIDENCE, delta_pct, stress_score
+from backend.data.metrics import MIN_CONFIDENCE, count_ingested, delta_pct, stress_score
 
 log = logging.getLogger("data.fake")
 
@@ -51,6 +51,9 @@ def _stress(row: dict, b: Optional[Baseline]) -> Optional[float]:
 # ---------------------------------------------------------------- sessions
 
 async def create_session(user_name, interview_type, role_title) -> str:
+    for other in _sessions.values():   # a new interview closes older open ones (one sensor, one person)
+        if other["ended_at"] is None:
+            other["ended_at"] = _now()
     sid = str(uuid.uuid4())
     _sessions[sid] = {
         "id": sid, "user_name": user_name, "interview_type": interview_type,
@@ -89,9 +92,10 @@ async def insert_vitals(readings: list[VitalsReading]) -> list[dict]:
             "expression": r.expression, "confidence": r.confidence,
         }
         row["stress"] = _stress(row, _sessions[sid]["baseline"])
-        if r.confidence >= MIN_CONFIDENCE:          # below 0.7 is broadcast but never stored
+        if r.confidence >= MIN_CONFIDENCE:          # below the cutoff: broadcast but never stored
             _vitals[sid].append(row)
         rows.append(row)
+    count_ingested([row["confidence"] for row in rows])
     return rows
 
 
